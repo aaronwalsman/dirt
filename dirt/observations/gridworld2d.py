@@ -35,6 +35,8 @@ def extract_fpv(x, r, observable_area, observation_map, out_of_bounds=0):
     local_rc = jnp.stack(jnp.meshgrid(
         jnp.arange(a[0], b[0], s[0]),
         jnp.arange(a[1], b[1], s[1]),
+        #jnp.arange(-2,3,1),
+        #jnp.arange(-2,3,1),
         indexing='ij',
     ), axis=-1)
     
