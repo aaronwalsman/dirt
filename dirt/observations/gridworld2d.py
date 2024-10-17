@@ -2,12 +2,12 @@ import jax.numpy as jnp
 
 from dirt.dynamics import gridworld2d as g2d
 
-def extract_fpv(x, r, observable_area, observation_map, out_of_bounds=0):
+def extract_fpv(x, r, observable_rows_and_cols, observation_map, out_of_bounds=0):
     
     # compute the height, width and sign of the fpv
-    #h,w = b-a
-    a, b = observable_area
-    s = jnp.sign(b-a)
+    ##h,w = b-a
+    #a, b = observable_area
+    #s = jnp.sign(b-a)
     
     # construct local rows and columns that describe the area around the agent
     # that should be extracted based on each of the four rotation directions
@@ -32,17 +32,17 @@ def extract_fpv(x, r, observable_area, observation_map, out_of_bounds=0):
     # construct the local rows and columns that describe the area around the
     # agents that should be extracted
     # (h, w)
-    local_rc = jnp.stack(jnp.meshgrid(
-        jnp.arange(a[0], b[0], s[0]),
-        jnp.arange(a[1], b[1], s[1]),
-        #jnp.arange(-2,3,1),
-        #jnp.arange(-2,3,1),
-        indexing='ij',
-    ), axis=-1)
+    #local_rc = jnp.stack(jnp.meshgrid(
+    #    jnp.arange(a[0], b[0], s[0]),
+    #    jnp.arange(a[1], b[1], s[1]),
+    #    #jnp.arange(-2,3,1),
+    #    #jnp.arange(-2,3,1),
+    #    indexing='ij',
+    #), axis=-1)
     
     # construct the global rows and columns by rotating and offsetting the
     # local rows and columns using the agents' positions and orientations
-    global_rc = g2d.rotate(local_rc, r[...,None, None]) + x[...,None,None,:]
+    global_rc = g2d.rotate(observable_rows_and_cols, r[...,None, None]) + x[...,None,None,:]
     
     # cut out regions of the observation map corresponding to the computed
     # rows and columns

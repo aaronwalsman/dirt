@@ -19,6 +19,23 @@ class BigEnvSystem:
     max_food_per_agent : jax.Array
     max_food_per_tile : jax.Array
     observable_area : jax.Array
+    observable_rows_and_cols : jax.Array
+    
+    @classmethod
+    def create(cls, *args, observable_area, **kwargs):
+        a, b = observable_area.T
+        s = jnp.sign(b-a)
+        observable_rows_and_cols = jnp.stack(jnp.meshgrid(
+            jnp.arange(a[0], b[0], s[0]),
+            jnp.arange(a[1], b[1], s[1]),
+            indexing='ij',
+        ), axis=-1)
+        return cls(
+            *args,
+            observable_area=observable_area,
+            observable_rows_and_cols=observable_rows_and_cols,
+            **kwargs,
+        )
 
 @dataclass
 class BigEnvState:
@@ -111,20 +128,20 @@ def observe(system, state):
     food_view = og2d.extract_fpv(
         state.agent_x,
         state.agent_r,
-        system.observable_area,
+        system.observable_rows_and_cols,
         state.food_map,
     )
     occupancy_view = og2d.extract_fpv(
         state.agent_x,
         state.agent_r,
-        system.observable_area,
+        system.observable_rows_and_cols,
         state.occupancy_map,
     ).astype(jnp.float32)
     return jnp.stack((food_view, occupancy_view), axis=1)
 
 if __name__ == '__main__':
     k = 1024
-    system = BigEnvSystem(
+    system = BigEnvSystem.create(
         num_agents = jnp.array(k),
         world_size = jnp.array([k,k]),
         food_gen = jnp.array(0.05),
