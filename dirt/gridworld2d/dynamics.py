@@ -1,17 +1,23 @@
+from typing import Tuple, Optional
+
 import jax.numpy as jnp
 
 '''
-gridworld2d dynamics
+gridworld2d dynamics:
 
-rigid objects have a position (x) and orientation (r)
-and are acted upon by a translation (dx) and a rotation (dr)
+Rigid objects have a position (x) and orientation (r)
+and are acted upon by a translation (dx) and a rotation (dr).
 
-positions (x) are 2d integers between (0,0) and (h,w)
-translations (dx) are unbounded 2d integers
-orientations (r) are integers between 0 and 4
-rotations (dr) are unbounded integers
+Positions (x) are 2d integers between (0,0) and (h,w).
+Translations (dx) are unbounded 2d integers.
+Orientations (r) are integers between 0 and 4.
+Rotations (dr) are unbounded integers.
 
-dynamics are computed as:
+Dynamics expressed in global coordinates are computed as:
+x1 = (clip or wrap)(x0 + dx)
+r1 = (wrap)(r0 + dr)
+
+Dynamics expressed in local coordinates are computed as:
 x1 = (clip or wrap)(x0 + r0 * dx)
 r1 = (wrap)(r0 + dr)
 '''
@@ -24,93 +30,172 @@ gridworld2d_rotation_matrices = jnp.array([
 
 inverse_rotations = jnp.array([0,3,2,1])
 
-def rotate(x, r, pivot=0):
+def rotate(
+    x : jnp.ndarray,
+    r : jnp.ndarray,
+    pivot : jnp.ndarray | int = 0,
+):
     '''
-    rotates a position or direction x by a discrete rotation r about a pivot
+    Rotates a position or direction x by a discrete rotation r about a pivot.
+    
+    x : The position/direction to rotate.
+    r : The rotation ammount.
+    pivot : The rotation pivot point.
     '''
     m = gridworld2d_rotation_matrices[r]
     return (m @ (x-pivot)[...,None])[...,0] + pivot
 
-def wrap_x(x, world_size):
+def wrap_x(
+    x : jnp.ndarray,
+    world_size : Tuple[int, int],
+):
     '''
-    wraps a position x around the borders of a gridworld with a torus topology
+    Wraps a position x around the borders of a gridworld with a torus topology.
+    
+    x : The position to wrap.
+    world_size : The size of the grid to determine the wrap borders.
     '''
     return x % world_size
 
-def clip_x(x, world_size):
+def clip_x(
+    x : jnp.ndarray,
+    world_size : Tuple[int, int],
+):
     '''
-    clips a position x to stay within the boundaries of the gridworld
+    Clips a position x to stay within the boundaries of the gridworld.
+    
+    x : The position to clip.
+    world_size : The size of the grid to determine the clip borders.
     '''
     return jnp.clip(x, jnp.array([0,0]), world_size)
 
-def wrap_r(r):
+def wrap_r(
+    r : jnp.ndarray,
+):
     '''
-    remaps discrete orientations to lie between 0 and 3
+    Remaps discrete orientations to lie between 0 and 3.
+    
+    r : The rotations to wrap.
     '''
     return r % 4
 
-def step_wrap(x0, dx, r0, dr, world_size):
+def update_occupancy(
+    x0 : jnp.ndarray,
+    x1 : jnp.ndarray,
+    occupancy : jnp.ndarray,
+):
     '''
-    computes a new position x1 and orientation r1 given a previous
-    position x0, orientation r0 along with a translation dx and rotation dr
-    wraps x1 to stay within the world_size (torus topology)
-    '''
-    x1 = wrap_x(x0 + rotate(dx, r0), world_size)
-    r1 = wrap_r(r0 + dr)
-    return x1, r1
-
-def step_clip(x0, dx, r0, dr, world_size):
-    '''
-    computes a new position x1 and orientation r1 given a previous
-    position x0, orientation r0 along with a translation dx and rotation dr
-    clips x1 to stay within the world_size
-    '''
-    x1 = clip_x(x0 + rotate(dx, r0), world_size)
-    r1 = wrap_r(r0 + dr)
-    return x1, r1
-
-def update_occupancy(x0, x1, occupancy):
-    '''
-    subtracts one from all locations at x0 and adds one to all locations at x1
+    Returns a new occpuancy map after all items at one position x0 have been
+    moved to another position x1.
+    
+    x0 : The starting position for the occupancy transition.  One will be
+        subtracted from these locations.
+    x1 : The ending position for the occupancy transition.  One will be
+        added to these locations.
+    occupancy : The existing occupancy map.
     '''
     occupancy = occupancy.at[x0[:,0], x0[:,1]].add(-1)
     occupancy = occupancy.at[x1[:,0], x1[:,1]].add(1)
     return occupancy
 
-def collide(x0, x1, occupancy, max_occupancy=1):
+def collide(
+    x0 : jnp.ndarray,
+    x1 : jnp.ndarray,
+    occupancy : jnp.ndarray,
+    max_occupancy : int = 1,
+):
     '''
-    updates the occupancy based on the movement from x0 to x1, then checks if
-    any of the updates have resulted in too many items in the same location and
-    undos all movements where this has occurred
+    Updates the occupancy based on the movement from x0 to x1, then checks if
+    any of the updates have resulted in too many items in the same position and
+    undos all movements where this has occurred.  Returns a modified version of
+    x1 where all colliding positions have been reset to x0, a vector
+    representing which items collided, and an updated occupancy map.
+    
+    x0 : The starting position for each moving object.
+    x1 : The ending position for each moving object.
+    occupancy : The occupancy map before the motion.
     '''
     occupancy = update_occupancy(x0, x1, occupancy)
     collided = (occupancy[x1[:,0], x1[:,1]] > 1)[...,None]
-    #x2 = x1.at[collided].set(x0[collided])
     x2 = x1 * ~collided + x0 * collided
     occupancy = update_occupancy(x1, x2, occupancy)
     return x2, collided, occupancy
 
-def step_wrap_collide(x0, dx, r0, dr, occupancy, max_occupancy=1):
+def step(
+    x0 : jnp.ndarray,
+    r0 : jnp.ndarray,
+    dx : jnp.ndarray,
+    dr : jnp.ndarray,
+    space : str = 'global',
+    world_size : Optional[Tuple[int, int]] = None,
+    check_collisions : bool = False,
+    occupancy_grid : jnp.ndarray = None,
+    max_occupancy : int = 1,
+    out_of_bounds : str = 'clip',
+):
     '''
-    applies a step with wrapping, then checks for collision and undos any
-    colliding actions
+    Applies gridworld2d dynamics to a set of positions x0 and orientations r0
+    based on velocities dx and angular velocities dr.  Offsets can be
+    applied in either global or local space.  If check_collisions is True, an
+    occupancy_grid must be specified.  If check_collisions is False and an
+    occupancy_grid is specified, the occupancy grid is updated without
+    checking for collisions.
+    
+    x0 : The current position of the agents/objects.
+    r0 : The current orientation of the agents/objects.
+    dx : The velocity of the agents/objects.
+    dr : The angular velocity of the agents/objects.
+    space : Should be "global" or "local" and specifies whether the velocity
+        is specified in the local coordinate frame of each agent/object.
+    world_size : The size of the gridworld.  Used for clipping or wrapping the
+        positions if they move out of bounds.  If omitted, this will be inferred
+        from the occupancy grid if that is specified.  If neither are specified,
+        out_of_bounds must be "none" indicating no border checks will be
+        enforced.
+    check_collisions: Whether or not to check if two objects will collide if
+        they move to the same location.
+    occupancy_grid: The occupancy grid to use for collision checking.  If
+        specified, this will be updated based on the motion of the objects.
+        If specified, but check_collisions is False, this will still be updated
+        based on the motion of the agents.
+    max_occpuancy : The maximum number of objects or agents that can occupy a
+        single grid cell.
+    out_of_bounds : How to handle out_of_bounds behavior if the agent leaves
+        the edge of the gridworld.  Can be either "clip", "wrap" or "none".
     '''
-    world_size = occupancy.shape
-    x1, r1 = step_wrap(x0, dx, r0, dr, world_size)
-    x2, collided, occupancy = collide(
-        x0, x1, occupancy, max_occpuancy=max_occupancy)
-    return x2, r1, collided, occupancy
+    if world_size is None and occupancy_grid is not None:
+        world_size = occupancy_grid.shape
+    
+    if space == 'global':
+        x1 = x0 + dx
+    elif space == 'local':
+        x1 = x0 + rotate(dx, r0)
+    else:
+        raise NotImplementedError
+    
+    if out_of_bounds == 'clip':
+        x1 = clip_x(x1, world_size)
+    elif out_of_bounds == 'wrap':
+        x1 = wrap_x(x1, world_size)
+    elif out_of_bounds == 'none':
+        pass
+    
+    r1 = wrap_r(r0 + dr)
+    
+    if occupancy_grid is not None:
+        if check_collisions:
+            x1, collided, occupancy = collide(x0, x1, occupancy, max_occupancy)
+            return x1, r1, occupancy, occupancy
+        
+        else:
+            occupancy = update_occupancy(x0, x1, occupancy)
+            return x1, r1, occupancy
+    
+    return x1, r1
 
-def step_clip_collide(x0, dx, r0, dr, occupancy, max_occupancy=1):
-    '''
-    applies a step with clipping, then checks for collision and undos any
-    colliding actions
-    '''
-    world_size = jnp.array(occupancy.shape)
-    x1, r1 = step_clip(x0, dx, r0, dr, world_size)
-    x2, collided, occupancy = collide(
-        x0, x1, occupancy, max_occupancy=max_occupancy)
-    return x2, r1, collided, occupancy
+def forward_rotate_step(x0, r0, forward, rotate, **kwargs):
+    dx = jnp.stack((forward, jnp.zeros_like(forward)), axis=-1)
+    return step(x0, r0, dx, rotate, space='local', **kwargs)
 
 if __name__ == '__main__':
     x0 = jnp.array([
