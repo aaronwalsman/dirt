@@ -11,7 +11,7 @@ def uniform_grid(
     key : chex.PRNGKey,
     world_size : jnp.ndarray,
     p_spawn : float | jnp.ndarray,
-):
+) -> jrng.ndarray :
     '''
     Returns a set of spawn locations as boolean entries on a grid, where each
     location is True with probability p_spawn.
@@ -29,7 +29,7 @@ def uniform_x(
     key : chex.PRNGKey,
     world_size : Tuple[int, int],
     n : int = 1,
-):
+) -> jrng.ndarray :
     '''
     Returns a fixed number of spawn positions, where each position is sampled
     uniformly from a grid.
@@ -51,7 +51,7 @@ def uniform_x(
 def uniform_r(
     key : chex.PRNGKey,
     n : int = 1,
-):
+) -> jrng.ndarray :
     '''
     Returns a fixed number of spawn orientations sampled from [0,1,2,3].
     
@@ -72,7 +72,7 @@ def uniform_xr(
     key : chex.PRNGKey,
     world_size : Tuple[int, int],
     n : int = 1,
-):
+) -> Tuple[jrng.ndarray, jrng.ndarray] :
     '''
     A convenience function that calls both uniform_x and uniform_r with the same
     set of parameters.
@@ -95,7 +95,7 @@ def poisson_grid(
     world_size : Tuple[int, int],
     mean_n : int,
     max_n : int,
-):
+) -> jrng.ndarray :
     '''
     Returns a random number  of spawn locations sampled from a poisson
     distribution as boolean entries on a grid.

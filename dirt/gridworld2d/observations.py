@@ -56,7 +56,7 @@ def first_person_view(
     view_distance : int,
     view_back_distance : int = 0,
     out_of_bounds : int | float | jnp.ndarray = 0,
-):
+) -> jnp.ndarray :
     '''
     A reparameterized version of local_view with a different description of the
     local shape of each view to be extracted.

@@ -7,7 +7,7 @@ def poisson_vector(
     key : chex.PRNGKey,
     mean_n : int,
     max_n : int,
-):
+) -> jnp.ndarray :
     '''
     Samples a number n from a poisson distrbution defined by mean_n (lambda)
     and returns a boolean vector of size max_n where the first n entries are 1

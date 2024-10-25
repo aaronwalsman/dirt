@@ -34,7 +34,7 @@ def rotate(
     x : jnp.ndarray,
     r : jnp.ndarray,
     pivot : jnp.ndarray | int = 0,
-):
+) -> jnp.ndarray :
     '''
     Rotates a position or direction x by a discrete rotation r about a pivot.
     
@@ -48,7 +48,7 @@ def rotate(
 def wrap_x(
     x : jnp.ndarray,
     world_size : Tuple[int, int],
-):
+) -> jnp.ndarray :
     '''
     Wraps a position x around the borders of a gridworld with a torus topology.
     
@@ -60,7 +60,7 @@ def wrap_x(
 def clip_x(
     x : jnp.ndarray,
     world_size : Tuple[int, int],
-):
+) -> jnp.ndarray :
     '''
     Clips a position x to stay within the boundaries of the gridworld.
     
@@ -71,7 +71,7 @@ def clip_x(
 
 def wrap_r(
     r : jnp.ndarray,
-):
+) -> jnp.ndarray :
     '''
     Remaps discrete orientations to lie between 0 and 3.
     
@@ -83,7 +83,7 @@ def update_occupancy(
     x0 : jnp.ndarray,
     x1 : jnp.ndarray,
     occupancy : jnp.ndarray,
-):
+) -> jnp.ndarray :
     '''
     Returns a new occpuancy map after all items at one position x0 have been
     moved to another position x1.
@@ -103,7 +103,7 @@ def collide(
     x1 : jnp.ndarray,
     occupancy : jnp.ndarray,
     max_occupancy : int = 1,
-):
+) -> Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray] :
     '''
     Updates the occupancy based on the movement from x0 to x1, then checks if
     any of the updates have resulted in too many items in the same position and
@@ -132,7 +132,7 @@ def step(
     occupancy_grid : jnp.ndarray = None,
     max_occupancy : int = 1,
     out_of_bounds : str = 'clip',
-):
+) -> Tuple[jnp.ndarray, jnp.ndarray] :
     '''
     Applies gridworld2d dynamics to a set of positions x0 and orientations r0
     based on velocities dx and angular velocities dr.  Offsets can be
@@ -193,7 +193,13 @@ def step(
     
     return x1, r1
 
-def forward_rotate_step(x0, r0, forward, rotate, **kwargs):
+def forward_rotate_step(
+    x0 : jnp.ndarray,
+    r0 : jnp.ndarray,
+    forward : jnp.ndarray,
+    rotate : jnp.ndarray,
+    **kwargs
+) -> Tuple[jnp.ndarray, jnp.ndarray] :
     dx = jnp.stack((forward, jnp.zeros_like(forward)), axis=-1)
     return step(x0, r0, dx, rotate, space='local', **kwargs)
 
