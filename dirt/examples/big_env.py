@@ -140,7 +140,7 @@ def observe(system, state):
     return jnp.stack((food_view, occupancy_view), axis=1)
 
 if __name__ == '__main__':
-    k = 1024
+    k = 1024*8
     system = BigEnvSystem.create(
         num_agents = jnp.array(k),
         world_size = jnp.array([k,k]),
@@ -158,7 +158,9 @@ if __name__ == '__main__':
     
     step = jit(step)
     observe = jit(observe)
-    for i in range(10000):
+    i = 0
+    while True:
+        i += 1
         t1 = time.time()
         
         action_key, subkey = jrng.split(action_key)
