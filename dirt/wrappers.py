@@ -25,7 +25,7 @@ def make_step_auto_reset(
         
         # select the observation and state from either the step or reset
         # observation/state depending on done
-        obs = jax.tree.map(
+        obs, state = jax.tree.map(
             lambda r, s : jnp.where(jnp.expand_dims(
                 done, axis=tuple(range(1, len(r.shape)))), r, s
             ),

@@ -10,8 +10,6 @@ from flax.struct import dataclass
 
 import chex
 
-from gymnax.environments.environment import Environment
-
 from dirt.gridworld2d import dynamics, observations, spawn
 from dirt.wrappers import make_step_auto_reset
 
@@ -159,6 +157,7 @@ def step(
         state.agent_r,
         action.forward,
         action.rotate,
+        world_size=params.world_size,
     )
     
     # eat
@@ -187,31 +186,21 @@ def step(
     
     return obs, state, reward, done
 
-def test_run(
-    key,
-    params,
-):
+def test_run(key, params, steps):
     key, reset_key = jrng.split(key)
-    
     step_auto_reset = make_step_auto_reset(step, reset)
-    
-    #jit_reset = jax.jit(reset, static_argnums=(1,))
-    #jit_step_auto_reset = jax.jit(step_auto_reset, static_argnums=(1,))
     obs, state = reset(reset_key, params)
     
-    i = 0
-    while True:
-        t = time.time()
-        key, action_key = jrng.split(key)
+    def single_step(key_obs_state, _):
+        key, obs, state = key_obs_state
+        key, action_key, step_key = jrng.split(key, 3)
         action = NomAction.sample(action_key, state)
-        
-        key, step_key = jrng.split(key)
         obs, state, reward, done = step_auto_reset(
             step_key, params, state, action)
-        i += 1
-        t2 = time.time()
-        if i % 100 == 0:
-            print(1./(t2-t))
+        
+        return (key, obs, state), None
+    
+    jax.lax.scan(single_step, (key, obs, state), length=steps)
     
 
 if __name__ == '__main__':
@@ -219,16 +208,11 @@ if __name__ == '__main__':
     key = jrng.key(1234)
     keys = jrng.split(key, 16)
     params = NomParams()
+    steps = 1000
     
-    # for some reason doing both outer and inner JIT speeds things up quite a
-    # bit... why isn't just doing the out one good enough?  Consult the AI
-    # probably.
+    jit_test_run = jax.jit(test_run, static_argnums=(1,2))
     
-    outer_jit = True
-    if outer_jit:
-        jax.jit(
-            jax.vmap(test_run, in_axes=(0, None)),
-            static_argnums=(1,),
-        )(keys, params)
-    else:
-        jax.vmap(test_run, in_axes=(0, None))(keys, params)
+    t0 = time.time()
+    jit_test_run(key, params, steps)
+    t1 = time.time()
+    print(steps/(t1-t0), 'hz')

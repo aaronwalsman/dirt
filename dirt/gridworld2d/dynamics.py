@@ -220,8 +220,10 @@ def step(
         raise NotImplementedError
     
     if out_of_bounds == 'clip':
+        assert world_size is not None
         x1 = clip_x(x1, world_size)
     elif out_of_bounds == 'wrap':
+        assert world_size is not None
         x1 = wrap_x(x1, world_size)
     elif out_of_bounds == 'none':
         pass
