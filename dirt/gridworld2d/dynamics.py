@@ -1,4 +1,4 @@
-from typing import Tuple, Optional
+from typing import Tuple, Optional, Union
 
 import jax.numpy as jnp
 
@@ -67,7 +67,7 @@ def clip_x(
     x : The position to clip.
     world_size : The size of the grid to determine the clip borders.
     '''
-    return jnp.clip(x, jnp.array([0,0]), world_size)
+    return jnp.clip(x, jnp.array([0,0]), jnp.array(world_size))
 
 def wrap_r(
     r : jnp.ndarray,
@@ -79,47 +79,94 @@ def wrap_r(
     '''
     return r % 4
 
-def update_occupancy(
+def move_mass(
     x0 : jnp.ndarray,
     x1 : jnp.ndarray,
-    occupancy : jnp.ndarray,
+    mass_grid : jnp.ndarray,
+    mass : Union[int, float, jnp.ndarray] = 1,
 ) -> jnp.ndarray :
     '''
-    Returns a new occpuancy map after all items at one position x0 have been
-    moved to another position x1.
+    Returns a new mass_grid after a fixed ammount of mass at one position x0
+    has been moved to another position x1.
     
-    x0 : The starting position for the occupancy transition.  One will be
+    x0 : The starting position for the transition.  Mass will be
         subtracted from these locations.
-    x1 : The ending position for the occupancy transition.  One will be
+    x1 : The ending position for the transition.  Mass will be
         added to these locations.
     occupancy : The existing occupancy map.
     '''
-    occupancy = occupancy.at[x0[:,0], x0[:,1]].add(-1)
-    occupancy = occupancy.at[x1[:,0], x1[:,1]].add(1)
-    return occupancy
+    mass_grid = mass_grid.at[x0[...,0], x0[...,1]].add(-mass)
+    mass_grid = mass_grid.at[x1[...,0], x1[...,1]].add(mass)
+    return mass_grid
 
 def collide(
     x0 : jnp.ndarray,
     x1 : jnp.ndarray,
-    occupancy : jnp.ndarray,
+    occupancy_grid : jnp.ndarray,
     max_occupancy : int = 1,
 ) -> Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray] :
     '''
-    Updates the occupancy based on the movement from x0 to x1, then checks if
-    any of the updates have resulted in too many items in the same position and
-    undos all movements where this has occurred.  Returns a modified version of
-    x1 where all colliding positions have been reset to x0, a vector
-    representing which items collided, and an updated occupancy map.
+    Updates the occupancy_grid based on the movement from x0 to x1, then
+    checks if any of the updates have resulted in too many items in the
+    same position and undoes all movements where this has occurred.
+    Returns a modified version of x1 where all colliding positions have
+    been reset to x0, a vector representing which items collided, and an
+    updated occupancy map.
     
     x0 : The starting position for each moving object.
     x1 : The ending position for each moving object.
-    occupancy : The occupancy map before the motion.
+    occupancy_grid : The occupancy map before the motion.
     '''
-    occupancy = update_occupancy(x0, x1, occupancy)
-    collided = (occupancy[x1[:,0], x1[:,1]] > 1)[...,None]
+    occupancy_grid = move_mass(x0, x1, occupancy_grid)
+    collided = (occupancy_grid[x1[:,0], x1[:,1]] > 1)[...,None]
     x2 = x1 * ~collided + x0 * collided
-    occupancy = update_occupancy(x1, x2, occupancy)
-    return x2, collided, occupancy
+    occupancy_grid = move_mass(x1, x2, occupancy_grid)
+    return x2, collided, occupancy_grid
+
+
+def move_objects(
+    x0 : jnp.ndarray,
+    x1 : jnp.ndarray,
+    object_grid : jnp.ndarray,
+    background : Union[int, float, jnp.ndarray] = -1,
+) -> jnp.ndarray :
+    '''
+    Returns a new object_grid after objects at position x0
+    have been moved to another position x1.  This does not do any
+    collision checking (see move_and_collide_objects below), so if
+    two objects are moved to the same locations, one will be overwritten.
+    
+    x0 : The starting position for the transition.  Mass will be
+        subtracted from these locations.
+    x1 : The ending position for the transition.  Mass will be
+        added to these locations.
+    object_grid : The existing object_grid.
+    '''
+    values = object_grid[x0[...,0], x0[...,1]]
+    object_grid = object_grid.at[x0[...,0], x0[...,1]].set(background)
+    object_grid = object_grid.at[x1[...,0], x1[...,1]].set(values)
+    return object_grid
+
+def move_and_collide_objects(
+    x0 : jnp.ndarray,
+    x1 : jnp.ndarray,
+    object_grid : jnp.ndarray,
+    background : int = -1,
+) -> Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray] :
+    '''
+    Returns a new object_grid after attempting to move objects at
+    position x0 has been moved to another position x1
+    
+    x0 : The starting position for the transition.  Mass will be
+        subtracted from these locations.
+    x1 : The ending position for the transition.  Mass will be
+        added to these locations.
+    object_grid : The existing object_grid.
+    '''
+    occupancy_grid = (object_grid != background).astype(jnp.int32)
+    x2, collided, _ = collide(x0, x1, occupancy_grid)
+    object_grid = move_objects(x0, x2, object_grid, background=background)
+    return x2, collided, object_grid
 
 def step(
     x0 : jnp.ndarray,
@@ -129,16 +176,15 @@ def step(
     space : str = 'global',
     world_size : Optional[Tuple[int, int]] = None,
     check_collisions : bool = False,
-    occupancy_grid : jnp.ndarray = None,
-    max_occupancy : int = 1,
+    object_grid : Optional[jnp.ndarray] = None,
     out_of_bounds : str = 'clip',
 ) -> Tuple[jnp.ndarray, jnp.ndarray] :
     '''
     Applies gridworld2d dynamics to a set of positions x0 and orientations r0
     based on velocities dx and angular velocities dr.  Offsets can be
     applied in either global or local space.  If check_collisions is True, an
-    occupancy_grid must be specified.  If check_collisions is False and an
-    occupancy_grid is specified, the occupancy grid is updated without
+    object_grid must be specified.  If check_collisions is False and an
+    object_grid is specified, the object_grid is updated without
     checking for collisions.
     
     x0 : The current position of the agents/objects.
@@ -149,12 +195,12 @@ def step(
         is specified in the local coordinate frame of each agent/object.
     world_size : The size of the gridworld.  Used for clipping or wrapping the
         positions if they move out of bounds.  If omitted, this will be inferred
-        from the occupancy grid if that is specified.  If neither are specified,
-        out_of_bounds must be "none" indicating no border checks will be
-        enforced.
+        from the object_grid grid if that is specified.  If neither are
+        specified, out_of_bounds must be "none" indicating no border checks
+        will be enforced.
     check_collisions: Whether or not to check if two objects will collide if
         they move to the same location.
-    occupancy_grid: The occupancy grid to use for collision checking.  If
+    object_grid: The object_grid to use for collision checking.  If
         specified, this will be updated based on the motion of the objects.
         If specified, but check_collisions is False, this will still be updated
         based on the motion of the agents.
@@ -163,8 +209,8 @@ def step(
     out_of_bounds : How to handle out_of_bounds behavior if the agent leaves
         the edge of the gridworld.  Can be either "clip", "wrap" or "none".
     '''
-    if world_size is None and occupancy_grid is not None:
-        world_size = occupancy_grid.shape
+    if world_size is None and object_grid is not None:
+        world_size = object_grid.shape
     
     if space == 'global':
         x1 = x0 + dx
@@ -182,14 +228,15 @@ def step(
     
     r1 = wrap_r(r0 + dr)
     
-    if occupancy_grid is not None:
+    if object_grid is not None:
         if check_collisions:
-            x1, collided, occupancy = collide(x0, x1, occupancy, max_occupancy)
-            return x1, r1, occupancy, occupancy
+            x1, collided, object_grid = move_and_collide_objects(
+                x0, x1, object_grid)
+            return x1, r1, collided, object_grid
         
         else:
-            occupancy = update_occupancy(x0, x1, occupancy)
-            return x1, r1, occupancy
+            object_grid = update_occupancy(x0, x1, object_grid)
+            return x1, r1, object_grid
     
     return x1, r1
 

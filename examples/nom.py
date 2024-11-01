@@ -13,6 +13,7 @@ import chex
 from gymnax.environments.environment import Environment
 
 from dirt.gridworld2d import dynamics, observations, spawn
+from dirt.wrappers import make_step_auto_reset
 
 TNomParams = TypeVar('TNomParams', bound='NomParams')
 TNomState = TypeVar('TNomState', bound='NomState')
@@ -48,7 +49,7 @@ class NomState:
     food_grid : jnp.ndarray
     agent_x : jnp.ndarray
     agent_r : jnp.ndarray
-    agent_stomach : float
+    agent_stomach : jnp.ndarray
 
 @dataclass
 class NomAction:
@@ -59,11 +60,11 @@ class NomAction:
     rotate : int
     
     @classmethod
-    def sample(cls, key):
+    def sample(cls, key, state):
         key, forward_key = jrng.split(key)
-        forward = jrng.randint(forward_key, shape=(), minval=0, maxval=2)
+        forward = jrng.randint(forward_key, shape=(1,), minval=0, maxval=2)
         key, rotate_key = jrng.split(key)
-        rotate = jrng.randint(rotate_key, shape=(), minval=-1, maxval=2)
+        rotate = jrng.randint(rotate_key, shape=(1,), minval=-1, maxval=2)
         return NomAction(forward, rotate)
 
 @dataclass
@@ -72,7 +73,7 @@ class NomObservation:
     An observation in the Nom environment.
     '''
     view : jnp.ndarray
-    stomach : float
+    stomach : jnp.ndarray
 
 def observe(
     params: TNomParams,
@@ -108,18 +109,19 @@ def reset(
     '''
     # initialize the agent
     key, xr_key = jrng.split(key)
-    agent_x, agent_r = spawn.uniform_xr(xr_key, params.world_size)
-    agent_x = agent_x[0]
-    agent_r = agent_r[0]
-    agent_stomach = params.initial_stomach
+    agent_x, agent_r = spawn.unique_xr(
+        xr_key, 1, params.world_size)
+    agent_x = agent_x
+    agent_r = agent_r
+    agent_stomach = jnp.full((1,), params.initial_stomach)
     
     # initialize the food grid
     key, foodkey = jrng.split(key)
     food_grid = spawn.poisson_grid(
         foodkey,
-        params.world_size,
         params.mean_initial_food,
         params.max_initial_food,
+        params.world_size,
     )
     
     state =  NomState(food_grid, agent_x, agent_r, agent_stomach)
@@ -141,18 +143,23 @@ def step(
     When used inside a jit compiled program, params must come from a static
     variable as it controls the shapes of various arrays.
     '''
+    
     # grow new food
     key, food_key = jrng.split(key)
     food_grid = state.food_grid | spawn.poisson_grid(
         food_key,
-        params.world_size,
         params.mean_food_growth,
         params.max_food_growth,
+        params.world_size,
     )
     
     # move
     agent_x, agent_r = dynamics.forward_rotate_step(
-        state.agent_x, state.agent_r, action.forward, action.rotate)
+        state.agent_x,
+        state.agent_r,
+        action.forward,
+        action.rotate,
+    )
     
     # eat
     eaten_food = food_grid[agent_x[...,0], agent_x[...,1]]
@@ -180,58 +187,48 @@ def step(
     
     return obs, state, reward, done
 
-def step_auto_reset(
-    key: chex.PRNGKey,
-    state: TNomState,
-    action: TNomAction,
-    params: TNomParams,
-) -> Tuple[TNomObservation, TNomState, jnp.ndarray, jnp.ndarray]:
-    '''
-    Transition function for the Nom environment with automatic resets.
-    Returns a new observation, state, reward and done given the environment
-    params, a previous state and an action.  If the episode is done, the
-    environment is reset to begin a new episode and the new observation and
-    state are returned.
-    
-    When used inside a jit compiled program, params must come from a static
-    variable as it controls the shapes of various arrays.
-    '''
-    
-    key, step_key = jax.random.split(key)
-    obs_step, state_step, reward, done = step(step_key, params, state, action)
-    key, reset_key = jax.random.split(key)
-    obs_reset, state_reset = reset(reset_key, params)
-    
-    # Auto-reset environment based on termination
-    state = jax.tree.map(
-        lambda x, y: jax.lax.select(done, x, y), state_reset, state_step
-    )
-    obs = jax.tree.map(
-        lambda x, y: jax.lax.select(done, x, y), obs_reset, obs_step
-    )
-    return obs, state, reward, done
-
-if __name__ == '__main__':
-    
-    key = jrng.key(1234)
-    
-    params = NomParams()
-    
+def test_run(
+    key,
+    params,
+):
     key, reset_key = jrng.split(key)
-    jit_reset = jax.jit(reset, static_argnums=(1,))
-    obs, state = jit_reset(reset_key, params)
+    
+    step_auto_reset = make_step_auto_reset(step, reset)
+    
+    #jit_reset = jax.jit(reset, static_argnums=(1,))
+    #jit_step_auto_reset = jax.jit(step_auto_reset, static_argnums=(1,))
+    obs, state = reset(reset_key, params)
     
     i = 0
     while True:
         t = time.time()
         key, action_key = jrng.split(key)
-        action = NomAction.sample(action_key)
+        action = NomAction.sample(action_key, state)
         
         key, step_key = jrng.split(key)
-        jit_step = jax.jit(step_auto_reset, static_argnums=(3,))
-        obs, state, reward, done = jit_step(
-            step_key, state, action, params)
+        obs, state, reward, done = step_auto_reset(
+            step_key, params, state, action)
         i += 1
         t2 = time.time()
         if i % 100 == 0:
             print(1./(t2-t))
+    
+
+if __name__ == '__main__':
+    
+    key = jrng.key(1234)
+    keys = jrng.split(key, 16)
+    params = NomParams()
+    
+    # for some reason doing both outer and inner JIT speeds things up quite a
+    # bit... why isn't just doing the out one good enough?  Consult the AI
+    # probably.
+    
+    outer_jit = True
+    if outer_jit:
+        jax.jit(
+            jax.vmap(test_run, in_axes=(0, None)),
+            static_argnums=(1,),
+        )(keys, params)
+    else:
+        jax.vmap(test_run, in_axes=(0, None))(keys, params)
