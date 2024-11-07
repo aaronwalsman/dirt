@@ -10,8 +10,6 @@ from flax.struct import dataclass
 
 import chex
 
-from gymnax.environments.environment import Environment
-
 from dirt.gridworld2d import dynamics, observations, spawn
 
 TNomNomParams = TypeVar('TNomNomParams', bound='NomNomParams')
