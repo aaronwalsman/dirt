@@ -108,5 +108,5 @@ if __name__ == '__main__':
     z = z.at[:,:].add(jnp.expand_dims(jnp.sin(jnp.arange(0,16,1/16.)), [0]))
     z = z.at[:,:].add(jnp.expand_dims(jnp.sin(jnp.arange(0,16,1/16.)), [1]))
     z = z * 5
-    vertices, triangles = make_height_map_mesh(z)
-    make_obj(vertices, triangles, './tmp.obj')
+    vertices, faces = make_height_map_mesh(z)
+    make_obj(vertices, faces, './tmp.obj')
