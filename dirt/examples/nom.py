@@ -72,6 +72,16 @@ class NomObservation:
     '''
     view : jnp.ndarray
     stomach : jnp.ndarray
+    
+    @classmethod
+    def zero(cls, params: TNomParams):
+        return NomObservation(
+            view=jnp.zeros(
+                (params.view_distance, params.view_width),
+                dtype=jnp.int32,
+            ),
+            stomach=jnp.zeros(1, dtype=jnp.float32),
+        )
 
 def observe(
     params: TNomParams,
