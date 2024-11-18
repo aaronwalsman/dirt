@@ -86,7 +86,7 @@ def make_obj(vertices, faces, file_path=None):
     for x, y, z in vertices:
         lines.append(f'v {float(x)} {float(y)} {float(z)}')
     
-    for face_vertices in triangles:
+    for face_vertices in faces:
         lines.append('f ' + ' '.join([f'{int(v+1)}' for v in face_vertices]))
     
     text = '\n'.join(lines)
