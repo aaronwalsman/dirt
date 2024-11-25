@@ -81,7 +81,7 @@ if __name__ == '__main__':
     key = jrng.PRNGKey(1022)
     world_size = (256,256)
     water_initial = 1
-    time = 100
+    time = 200
     flow_rate = 0.25
     terrain = Fractal_Noise(world_size=world_size, octaves = 6, persistence = 0.5, lacunarity = 2.0, key = key)
     water = jnp.full(world_size, water_initial)
