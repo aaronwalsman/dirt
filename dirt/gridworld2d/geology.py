@@ -60,6 +60,7 @@ def Fractal_Noise(
 if __name__ == '__main__':
     key = jrng.PRNGKey(1234)
     noise = Fractal_Noise(world_size=(256,256), octaves = 6, persistence = 0.5, lacunarity = 2.0, key = key)
+    '''
     import matplotlib.pyplot as plt
     plt.figure(figsize=(8, 8))
     plt.imshow(noise, cmap="terrain", extent=(0, 10, 0, 10))
@@ -68,6 +69,10 @@ if __name__ == '__main__':
     plt.xlabel("X")
     plt.ylabel("Y")
     plt.show()
-
+    '''
+    
+    from dirt.gridworld2d.visualization import make_height_map_mesh, make_obj
+    vertices, faces = make_height_map_mesh(noise*10)
+    make_obj(vertices, faces, './tmp.obj')
 
 

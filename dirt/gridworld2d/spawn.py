@@ -160,9 +160,8 @@ def unique_xr(
     cell_size : Used for unique_x to control uniformity of sampled positions.
     n : The number of positions to sample.
     '''
-    key, x_key = jrng.split(key)
+    key, x_key, r_key = jrng.split(key, 3)
     x = unique_x(x_key, n, world_size, cell_size=cell_size)
-    key, r_key = jrng.split(key)
     r = uniform_r(r_key, n=n)
     return x, r
 
