@@ -57,10 +57,10 @@ def flow_step(
 
     new_water = (
     water
-    - flow_up + jnp.pad(flow_up, ((1, 0), (0, 0)))[:-1, :]
-    - flow_down + jnp.pad(flow_down, ((0, 1), (0, 0)))[1:, :]
-    - flow_left + jnp.pad(flow_left, ((0, 0), (1, 0)))[:, :-1]
-    - flow_right + jnp.pad(flow_right, ((0, 0), (0, 1)))[:, 1:]
+    - flow_up + jnp.pad(flow_up, ((1, 0), (0, 0)))[1:, :]
+    - flow_down + jnp.pad(flow_down, ((0, 1), (0, 0)))[:-1, :]
+    - flow_left + jnp.pad(flow_left, ((0, 0), (0, 1)))[:, 1:]
+    - flow_right + jnp.pad(flow_right, ((0, 0), (1, 0)))[:, :-1]
     )
 
     return new_water
