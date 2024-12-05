@@ -5,10 +5,6 @@ import jax
 
 from typing import Tuple, Optional, Union
 
-# 2. - Try the use of x_offset to set a better direction(change the direction into x_direction/y_direction)
-# 3. - Add erosion to the rock from the water
-# 4. - add weather system
-
 '''
 Now that we have got the terrain at hand...
 Here is for water!
