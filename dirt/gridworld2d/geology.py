@@ -6,16 +6,14 @@ from jax import vmap
 
 from typing import Tuple, Optional, Union
 
-# Used for random generating(Come in Handy)
-# key = jrng.key(1022)
-# key1, key2 = jrng.split(key)
-# test = jrng.normal(key, (100,100,))
-# print(test[0:5])
-
 '''
 The total world size is set to be (x,y,h)
 On the first pass, I will follow the guide, creating the world
     with fractal noise.
+
+As an add-on, we can adjusted the generated terrain with really high bar 
+at the margin to prevent water from flowing out
+(it's good even if we don't call the adjusted_margin)
 
 '''
 
@@ -57,9 +55,20 @@ def Fractal_Noise(
 
     return jnp.sum(octave_noises, axis=0).reshape(world_size)
 
+def adjusted_margin(
+    current_terrain: jnp.ndarray
+) -> jnp.ndarray:
+    margin = current_terrain.sum()
+    current_terrain = current_terrain.at[0, :].set(margin)
+    current_terrain = current_terrain.at[-1, :].set(margin)
+    current_terrain = current_terrain.at[:, 0].set(margin)
+    current_terrain = current_terrain.at[:, -1].set(margin)
+    return current_terrain
+
 if __name__ == '__main__':
-    key = jrng.PRNGKey(1234)
+    key = jrng.PRNGKey(1022)
     noise = Fractal_Noise(world_size=(256,256), octaves = 6, persistence = 0.5, lacunarity = 2.0, key = key)
+    # noise = adjusted_margin(noise)
     import matplotlib.pyplot as plt
     plt.figure(figsize=(8, 8))
     plt.imshow(noise, cmap="terrain", extent=(0, 10, 0, 10))
