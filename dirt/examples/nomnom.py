@@ -11,6 +11,7 @@ from flax.struct import dataclass
 import chex
 
 from dirt.gridworld2d import dynamics, observations, spawn
+from mechagogue.dp.population_game import population_game
 
 TNomNomParams = TypeVar('TNomNomParams', bound='NomNomParams')
 TNomNomState = TypeVar('TNomNomState', bound='NomNomState')
@@ -19,9 +20,6 @@ TNomNomAction = TypeVar('TNomNomAction', bound='NomNomAction')
 
 @dataclass
 class NomNomParams:
-    max_agents : int = 32
-    initial_agents : int = 32
-    
     world_size : Tuple = (32,32)
     
     mean_initial_food : float = 32
@@ -29,14 +27,14 @@ class NomNomParams:
     mean_food_growth : float = 2
     max_food_growth : float = 4
    
+    initial_players : int = 32
+    max_players : int = 256
+    
     initial_energy : float = 1.
-    max_energy : float = 3.
-    move_metabolism : float = 0.2
-    wait_metabolism : float = 0.1
-   
-    initial_health : float = 1.
-    bite_damage : float = 0.5
-    step_heal : float = 0.01
+    max_energy : float = 5.
+    food_metabolism : float = 1
+    move_metabolism : float = -0.2
+    wait_metabolism : float = -0.1
     
     view_width : int = 5
     view_distance : int = 5
@@ -47,32 +45,37 @@ class NomNomState:
     State information about a single Nom environment.
     '''
     food_grid : jnp.ndarray
-    #occupancy_grid : jnp.ndarray
     object_grid : jnp.ndarray
-    agent_alive : jnp.ndarray
-    agent_x : jnp.ndarray
-    agent_r : jnp.ndarray
-    agent_health : jnp.ndarray
-    agent_energy : jnp.ndarray
+    
+    player_id : jnp.ndarray
+    parent_id : jnp.ndarray
+    player_x : jnp.ndarray
+    player_r : jnp.ndarray
+    player_energy : jnp.ndarray
+    
+    next_new_player_id : int
 
 @dataclass
 class NomNomAction:
     '''
-    An action in the Nom environment.
+    An action in the Nom environment consists of three buttons:
+    forward : [0,1] moves the agent forward one step
+    rotate : [0,1,2] rotates the agent left, zero or right
+    reproduce : [0,1] makes a new agent
     '''
     forward : jnp.ndarray
     rotate : jnp.ndarray
-    bite : jnp.ndarray
-
+    reproduce : jnp.ndarray
+    
     @classmethod
-    def sample(cls, key, state):
-        n = state.agent_x.shape[0]
-        key, forward_key, rotate_key, bite_key = jrng.split(key, 4)
+    def uniform_sample(cls, key, state):
+        n = state.player_x.shape[0]
+        forward_key, rotate_key, reproduce_key = jrng.split(key, 3)
         forward = jrng.randint(forward_key, shape=(n,), minval=0, maxval=2)
         rotate = jrng.randint(rotate_key, shape=(n,), minval=-1, maxval=2)
-        bite = jrng.randint(bite_key, shape=(n,), minval=0, maxval=2)
+        reproduce = jrng.randint(reproduce_key, shape=(n,), minval=0, maxval=2)
         
-        return NomNomAction(forward, rotate, bite)
+        return NomNomAction(forward, rotate, reproduce)
 
 @dataclass
 class NomNomObservation:
@@ -80,34 +83,12 @@ class NomNomObservation:
     An observation in the Nom environment.
     '''
     view : jnp.ndarray
-    health : jnp.ndarray
     energy : jnp.ndarray
 
-def observe( 
-    params: TNomNomParams,
-    state: TNomNomState,
-) -> TNomNomObservation :
-    '''
-    Computes the observation of a Nom environment given the environment params
-    and state.
-    
-    When used inside a jit compiled program, params must come from a static
-    variable as it controls the shapes of various arrays.
-    '''
-    view = observations.first_person_view(
-        state.agent_x,
-        state.agent_r,
-        state.food_grid.astype(jnp.uint8),
-        params.view_width,
-        params.view_distance,
-        out_of_bounds=2,
-    )
-    return NomNomObservation(view, state.agent_health, state.agent_energy)
-
-def reset(
+def nomnom_initialize(
     key : chex.PRNGKey,
     params : TNomNomParams,
-) -> Tuple[TNomNomObservation, TNomNomState] :
+) -> TNomNomState :
     '''
     Reset function for the NomNom environment.  Returns a NomNom environment
     observation and state representing the start of a new episode.
@@ -115,19 +96,20 @@ def reset(
     When used inside a jit compiled program, params must come from a static
     variable as it controls the shapes of various arrays.
     '''
-    # initialize the agents
+    # initialize the players
     key, xr_key = jrng.split(key)
-    agent_alive = jnp.zeros(params.max_agents, dtype=jnp.bool)
-    agent_alive.at[params.initial_agents].set(True)
-    agent_x, agent_r = spawn.unique_xr(
-        xr_key, params.max_agents, params.world_size)
-    agent_health = jnp.full((params.max_agents,), params.initial_health)
-    agent_energy = jnp.full((params.max_agents,), params.initial_energy)
+    
+    player_id = jnp.full(params.max_players, -1, dtype=jnp.int32)
+    player_id = player_id.at[:params.initial_players].set(
+        jnp.arange(params.initial_players))
+    parent_id = jnp.full(params.max_players, -1, dtype=jnp.int32)
+    player_x, player_r = spawn.unique_xr(
+        xr_key, params.max_players, params.world_size)
+    player_energy = jnp.full((params.max_players,), params.initial_energy)
     
     # initialize the object grid
     object_grid = jnp.full(params.world_size, -1, dtype=jnp.int32)
-    object_grid.at[agent_x[...,0], agent_x[...,1]].set(
-        jnp.arange(params.max_agents))
+    object_grid.at[player_x[...,0], player_x[...,1]].set(player_id)
     
     # initialize the food grid
     key, foodkey = jrng.split(key)
@@ -138,35 +120,101 @@ def reset(
         params.world_size,
     )
     
-    # build the state and observation
+    # build the state
     state =  NomNomState(
         food_grid,
         object_grid,
-        agent_alive,
-        agent_x,
-        agent_r,
-        agent_health,
-        agent_energy,
+        player_id,
+        parent_id,
+        player_x,
+        player_r,
+        player_energy,
+        params.initial_players,
     )
-    obs = observe(params, state)
 
-    return obs, state
+    return state
 
-def step(
+def nomnom_transition(
     key: chex.PRNGKey,
     params: TNomNomParams,
     state: TNomNomState,
     action: TNomNomAction,
-) -> Tuple[TNomNomObservation, TNomNomState, jnp.ndarray, jnp.ndarray] :
+) -> TNomNomState :
     '''
-    Transition function for the Nom Nom environment.  Returns a new observation,
-    state, reward and done given the environment params, a previous state
-    and an action.
+    Transition function for the NomNom environment.  Samples a new state
+    given the environment params, a previous state and an action.
     
     When used inside a jit compiled program, params must come from a static
     variable as it controls the shapes of various arrays.
     '''
+    
+    # move
+    player_x, player_r, _, object_grid = dynamics.forward_rotate_step(
+        state.player_x,
+        state.player_r,
+        action.forward,
+        action.rotate,
+        check_collisions=True,
+        object_grid=state.object_grid,
+    )
 
+    # eat
+    player_alive = (state.player_id != -1)
+    eaten_food = (
+        state.food_grid[player_x[...,0], player_x[...,1]] * player_alive)
+    player_energy = jnp.clip(
+        state.player_energy + eaten_food * params.food_metabolism,
+        0,
+        params.max_energy,
+    )
+    food_grid = food_grid.at[player_x[...,0], player_x[...,1]].subtract(
+        eaten_food)
+
+    # metabolism
+    moved = action.forward | (action.rotate != 0)
+    player_energy = (
+        player_energy -
+        moved * params.move_metabolism -
+        (1. - moved) * params.wait_metabolism
+    ) * player_alive
+    
+    # kill players that have starved
+    player_alive = player_alive & (player_energy > 0.)
+    player_id = player_id * player_alive + -1 * ~player_alive
+    
+    # update the object grid with dead players
+    object_grid = object_grid.at[player_x[...,0], player_x[...,1]].set(
+        player_id)
+    
+    # make new players
+    # in order to reproduce, a player must have enough energy and not be dead
+    reproduce = (
+        action.reproduce &
+        (player_energy > params.initial_energy) &
+        (player_id != -1)
+    )
+    
+    (
+        next_new_player_id,
+        player_new,
+        player_id,
+        player_parents,
+        player_x,
+        player_r,
+        player_energy,
+        object_grid,
+    ) = spawn.reproduce_from_parents(
+        reproduce,
+        state.next_new_player_id,
+        player_id,
+        player_parents,
+        player_x,
+        player_r,
+        player_energy,
+        jnp.full_like(player_energy, params.initial_energy),
+        object_grid=object_grid,
+    )
+    
     # grow new food
     key, food_key = jrng.split(key)
     food_grid = state.food_grid | spawn.poisson_grid(
@@ -176,67 +224,79 @@ def step(
         params.world_size,
     )
     
-    # move
-    agent_x, agent_r, _, object_grid = dynamics.forward_rotate_step(
-        state.agent_x,
-        state.agent_r,
-        action.forward,
-        action.rotate,
-        check_collisions=True,
-        object_grid=state.object_grid,
-    )
-
-    # eat
-    eaten_food = food_grid[agent_x[...,0], agent_x[...,1]]
-    agent_energy = jnp.clip(
-        state.agent_energy + eaten_food, 0, params.max_energy)
-    food_grid = food_grid.at[agent_x[...,0], agent_x[...,1]].set(False)
-
-    # digest
-    moved = action.forward | action.rotate
-    agent_energy = (
-        agent_energy -
-        moved * params.move_metabolism -
-        ~moved * params.wait_metabolism
-    ) * state.agent_alive
-    
-    # fight
-    pass
-    agent_health = state.agent_health
-    
-    # kill
-    agent_alive = state.agent_alive & (agent_energy > 0.) & (agent_health > 0.)
-   
     # compute new state
     state = NomNomState(
         food_grid,
         object_grid,
-        agent_alive,
-        agent_x,
-        agent_r,
-        agent_health,
-        agent_energy,
+        player_id,
+        parent_id,
+        player_x,
+        player_r,
+        player_energy,
+        next_new_player_id
     )
+    
+    return state
 
-    # compute observation
-    obs = observe(params, state)
+def nomnom_observe(
+    key: chex.PRNGKey,
+    params: TNomNomParams,
+    state: TNomNomState,
+) -> TNomNomObservation :
+    '''
+    Computes the observation of a NomNom environment given the environment
+    params and state.
+    
+    When used inside a jit compiled program, params must come from a static
+    variable as it controls the shapes of various arrays.
+    '''
+    
+    view_grid = state.food_grid.astype(jnp.uint8)
+    view_grid.at[state.player_x[...,0], state.player_x[...,1]].set(
+        2 * (state.player_id != -1))
+    
+    view = observations.first_person_view(
+        state.player_x,
+        state.player_r,
+        view_grid,
+        params.view_width,
+        params.view_distance,
+        out_of_bounds=3,
+    )
+    return NomNomObservation(view, state.player_energy)
 
-    return obs, state
+def nomnom(
+    params: TNomNomParams = NomNomParams,
+):
+    reset, step = population_game(
+        params,
+        nomnom_initialize,
+        nomnom_transition,
+        nomnom_observe,
+        lambda state : state.player_id,
+        lambda state : state.parent_id,
+    )
+    
+    return reset, step
 
 def test_run(key, params, steps):
+    
+    reset, step = nomnom(params)
+    
     key, reset_key = jrng.split(key)
-    obs, state = reset(reset_key, params)
+    state, obs, players, parents = reset(reset_key)
     
-    #for i in range(steps):
-    def single_step(key_obs_state, _):
-        key, obs, state = key_obs_state
+    def single_step(step_state, _):
+        key, state, obs, players, parents = step_state
         key, action_key, step_key = jrng.split(key, 3)
-        action = NomNomAction.sample(action_key, state)
-        obs, state = step(step_key, params, state, action)
         
-        return (key, obs, state), None
+        action = NomNomAction.sample(action_key, state)
+        
+        state, obs, players, parents = step(step_key, params, state, action)
+        
+        return (key, state, players, parents), None
     
-    jax.lax.scan(single_step, (key, obs, state), length=steps)
+    jax.lax.scan(single_step, (key, state, obs, players, parents), length=steps)
 
 if __name__ == '__main__':
     

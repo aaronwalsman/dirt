@@ -31,8 +31,8 @@ class NomParams:
     mean_food_growth : float = 2
     max_food_growth : float = 4
     
-    initial_health : float = 1.
-    max_health : float = 3.
+    initial_energy : float = 1.
+    max_energy : float = 3.
     move_metabolism : float = 0.2
     wait_metabolism : float = 0.1
     
@@ -47,11 +47,11 @@ class NomState:
     food_grid : jnp.ndarray
     agent_x : jnp.ndarray
     agent_r : jnp.ndarray
-    agent_health : jnp.ndarray
+    agent_energy : jnp.ndarray
     
     @property
-    def agent_dead(self):
-        return self.agent_health <= 0
+    def agent_alive(self):
+        return self.agent_energy > 0.
 
 @dataclass
 class NomAction:
@@ -67,7 +67,7 @@ class NomObservation:
     An observation in the Nom environment.
     '''
     view : jnp.ndarray
-    health : jnp.ndarray
+    energy : jnp.ndarray
     
     @classmethod
     def zero(cls, params: TNomParams):
@@ -76,7 +76,7 @@ class NomObservation:
                 (params.view_distance, params.view_width),
                 dtype=jnp.int32,
             ),
-            health=jnp.zeros(1, dtype=jnp.float32),
+            energy=jnp.zeros(1, dtype=jnp.float32),
         )
 
 def nom_init(key, params):
@@ -92,7 +92,7 @@ def nom_init(key, params):
     agent_x, agent_r = spawn.unique_xr(xr_key, 1, params.world_size)
     agent_x = agent_x[0]
     agent_r = agent_r[0]
-    agent_health = jnp.full((), params.initial_health)
+    agent_energy = jnp.full((), params.initial_energy)
     
     # initialize the food grid
     key, foodkey = jrng.split(key)
@@ -103,7 +103,7 @@ def nom_init(key, params):
         params.world_size,
     )
     
-    state =  NomState(food_grid, agent_x, agent_r, agent_health)
+    state =  NomState(food_grid, agent_x, agent_r, agent_energy)
     
     return state
 
@@ -132,14 +132,14 @@ def nom_transition(
     
     # eat
     eaten_food = state.food_grid[agent_x[...,0], agent_x[...,1]]
-    agent_health = jnp.clip(
-        state.agent_health + eaten_food, 0, params.max_health)
+    agent_energy = jnp.clip(
+        state.agent_energy + eaten_food, 0, params.max_energy)
     food_grid = state.food_grid.at[agent_x[...,0], agent_x[...,1]].set(False)
     
     # digest
     moved = action.forward | (action.rotate != 0)
-    agent_health = (
-        agent_health -
+    agent_energy = (
+        agent_energy -
         moved * params.move_metabolism -
         (1. - moved) * params.wait_metabolism
     )
@@ -154,7 +154,7 @@ def nom_transition(
     )
 
     # compute new state
-    state = NomState(food_grid, agent_x, agent_r, agent_health)
+    state = NomState(food_grid, agent_x, agent_r, agent_energy)
     
     return state
 
@@ -178,21 +178,21 @@ def nom_observe(
         params.view_distance,
         out_of_bounds=2,
     )
-    return NomObservation(view, state.agent_health)
+    return NomObservation(view, state.agent_energy)
 
 def nom_reward(
     key: chex.PRNGKey,
     state: TNomState,
 ) -> TNomState :
-    #dead = state.agent_health <= 0
+    #dead = state.agent_energy <= 0
     #reward = -(dead.astype(jnp.float32))
-    return -state.agent_dead.astype(jnp.float32)
+    return state.agent_alive.astype(jnp.float32) - 1.
 
 def nom_terminal(
     key: chex.PRNGKey,
     state: TNomState,
 ) -> TNomState :
-    return state.agent_dead
+    return jnp.logical_not(state.agent_alive)
 
 def nom(
     params : TNomParams = NomParams()
@@ -229,7 +229,7 @@ def nom(
 #        xr_key, 1, params.world_size)
 #    agent_x = agent_x[0]
 #    agent_r = agent_r[0]
-#    agent_health = jnp.full((1,), params.initial_health)
+#    agent_energy = jnp.full((1,), params.initial_energy)
 #    
 #    # initialize the food grid
 #    key, foodkey = jrng.split(key)
@@ -240,7 +240,7 @@ def nom(
 #        params.world_size,
 #    )
 #    
-#    state =  NomState(food_grid, agent_x, agent_r, agent_health)
+#    state =  NomState(food_grid, agent_x, agent_r, agent_energy)
 #    obs = observe(params, state)
 #    
 #    return obs, state
@@ -271,14 +271,14 @@ def nom(
 #    
 #    # eat
 #    eaten_food = food_grid[agent_x[...,0], agent_x[...,1]]
-#    agent_health = jnp.clip(
-#        state.agent_health + eaten_food, 0, params.max_health)
+#    agent_energy = jnp.clip(
+#        state.agent_energy + eaten_food, 0, params.max_energy)
 #    food_grid = food_grid.at[agent_x[...,0], agent_x[...,1]].set(False)
 #    
 #    # digest
 #    moved = action.forward | action.rotate
-#    agent_health = (
-#        agent_health -
+#    agent_energy = (
+#        agent_energy -
 #        moved * params.move_metabolism -
 #        ~moved * params.wait_metabolism
 #    )
@@ -293,13 +293,13 @@ def nom(
 #    )
 #
 #    # compute new state
-#    state = NomState(food_grid, agent_x, agent_r, agent_health)
+#    state = NomState(food_grid, agent_x, agent_r, agent_energy)
 #    
 #    # compute observation
 #    obs = observe(params, state)
 #    
 #    # compute reward and done
-#    done = agent_health <= 0
+#    done = agent_energy <= 0
 #    reward = -(done.astype(jnp.float32))
 #    
 #    return obs, state, reward, done

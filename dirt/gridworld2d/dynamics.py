@@ -136,10 +136,10 @@ def move_objects(
     collision checking (see move_and_collide_objects below), so if
     two objects are moved to the same locations, one will be overwritten.
     
-    x0 : The starting position for the transition.  Mass will be
-        subtracted from these locations.
-    x1 : The ending position for the transition.  Mass will be
-        added to these locations.
+    x0 : The starting position for the transition.  Objects will be
+        removed from these locations.
+    x1 : The ending position for the transition.  Objects will be
+        placed in these locations.
     object_grid : The existing object_grid.
     '''
     values = object_grid[x0[...,0], x0[...,1]]
