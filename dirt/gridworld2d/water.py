@@ -166,9 +166,9 @@ if __name__ == '__main__':
     water = jnp.full(world_size, water_initial)
     final_water_tdir = simulate_water_flow_twodir(terrain, water, time, flow_rate)
     final_water = simulate_water_flow(terrain, water, time, flow_rate)
-    print(water.sum())
-    print(final_water.sum())
-    print(final_water_tdir.sum())
+    # print(water.sum())
+    # print(final_water.sum())
+    # print(final_water_tdir.sum())
     # Ensure that total mass of water is the same.
     # With output to be 32768.0, 32768.0, 32768.0 for this seed
     import matplotlib.pyplot as plt
