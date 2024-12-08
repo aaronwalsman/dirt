@@ -16,7 +16,7 @@ Usually we should use erosion with water, but who knows?
 def erosion_step_direction(
     terrain: jnp.ndarray, 
     water : jnp.ndarray,
-    current_erosion: jnp.ndarray,
+    accumulate_erosion: jnp.ndarray,
     x_offset : int,
     y_offset: int,
     flow_rate: int,
@@ -34,7 +34,7 @@ def erosion_step_direction(
     '''
     total_height = terrain + water
     current_erosion = calculate_flow_twodir(total_height, water, x_offset, y_offset, flow_rate)
-    total_erosion = current_erosion + current_erosion
+    total_erosion = accumulate_erosion + current_erosion
     erosion_mask = total_erosion > erosion_endurance
 
     erosion_amount = jnp.where(erosion_mask, current_erosion * erosion_ratio, 0)
@@ -59,6 +59,7 @@ def simulate_erosion_step(
     terrain: jnp.ndarray,
     water : jnp.ndarray,
     current_erosion: jnp.ndarray,
+    flow_rate: float,
     erosion_endurance: float,
     erosion_ratio: float,
 ) -> jnp.ndarray:
@@ -113,11 +114,11 @@ def simulate_erosion(
     def erosion_step(carry, _):
         terrain, current_erosion, water = carry
 
-        water = flow_step_twodir(terrain, water, flow_rate)
-        new_terrain = simulate_erosion_step(terrain, water, current_erosion, erosion_endurance, erosion_ratio)
+        new_water = flow_step_twodir(terrain, water, flow_rate)
+        new_terrain = simulate_erosion_step(terrain, water, current_erosion, flow_rate, erosion_endurance, erosion_ratio)
         current_erosion = reset_erosion_status(new_terrain, terrain, current_erosion)
 
-        return (new_terrain, current_erosion, water), None
+        return (new_terrain, current_erosion, new_water), None
 
     initial_state = (terrain, current_erosion, water)
     (final_terrain, _, _), _ = jax.lax.scan(erosion_step, initial_state, None, length=time)
@@ -139,7 +140,7 @@ if __name__ == '__main__':
     final_terrain = simulate_erosion(terrain, water, erosion_initial, flow_rate, time, erosion_ratio, erosion_endurance)
 
     # print(terrain.sum()) # -349.00833
-    # print(final_terrain.sum()) # -349.0088
+    # print(final_terrain.sum()) # -349.0083
     # print(terrain == final_terrain) # Erosion is Happening
     import matplotlib.pyplot as plt
     plt.figure(figsize=(8, 8))
