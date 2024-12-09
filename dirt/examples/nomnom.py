@@ -33,8 +33,8 @@ class NomNomParams:
     initial_energy : float = 1.
     max_energy : float = 5.
     food_metabolism : float = 1
-    move_metabolism : float = -0.2
-    wait_metabolism : float = -0.1
+    move_metabolism : float = -0.05
+    wait_metabolism : float = -0.025
     
     view_width : int = 5
     view_distance : int = 5
@@ -68,12 +68,15 @@ class NomNomAction:
     reproduce : jnp.ndarray
     
     @classmethod
-    def uniform_sample(cls, key, state):
-        n = state.player_x.shape[0]
+    def uniform_sample(cls, key, n):
+        #n = state.player_x.shape[0]
         forward_key, rotate_key, reproduce_key = jrng.split(key, 3)
         forward = jrng.randint(forward_key, shape=(n,), minval=0, maxval=2)
         rotate = jrng.randint(rotate_key, shape=(n,), minval=-1, maxval=2)
         reproduce = jrng.randint(reproduce_key, shape=(n,), minval=0, maxval=2)
+        #forward = jrng.randint(forward_key, minval=0, maxval=2)
+        #rotate = jrng.randint(rotate_key, minval=-1, maxval=2)
+        #reproduce = jrng.randint(reproduce_key, minval=0, maxval=2)
         
         return NomNomAction(forward, rotate, reproduce)
 
@@ -160,27 +163,33 @@ def nomnom_transition(
 
     # eat
     player_alive = (state.player_id != -1)
-    eaten_food = (
-        state.food_grid[player_x[...,0], player_x[...,1]] * player_alive)
+    food_at_player = state.food_grid[player_x[...,0], player_x[...,1]]
+    eaten_food = food_at_player * player_alive
     player_energy = jnp.clip(
         state.player_energy + eaten_food * params.food_metabolism,
         0,
         params.max_energy,
     )
-    food_grid = food_grid.at[player_x[...,0], player_x[...,1]].subtract(
-        eaten_food)
-
+    
+    food_grid = state.food_grid.at[player_x[...,0], player_x[...,1]].set(
+        food_at_player & jnp.logical_not(eaten_food.astype(jnp.int32)))
+    #jax.debug.print('pref: {pf}, eaten: {e}, postf: {post}',
+    #    pf=jnp.sum(state.food_grid),
+    #    e=jnp.sum(eaten_food),
+    #    post=jnp.sum(food_grid),
+    #)
+    
     # metabolism
     moved = action.forward | (action.rotate != 0)
     player_energy = (
-        player_energy -
-        moved * params.move_metabolism -
+        player_energy +
+        moved * params.move_metabolism +
         (1. - moved) * params.wait_metabolism
     ) * player_alive
     
     # kill players that have starved
     player_alive = player_alive & (player_energy > 0.)
-    player_id = player_id * player_alive + -1 * ~player_alive
+    player_id = state.player_id * player_alive + -1 * ~player_alive
     
     # update the object grid with dead players
     object_grid = object_grid.at[player_x[...,0], player_x[...,1]].set(
@@ -198,7 +207,7 @@ def nomnom_transition(
         next_new_player_id,
         player_new,
         player_id,
-        player_parents,
+        parent_id,
         player_x,
         player_r,
         player_energy,
@@ -207,7 +216,7 @@ def nomnom_transition(
         reproduce,
         state.next_new_player_id,
         player_id,
-        player_parents,
+        state.parent_id,
         player_x,
         player_r,
         player_energy,
@@ -215,9 +224,13 @@ def nomnom_transition(
         object_grid=object_grid,
     )
     
+    #jax.debug.print('internal_p {p}', p=player_id)
+    #jax.debug.print('energy {e}', e=player_energy)
+    #jax.debug.print('eaten {e}', e=eaten_food)
+    
     # grow new food
     key, food_key = jrng.split(key)
-    food_grid = state.food_grid | spawn.poisson_grid(
+    food_grid = food_grid | spawn.poisson_grid(
         food_key,
         params.mean_food_growth,
         params.max_food_growth,
@@ -273,8 +286,8 @@ def nomnom(
         nomnom_initialize,
         nomnom_transition,
         nomnom_observe,
-        lambda state : state.player_id,
-        lambda state : state.parent_id,
+        lambda params, state : state.player_id,
+        lambda params, state : state.parent_id,
     )
     
     return reset, step
