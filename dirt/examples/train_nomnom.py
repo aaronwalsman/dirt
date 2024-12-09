@@ -69,17 +69,22 @@ if __name__ == '__main__':
     train = jax.jit(train, static_argnums=(1,2,3))
     
     env_params = NomNomParams(
-        mean_initial_food=64,
-        max_initial_food=256,
-        mean_food_growth=1.5,
-        max_players=1024, # this is very slow on laptop
+        mean_initial_food=1500**2,
+        max_initial_food=4000**2,
+        mean_food_growth=150**2,
+        max_food_growth=1000**2,
+        initial_players=1000,
+        max_players=5000000, # this is very slow on laptop
+        world_size=(10000,10000)
     )
     algo_params = NaturalSelectionParams()
 
     key = jrng.key(1234)
-    iterations = 50
+    iterations = 100
 
     t = time.time()
     result = train(key, env_params, algo_params, iterations)
     jax.block_until_ready(result)
-    print((time.time() - t)/iterations)
+    algo_fps = iterations / (time.time() - t)
+    print('algo fps:', algo_fps)
+    print('env fps:', algo_params.rollout_steps * algo_fps)
