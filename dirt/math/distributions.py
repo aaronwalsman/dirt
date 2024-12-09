@@ -21,5 +21,6 @@ def poisson_vector(
     max_n : The maximum number of new items to produce.
     '''
     n = jrng.poisson(key, mean_n)
-    vector = jnp.arange(max_n) > n
+    vector = jnp.arange(max_n) < n
+    
     return vector
