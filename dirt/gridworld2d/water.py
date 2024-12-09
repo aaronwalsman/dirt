@@ -79,9 +79,9 @@ def simulate_water_flow(
 
 if __name__ == '__main__':
     key = jrng.PRNGKey(1022)
-    world_size = (256,256)
+    world_size = (32,32)
     water_initial = 1
-    time = 100
+    time = 16
     flow_rate = 0.25
     terrain = Fractal_Noise(world_size=world_size, octaves = 6, persistence = 0.5, lacunarity = 2.0, key = key)
     water = jnp.full(world_size, water_initial)
@@ -92,3 +92,11 @@ if __name__ == '__main__':
     plt.colorbar(label="Height (Terrain + Water)")
     plt.title("Final Terrain with Water")
     plt.show()
+    
+    from dirt.gridworld2d.visualization import make_height_map_mesh, make_obj
+    vt,ft = make_height_map_mesh(terrain)
+    make_obj(vt, ft, file_path='./terrain.obj')
+    
+    terrain_water = terrain + final_water
+    vw,fw = make_height_map_mesh(terrain_water)
+    make_obj(vw, fw, file_path='./water.obj')
