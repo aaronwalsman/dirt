@@ -5,6 +5,8 @@ import jax
 
 from typing import Tuple, Optional, Union
 
+from dirt.gridworld2d.visualization import visualize_height_water
+
 '''
 Now that we have got the terrain at hand...
 Here is for water!
@@ -15,7 +17,7 @@ def calculate_flow(
     total_height: jnp.ndarray, 
     water : jnp.ndarray, 
     direction : int,
-    flow_rate : float          
+    flow_rate : float
 ) -> jnp.ndarray :
     '''
     Calculate the flow in either of the four directions!(As in the graph)
@@ -85,6 +87,10 @@ if __name__ == '__main__':
     flow_rate = 0.25
     terrain = Fractal_Noise(world_size=world_size, octaves = 6, persistence = 0.5, lacunarity = 2.0, key = key)
     water = jnp.full(world_size, water_initial)
+    
+    #visualize_height_water(terrain, water)
+    
+    #'''
     final_water = simulate_water_flow(terrain, water, time, flow_rate)
     print(final_water)
     import matplotlib.pyplot as plt
@@ -92,3 +98,4 @@ if __name__ == '__main__':
     plt.colorbar(label="Height (Terrain + Water)")
     plt.title("Final Terrain with Water")
     plt.show()
+    #'''
