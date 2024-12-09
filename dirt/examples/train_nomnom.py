@@ -1,19 +1,29 @@
+'''
+This example is designed to test the nomnom environment in a training loop
+with a random policy.
+'''
+
 import time
 
 import jax
 import jax.numpy as jnp
 import jax.random as jrng
 
-from mechagogue.pop.objective_free import objective_free, ObjectiveFreeParams
+from mechagogue.pop.natural_selection import (
+    natural_selection, NaturalSelectionParams)
 
 from dirt.examples.nomnom import nomnom, NomNomParams, NomNomAction
 
 def train(key, iterations):
 
     # build the environment
-    env_params = NomNomParams(mean_food_growth=1.5)
+    env_params = NomNomParams(
+        mean_food_growth=1.5,
+        max_players=1024, # this is very slow on laptop
+    )
     reset_env, step_env = nomnom(env_params)
-
+    
+    # build the randomized policy
     def randomized_policy(weights, obs):
         n = weights.shape[0]
         
@@ -24,31 +34,34 @@ def train(key, iterations):
         
         return sampler, lambda x : 0
 
-    # build the algorithm
-    algo_params = ObjectiveFreeParams()
-    reset_algo, step_algo = objective_free(
+    # build the natural selection algorithm
+    algo_params = NaturalSelectionParams()
+    reset_algo, step_algo = natural_selection(
         algo_params,
         reset_env,
         step_env,
         randomized_policy,
         lambda key : 0,
-        lambda x : x
+        lambda w, players, parents, next_players, next_parents : w
     )
-
+    
+    # reset the algorithm to get an initial state
     key, reset_key = jrng.split(key)
     algo_state = reset_algo(reset_key)
     
+    # step function that will be run at each iteration
+    # this is just the algorithm's step function, but structured so that it
+    # can be scanned
     def step(algo_state, key):
         env_state, _, players, _, _ = algo_state
-        #jax.debug.print('Population: {p}', p=jnp.sum(players != -1))
-        #jax.debug.print('Food remaining: {f}', f=jnp.sum(env_state.food_grid))
-        #jax.debug.print('OP: {p}', p=players)
-        #jax.debug.print('Players: {p}', p=env_state.player_id)
-        #jax.debug.print('Parents: {p}', p=env_state.parent_id)
+        jax.debug.print('Population: {p}', p=jnp.sum(players != -1))
         return step_algo(key, *algo_state)
     
+    # generate step keys
     key, step_key = jrng.split(key)
     step_keys = jrng.split(step_key, iterations)
+    
+    # iterate
     algo_state, _ = jax.lax.scan(step, algo_state, step_keys, iterations)
     
     return algo_state
@@ -57,9 +70,9 @@ if __name__ == '__main__':
     train = jax.jit(train, static_argnums=(1))
 
     key = jrng.key(1234)
-    iterations = 50
+    iterations = 500
 
     t = time.time()
-    things = train(key, iterations)
+    result = train(key, iterations)
+    jax.block_until_ready(result)
     print((time.time() - t)/iterations)
-    #breakpoint()
