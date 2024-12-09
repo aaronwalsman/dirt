@@ -27,7 +27,7 @@ class NomNomParams:
     world_size : Tuple = (32,32)
     
     mean_initial_food : float = 32
-    max_initial_food : float = 36
+    max_initial_food : float = 32
     mean_food_growth : float = 2
     max_food_growth : float = 4
    

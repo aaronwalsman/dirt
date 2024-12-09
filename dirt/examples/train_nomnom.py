@@ -14,13 +14,9 @@ from mechagogue.pop.natural_selection import (
 
 from dirt.examples.nomnom import nomnom, NomNomParams, NomNomAction
 
-def train(key, iterations):
+def train(key, env_params, algo_params, iterations):
 
     # build the environment
-    env_params = NomNomParams(
-        mean_food_growth=1.5,
-        max_players=1024, # this is very slow on laptop
-    )
     reset_env, step_env = nomnom(env_params)
     
     # build the randomized policy
@@ -35,7 +31,6 @@ def train(key, iterations):
         return sampler, lambda x : 0
 
     # build the natural selection algorithm
-    algo_params = NaturalSelectionParams()
     reset_algo, step_algo = natural_selection(
         algo_params,
         reset_env,
@@ -54,7 +49,11 @@ def train(key, iterations):
     # can be scanned
     def step(algo_state, key):
         env_state, _, players, _, _ = algo_state
-        jax.debug.print('Population: {p}', p=jnp.sum(players != -1))
+        jax.debug.print(
+            'Population: {p}, Food: {f}',
+            p=jnp.sum(players != -1),
+            f=jnp.sum(env_state.food_grid)
+        )
         return step_algo(key, *algo_state)
     
     # generate step keys
@@ -67,12 +66,20 @@ def train(key, iterations):
     return algo_state
 
 if __name__ == '__main__':
-    train = jax.jit(train, static_argnums=(1))
+    train = jax.jit(train, static_argnums=(1,2,3))
+    
+    env_params = NomNomParams(
+        mean_initial_food=64,
+        max_initial_food=256,
+        mean_food_growth=1.5,
+        max_players=1024, # this is very slow on laptop
+    )
+    algo_params = NaturalSelectionParams()
 
     key = jrng.key(1234)
-    iterations = 500
+    iterations = 50
 
     t = time.time()
-    result = train(key, iterations)
+    result = train(key, env_params, algo_params, iterations)
     jax.block_until_ready(result)
     print((time.time() - t)/iterations)
