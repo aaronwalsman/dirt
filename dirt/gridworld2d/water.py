@@ -5,7 +5,7 @@ import jax
 
 from typing import Tuple, Optional, Union
 
-from dirt.gridworld2d.visualization import visualize_height_water
+#from dirt.gridworld2d.visualization import visualize_height_water
 
 '''
 Now that we have got the terrain at hand...
