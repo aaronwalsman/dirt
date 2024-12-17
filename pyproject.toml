@@ -20,6 +20,7 @@ dependencies = [
   "jax",
   "flax",
   "chex",
+  "splendor-render",
 ]
 
 [project.urls]

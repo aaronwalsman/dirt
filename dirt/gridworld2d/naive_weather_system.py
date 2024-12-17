@@ -30,8 +30,9 @@ def evaporate_step(
     rain_status: 1 for raining and 0 not
     evaporate_rate: how fast water is evaporated to the atmosphere
     '''
-
+    temperature = (temperature - jnp.min(temperature)) / (jnp.max(temperature) - jnp.min(temperature))
     evaporation_state = jnp.where(rain_status == 0, evaporate_rate * temperature * jnp.mean(water), 0)
+    # evaporation_state = jnp.where(rain_status == 0, evaporate_rate * temperature * jnp.mean(water) * (jnp.max(current_evaporation)-current_evaporation), 0)
     evaporation_state = jnp.minimum(evaporation_state, water)
     new_water = water - evaporation_state
     new_evaporation = current_evaporation + evaporation_state
@@ -111,7 +112,7 @@ def simulate_weather(
         terrain, water, current_evaporation, rain_status, current_erosion = carry
         
         # 1. Water flow
-        water = flow_step_twodir(terrain, water, flow_rate)
+        new_water_1 = flow_step_twodir(terrain, water, flow_rate)
         
         # 2. Erosion
         new_terrain = simulate_erosion_step(terrain, water, current_erosion, flow_rate, erosion_endurance, erosion_ratio)
@@ -119,9 +120,9 @@ def simulate_weather(
         
         # 3. Weather system
         new_water, new_evaporation, rain_status = weather_step(
-            water, temperature, current_evaporation, rain_status, evaporate_rate, air_up_limit, air_down_limit, rain)
+            new_water_1, temperature, current_evaporation, rain_status, evaporate_rate, air_up_limit, air_down_limit, rain)
         
-        return (terrain, new_water, new_evaporation, rain_status, current_erosion), None
+        return (new_terrain, new_water, new_evaporation, rain_status, current_erosion), None
     
     initial_state = (terrain, water, initial_evaporation, initial_rain_status, erosion_initial)
     final_state, _ = jax.lax.scan(step_fn, initial_state, None, length=time)
@@ -138,19 +139,19 @@ if __name__ == '__main__':
     water_initial = 0.5
     evaporation_initial = 0
     rain_initial = 0
-    flow_rate = 0.25
+    flow_rate = 0.45
     terrain = Fractal_Noise(world_size=world_size, octaves = 6, persistence = 0.5, lacunarity = 2.0, key = key)
     water = jnp.full(world_size, water_initial)
     temperature_naive = (terrain - jnp.min(terrain)) / (jnp.max(terrain) - jnp.min(terrain))
-    time = 200
+    time = 500
     rain_initial = jnp.full(world_size, rain_initial)
     evaporation_initial = jnp.full(world_size, evaporation_initial)
     evaporate_rate = 0.01
     air_up_limit = 0.2
     air_down_limit= 0.1
     rain = 0.08
-    erosion_endurance = 0.2
-    erosion_ratio = 0.001
+    erosion_endurance = 0.05
+    erosion_ratio = 0.01
 
     final_terrain, final_water, left_evaporation, final_rain_status = simulate_weather(
         terrain, water, temperature_naive, time, 
@@ -158,11 +159,12 @@ if __name__ == '__main__':
         evaporate_rate, air_up_limit, air_down_limit, rain,
         flow_rate, erosion_ratio, erosion_endurance 
     )
-    # total_water = final_water + left_evaporation
-    # print(terrain.sum()) # -349.00833
-    # print(final_terrain.sum()) # -349.00833
-    # print(water.sum()) # 32768.0
-    # print(total_water.sum()) # 32767.998
+    total_water = final_water + left_evaporation
+    print(terrain.sum()) # -349.00833
+    print(final_terrain.sum()) # -349.00833
+    print(water.sum()) # 32768.0
+    print(total_water.sum()) # 32767.998
+    print(final_terrain == terrain)
 
     import matplotlib.pyplot as plt
     plt.figure(figsize=(18, 6))

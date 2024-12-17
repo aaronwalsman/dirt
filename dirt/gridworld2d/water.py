@@ -5,6 +5,8 @@ import jax
 
 from typing import Tuple, Optional, Union
 
+from dirt.gridworld2d.visualization import visualize_height_water
+
 '''
 Now that we have got the terrain at hand...
 Here is for water!
@@ -164,6 +166,10 @@ if __name__ == '__main__':
     flow_rate = 0.25
     terrain = Fractal_Noise(world_size=world_size, octaves = 6, persistence = 0.5, lacunarity = 2.0, key = key)
     water = jnp.full(world_size, water_initial)
+    
+    #visualize_height_water(terrain, water)
+    
+    #'''
     final_water_tdir = simulate_water_flow_twodir(terrain, water, time, flow_rate)
     final_water = simulate_water_flow(terrain, water, time, flow_rate)
     # print(water.sum())
@@ -177,11 +183,12 @@ if __name__ == '__main__':
     plt.colorbar(label="Height (Water)")
     plt.title("Water")
     plt.show()
+    #'''
     
-    from dirt.gridworld2d.visualization import make_height_map_mesh, make_obj
-    vt,ft = make_height_map_mesh(terrain)
-    make_obj(vt, ft, file_path='./terrain.obj')
+    #from dirt.gridworld2d.visualization import make_height_map_mesh, make_obj
+    #vt,ft = make_height_map_mesh(terrain)
+    #make_obj(vt, ft, file_path='./terrain.obj')
     
-    terrain_water = terrain + final_water
-    vw,fw = make_height_map_mesh(terrain_water)
-    make_obj(vw, fw, file_path='./water.obj')
+    #terrain_water = terrain + final_water
+    #vw,fw = make_height_map_mesh(terrain_water)
+    #make_obj(vw, fw, file_path='./water.obj')
