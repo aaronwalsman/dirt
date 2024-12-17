@@ -4,8 +4,6 @@ import jax.numpy as jnp
 import jax.random as jrng
 
 import glfw
-import splendor.contexts.egl as egl
-from splendor.frame_buffer import FrameBufferWrapper
 import splendor.core as core
 import splendor.contexts.glfw_context as glfw_context
 from splendor.interactive_camera_glfw import InteractiveCameraGLFW
@@ -302,58 +300,6 @@ def start_terrain_viewer(
         window.swap_buffers()
     
     glfw_context.terminate()
-
-def visualize_height_water_egl_old(terrain, water):
-    tv, tu, tn, tf = make_height_map_mesh(terrain)
-    wv, wu, wn, wf = make_height_map_mesh(terrain + water)
-    
-    wv.at[...,2].add(-0.01)
-    
-    egl.initialize_plugin()
-    egl.initialize_device(None)
-    
-    framebuffer = FrameBufferWrapper(
-        512, 512,
-        anti_alias=True,
-        anti_alias_samples=8,
-    )
-    framebuffer.enable()
-    renderer = core.SplendorRender()
-    
-    renderer.load_mesh(
-        'terrain_mesh',
-        mesh_data={
-            'vertices':tv,
-            'uvs':tu,
-            'normals':tn,
-            'faces':tf,
-        },
-        color_mode='flat_color',
-    )
-    
-    renderer.load_material(
-        'terrain_mat',
-        flat_color=(0.5, 0.5, 0.5),
-    )
-    
-    renderer.add_instance(
-        'terrain', 'terrain_mesh', 'terrain_mat')
-    
-    renderer.add_direction_light('light', (0,0,-1), (1,1,1))
-    
-    camera_transform = np.eye(4)
-    camera_transform[2,3] = 100
-    camera_projection = camera.projection_matrix(
-        np.radians(90), 1., far_clip=1000)
-    
-    renderer.set_view_matrix(np.linalg.inv(camera_transform))
-    renderer.set_projection(camera_projection)
-    
-    renderer.color_render()
-    
-    image = frame_buffer.read_pixels()
-    
-    save_image(image, 'terrain.png')
 
 if __name__ == '__main__':
     #z = jnp.zeros((2,2))
