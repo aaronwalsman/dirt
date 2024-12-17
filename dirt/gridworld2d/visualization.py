@@ -120,7 +120,7 @@ def make_obj(vertices, faces, file_path=None):
     
     return text
 
-def terrain_viewer(
+def start_terrain_viewer(
     terrain_maps,
     water_maps,
     water_offset=-0.01,
@@ -229,8 +229,6 @@ def terrain_viewer(
     )
     renderer.set_active_image_light('background')
     
-    #current_frame = 0
-    
     viewer_state = {
         'renderer' : renderer,
         'current_frame' : 0,
@@ -310,4 +308,4 @@ if __name__ == '__main__':
         terrain_maps.append(terrain)
         water_maps.append(water)
     
-    terrain_viewer(terrain_maps, water_maps)
+    start_terrain_viewer(terrain_maps, water_maps)
