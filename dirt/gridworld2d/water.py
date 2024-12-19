@@ -55,17 +55,13 @@ def flow_step(
     total_height = terrain + water
 
     flow_up = calculate_flow(total_height, water, 0, flow_rate)
+    water = water - flow_up + jnp.pad(flow_up, ((1, 0), (0, 0)))[1:, :]
     flow_down = calculate_flow(total_height, water, 1, flow_rate)
+    water = water - flow_down + jnp.pad(flow_down, ((0, 1), (0, 0)))[:-1, :]
     flow_left = calculate_flow(total_height, water, 2, flow_rate)
+    water = water - flow_left + jnp.pad(flow_left, ((0, 0), (0, 1)))[:, 1:]
     flow_right = calculate_flow(total_height, water, 3, flow_rate)
-
-    new_water = (
-    water
-    - flow_up + jnp.pad(flow_up, ((1, 0), (0, 0)))[1:, :]
-    - flow_down + jnp.pad(flow_down, ((0, 1), (0, 0)))[:-1, :]
-    - flow_left + jnp.pad(flow_left, ((0, 0), (0, 1)))[:, 1:]
-    - flow_right + jnp.pad(flow_right, ((0, 0), (1, 0)))[:, :-1]
-    )
+    new_water = water - flow_right + jnp.pad(flow_right, ((0, 0), (1, 0)))[:, :-1]
 
     return new_water
 
@@ -110,14 +106,9 @@ def flow_step_twodir(
         (-1, 0),
     ]
 
-    flows = [
-        calculate_flow_twodir(total_height, water, x_offset, y_offset, flow_rate)
-        for x_offset, y_offset in offsets
-    ]
-
-    new_water = water
-    for flow, (x_offset, y_offset) in zip(flows, offsets):
-        new_water -= flow
+    for x_offset, y_offset in offsets:
+        flow = calculate_flow_twodir(total_height, water, x_offset, y_offset, flow_rate)
+        water -= flow
         padded_flow = jnp.pad(
             flow,
             (
@@ -125,12 +116,13 @@ def flow_step_twodir(
                 (max(0, x_offset), max(0, -x_offset)),
             ),
         )
-        new_water += padded_flow[
+        water += padded_flow[
             max(0, -y_offset) : flow.shape[0] + max(0, -y_offset),
             max(0, -x_offset) : flow.shape[1] + max(0, -x_offset),
         ]
+        total_height = terrain + water
 
-    return new_water
+    return water
 
 def simulate_water_flow(
     terrain: jnp.ndarray, 
@@ -164,7 +156,7 @@ if __name__ == '__main__':
     water_initial = 0.5
     time = 200
     flow_rate = 0.25
-    terrain = Fractal_Noise(world_size=world_size, octaves = 6, persistence = 0.5, lacunarity = 2.0, key = key)
+    terrain = Fractal_Noise(world_size=world_size, octaves = 6, persistence = 0.5, lacunarity = 2.0, key = key) * 10
     water = jnp.full(world_size, water_initial)
     
     #visualize_height_water(terrain, water)
@@ -172,11 +164,17 @@ if __name__ == '__main__':
     #'''
     final_water_tdir = simulate_water_flow_twodir(terrain, water, time, flow_rate)
     final_water = simulate_water_flow(terrain, water, time, flow_rate)
-    # print(water.sum())
-    # print(final_water.sum())
-    # print(final_water_tdir.sum())
+    print(water.sum())
+    print(final_water.sum())
+    print(final_water_tdir.sum())
     # Ensure that total mass of water is the same.
     # With output to be 32768.0, 32768.0, 32768.0 for this seed
+    terrain_maps = [terrain]
+    water_maps = [water]
+    for i in range(200):
+        water = flow_step(terrain, water, flow_rate)
+        terrain_maps.append(terrain)
+        water_maps.append(water)
     import matplotlib.pyplot as plt
     plt.imshow(final_water, cmap="terrain")
     # plt.imshow(terrain, cmap="terrain")

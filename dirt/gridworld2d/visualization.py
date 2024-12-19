@@ -314,16 +314,16 @@ if __name__ == '__main__':
     '''
     
     from geology import Fractal_Noise
-    from water import calculate_flow_twodir, flow_step_twodir
-    key = jrng.key(1234)
+    from water import flow_step_twodir
+    key = jrng.key(1022)
     
     world_size=(256,256)
     
     terrain = Fractal_Noise(
         world_size=world_size,
         octaves=6,
-        persistence=0.,
-        lacunarity=2.,
+        persistence=0.5,
+        lacunarity=2.0,
         key=key,
     ) * 10
     water = jnp.full(world_size, 0.5)
@@ -335,5 +335,5 @@ if __name__ == '__main__':
         water = flow_step_twodir(terrain, water, flow_rate)
         terrain_maps.append(terrain)
         water_maps.append(water)
-    
+
     start_terrain_viewer(terrain_maps, water_maps)
