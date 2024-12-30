@@ -34,6 +34,19 @@ def erosion_step_direction(
     '''
     total_height = terrain + water
     current_erosion = calculate_flow_twodir(total_height, water, x_offset, y_offset, flow_rate)
+    
+    # Aaron's new code to avoid moving rock "uphill"
+    padded_terrain = jnp.pad(terrain, pad_width=1, mode='edge')
+    neighbor = padded_terrain[
+        1 - y_offset : padded_terrain.shape[0] - 1 - y_offset,
+        1 + x_offset : padded_terrain.shape[1] - 1 + x_offset,
+    ]
+    max_erosion = terrain - neighbor
+    max_erosion = jnp.where(max_erosion < 0, 0, max_erosion)
+    current_erosion = jnp.where(
+        current_erosion > max_erosion, max_erosion, current_erosion)
+    # end
+    
     total_erosion = accumulate_erosion + current_erosion
     erosion_mask = total_erosion > erosion_endurance
 
@@ -72,15 +85,15 @@ def simulate_erosion_step(
         (1, 0),
         (-1, 0),
     ]
-
+    
     erosions = [
-        erosion_step_direction(terrain, water,current_erosion, x_offset, y_offset, flow_rate, erosion_endurance, erosion_ratio)
+        erosion_step_direction(terrain, water, current_erosion, x_offset, y_offset, flow_rate, erosion_endurance, erosion_ratio)
         for x_offset, y_offset in offsets
     ]
 
     new_terrain = terrain
     for erosion, (x_offset, y_offset) in zip(erosions, offsets):
-        new_terrain -= erosion
+        new_terrain = new_terrain - erosion
         padded_erosion = jnp.pad(
             erosion,
             (
@@ -88,8 +101,8 @@ def simulate_erosion_step(
                 (max(0, x_offset), max(0, -x_offset)),
             ),
         )
-        new_terrain += padded_erosion[
-            max(0, -y_offset) : erosion.shape[0] + max(0, -y_offset),
+        new_terrain = new_terrain + padded_erosion[
+            max(0, y_offset) : erosion.shape[0] + max(0, y_offset),
             max(0, -x_offset) : erosion.shape[1] + max(0, -x_offset),
         ]
     
@@ -121,9 +134,9 @@ def simulate_erosion(
         return (new_terrain, current_erosion, new_water), None
 
     initial_state = (terrain, current_erosion, water)
-    (final_terrain, _, _), _ = jax.lax.scan(erosion_step, initial_state, None, length=time)
+    (final_terrain, final_erosion, final_water), _ = jax.lax.scan(erosion_step, initial_state, None, length=time)
 
-    return final_terrain
+    return final_terrain, final_water
 
 if __name__ == '__main__':
     key = jrng.PRNGKey(1022)
@@ -132,12 +145,12 @@ if __name__ == '__main__':
     water_initial = 0.5
     time = 200
     flow_rate = 0.25
-    terrain = Fractal_Noise(world_size=world_size, octaves = 6, persistence = 0.5, lacunarity = 2.0, key = key)
+    terrain = Fractal_Noise(key=key, world_size=world_size, octaves = 6, persistence = 0.5, lacunarity = 2.0)
     water = jnp.full(world_size, water_initial)
     erosion_endurance = 0.2
     erosion_ratio = 0.001
 
-    final_terrain = simulate_erosion(terrain, water, erosion_initial, flow_rate, time, erosion_ratio, erosion_endurance)
+    final_terrain, final_water = simulate_erosion(terrain, water, erosion_initial, flow_rate, time, erosion_ratio, erosion_endurance)
 
     # print(terrain.sum()) # -349.00833
     # print(final_terrain.sum()) # -349.0083
