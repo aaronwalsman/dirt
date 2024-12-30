@@ -34,9 +34,11 @@ def Fractal_Noise(
     key: PRNG key for randomness
     
     '''
-    x = jnp.linspace(0, 10, world_size[0])
+    
+    world_aspect = world_size[0] / world_size[1]
+    x = jnp.linspace(0, 10 * world_aspect, world_size[0])
     y = jnp.linspace(0, 10, world_size[1])
-    xx, yy = jnp.meshgrid(x, y)
+    xx, yy = jnp.meshgrid(x, y, indexing='ij')
     coords = jnp.stack([xx.ravel(), yy.ravel()], axis=-1)
 
     keys = jrng.split(key, num=octaves)

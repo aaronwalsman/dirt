@@ -91,7 +91,7 @@ def calculate_flow_twodir(
 def flow_step_twodir(
     terrain: jnp.ndarray, 
     water : jnp.ndarray, 
-    flow_rate : float
+    flow_rate : float,
 ) -> jnp.ndarray :
     '''
     For each time step, flow the water in all directions by a certain rate
@@ -107,8 +107,9 @@ def flow_step_twodir(
     ]
 
     for x_offset, y_offset in offsets:
-        flow = calculate_flow_twodir(total_height, water, x_offset, y_offset, flow_rate)
-        water -= flow
+        flow = calculate_flow_twodir(
+            total_height, water, x_offset, y_offset, flow_rate)
+        water = water - flow
         padded_flow = jnp.pad(
             flow,
             (
@@ -116,8 +117,8 @@ def flow_step_twodir(
                 (max(0, x_offset), max(0, -x_offset)),
             ),
         )
-        water += padded_flow[
-            max(0, -y_offset) : flow.shape[0] + max(0, -y_offset),
+        water = water + padded_flow[
+            max(0, y_offset) : flow.shape[0] + max(0, y_offset),
             max(0, -x_offset) : flow.shape[1] + max(0, -x_offset),
         ]
         total_height = terrain + water
