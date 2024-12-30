@@ -1,4 +1,4 @@
-from geology import Fractal_Noise
+from geology import fractal_noise
 from water import calculate_flow_twodir, flow_step_twodir
 import jax.random as jrng
 import jax.numpy as jnp
@@ -145,7 +145,7 @@ if __name__ == '__main__':
     water_initial = 0.5
     time = 200
     flow_rate = 0.25
-    terrain = Fractal_Noise(key=key, world_size=world_size, octaves = 6, persistence = 0.5, lacunarity = 2.0)
+    terrain = fractal_noise(key=key, world_size=world_size, octaves = 6, persistence = 0.5, lacunarity = 2.0)
     water = jnp.full(world_size, water_initial)
     erosion_endurance = 0.2
     erosion_ratio = 0.001

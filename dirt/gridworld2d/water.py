@@ -1,4 +1,4 @@
-from geology import Fractal_Noise
+from geology import fractal_noise
 import jax.random as jrng
 import jax.numpy as jnp
 import jax
@@ -121,7 +121,7 @@ def flow_step_twodir(
             max(0, y_offset) : flow.shape[0] + max(0, y_offset),
             max(0, -x_offset) : flow.shape[1] + max(0, -x_offset),
         ]
-        total_height = terrain + water
+        #total_height = terrain + water
 
     return water
 
@@ -157,7 +157,7 @@ if __name__ == '__main__':
     water_initial = 0.5
     time = 200
     flow_rate = 0.25
-    terrain = Fractal_Noise(world_size=world_size, octaves = 6, persistence = 0.5, lacunarity = 2.0, key = key) * 10
+    terrain = fractal_noise(key=key, world_size=world_size, octaves = 6, persistence = 0.5, lacunarity = 2.0) * 10
     water = jnp.full(world_size, water_initial)
     
     #visualize_height_water(terrain, water)

@@ -254,6 +254,7 @@ def start_terrain_viewer(
         'background',
         'grey_cube_dif',
         'grey_cube_ref',
+        render_background=False,
     )
     renderer.set_active_image_light('background')
     
@@ -297,6 +298,98 @@ def start_terrain_viewer(
     
     glfw_context.terminate()
 
+def visualize_water_flow(key):
+    from geology import fractal_noise
+    from water import flow_step, flow_step_twodir
+    
+    world_size=(128,512)
+    
+    terrain = fractal_noise(
+        key=key,
+        world_size=world_size,
+        octaves=6,
+        persistence=0.5,
+        lacunarity=2.0,
+        grid_unit_scale=0.005,
+        height_scale=50,
+    )
+    water = jnp.full(world_size, 0.5)
+    flow_rate = 0.25
+    
+    terrain_maps = [terrain]
+    water_maps = [water]
+    for i in range(2048):
+        water = flow_step_twodir(terrain, water, flow_rate)
+        if i % 64 == 0:
+            terrain_maps.append(terrain)
+            water_maps.append(water)
+
+    start_terrain_viewer(
+        terrain_maps,
+        water_maps,
+        window_height=1024,
+        window_width=1024,
+    )
+
+def visualize_erosion(key):
+    from geology import fractal_noise
+    from erosion import simulate_erosion
+    
+    world_size=(1024,1024)
+    
+    terrain = fractal_noise(
+        key=key,
+        world_size=world_size,
+        octaves=12,
+        persistence=1./1.5, #0.5,
+        lacunarity=1.5, #2.0,
+        grid_unit_scale=0.005,
+        height_scale=50,
+    )
+    water_initial = 0.1
+    water_flow_rate = 0.25
+    erosion_steps = 100
+    erosion_endurance = 0.0 #0.01 #0.2
+    erosion_ratio = 0.25 #0.25/erosion_steps
+    
+    water = jnp.full(world_size, water_initial)
+    
+    macro_steps = 32
+    visualize_freq = 1
+    rain_freq = 8
+    rain_percent = 0.05
+    terrain_maps = [terrain]
+    water_maps = [water]
+    for i in range(macro_steps):
+        print('macro step', i, '/', macro_steps)
+        
+        if i % rain_freq == 0:
+            total_water = jnp.sum(water)
+            total_locations = world_size[0] * world_size[1]
+            water = water * (1.-rain_percent) + rain_percent * total_water / total_locations
+        
+        erosion_initial = jnp.zeros(world_size)
+        terrain, water = simulate_erosion(
+            terrain,
+            water,
+            erosion_initial,
+            water_flow_rate,
+            erosion_steps,
+            erosion_endurance,
+            erosion_ratio,
+        )
+        
+        if i % visualize_freq == 0:
+            terrain_maps.append(terrain)
+            water_maps.append(water)
+    
+    start_terrain_viewer(
+        terrain_maps,
+        water_maps,
+        window_width=1024,
+        window_height=1024,
+    )
+
 if __name__ == '__main__':
     #z = jnp.zeros((2,2))
     #z = z.at[0,0].set(0.)
@@ -313,27 +406,6 @@ if __name__ == '__main__':
     make_obj(vertices, faces, './tmp.obj')
     '''
     
-    from geology import Fractal_Noise
-    from water import flow_step_twodir
     key = jrng.key(1022)
-    
-    world_size=(256,256)
-    
-    terrain = Fractal_Noise(
-        world_size=world_size,
-        octaves=6,
-        persistence=0.5,
-        lacunarity=2.0,
-        key=key,
-    ) * 10
-    water = jnp.full(world_size, 0.5)
-    flow_rate = 0.25
-    
-    terrain_maps = [terrain]
-    water_maps = [water]
-    for i in range(64):
-        water = flow_step_twodir(terrain, water, flow_rate)
-        terrain_maps.append(terrain)
-        water_maps.append(water)
-
-    start_terrain_viewer(terrain_maps, water_maps)
+    #visualize_water_flow(key)
+    visualize_erosion(key)

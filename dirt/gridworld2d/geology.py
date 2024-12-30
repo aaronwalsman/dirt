@@ -17,12 +17,14 @@ at the margin to prevent water from flowing out
 
 '''
 
-def Fractal_Noise(
+def fractal_noise(
+    key : chex.PRNGKey,
     world_size : Tuple[int, int],
     octaves : int,
     lacunarity : float,
     persistence: float,
-    key : chex.PRNGKey,
+    grid_unit_scale : float = 0.005,
+    height_scale : float = 50,
 ) -> jnp.ndarray :
     '''
     Function to generate fractal noise with calling Perlin noise
@@ -35,9 +37,11 @@ def Fractal_Noise(
     
     '''
     
-    world_aspect = world_size[0] / world_size[1]
-    x = jnp.linspace(0, 10 * world_aspect, world_size[0])
-    y = jnp.linspace(0, 10, world_size[1])
+    #world_aspect = world_size[0] / world_size[1]
+    x_scale = grid_unit_scale * world_size[0]
+    y_scale = grid_unit_scale * world_size[1]
+    x = jnp.linspace(0, x_scale, world_size[0])
+    y = jnp.linspace(0, y_scale, world_size[1])
     xx, yy = jnp.meshgrid(x, y, indexing='ij')
     coords = jnp.stack([xx.ravel(), yy.ravel()], axis=-1)
 
@@ -55,7 +59,7 @@ def Fractal_Noise(
     octave_noises = vmap(octave_noise, 
                 in_axes=(0, 0, 0))(keys, frequencies, amplitudes)
 
-    return jnp.sum(octave_noises, axis=0).reshape(world_size)
+    return jnp.sum(octave_noises, axis=0).reshape(world_size) * height_scale
 
 def adjusted_margin(
     current_terrain: jnp.ndarray
@@ -69,7 +73,7 @@ def adjusted_margin(
 
 if __name__ == '__main__':
     key = jrng.PRNGKey(1022)
-    noise = Fractal_Noise(world_size=(256,256), octaves = 6, persistence = 0.5, lacunarity = 2.0, key = key)
+    noise = fractal_noise(key=key, world_size=(256,256), octaves = 6, persistence = 0.5, lacunarity = 2.0)
     '''
     # noise = adjusted_margin(noise)
     import matplotlib.pyplot as plt

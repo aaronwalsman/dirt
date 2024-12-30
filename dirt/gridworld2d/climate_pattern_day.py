@@ -1,4 +1,4 @@
-from geology import Fractal_Noise
+from geology import fractal_noise
 from water import flow_step_twodir
 from erosion import simulate_erosion_step, reset_erosion_status
 from naive_weather_system import weather_step
@@ -111,7 +111,7 @@ if __name__ == '__main__':
     light_intensity_initial_value = 0.5
     temperature_initial_value = 1
     flow_rate = 0.45
-    terrain = Fractal_Noise(world_size=world_size, octaves = 6, persistence = 0.5, lacunarity = 2.0, key = key)
+    terrain = fractal_noise(key=key, world_size=world_size, octaves = 6, persistence = 0.5, lacunarity = 2.0)
     water = jnp.full(world_size, water_initial)
     time = 500
     rain_initial = jnp.full(world_size, rain_initial_value)
