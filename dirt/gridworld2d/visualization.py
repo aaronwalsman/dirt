@@ -1,5 +1,6 @@
 import numpy as np
 
+import jax
 import jax.numpy as jnp
 import jax.random as jrng
 
@@ -261,6 +262,7 @@ def start_terrain_viewer(
     viewer_state = {
         'renderer' : renderer,
         'current_frame' : 0,
+        'view_water' : True,
     }
     
     def render():
@@ -272,9 +274,14 @@ def start_terrain_viewer(
         renderer.set_instance_mesh(
             'water_instance', f'water_mesh_{current_frame}')
         
+        if viewer_state['view_water']:
+            instances = ['terrain_instance', 'water_instance']
+        else:
+            instances = ['terrain_instance']
+        
         fbw, fbh = window.framebuffer_size()
         renderer.viewport_scissor(0,0,fbw,fbh)
-        renderer.color_render(flip_y=False)
+        renderer.color_render(flip_y=False, instances=instances)
     
     def key_callback(window, key, scancode, action, mods):
         current_frame = viewer_state['current_frame']
@@ -283,6 +290,8 @@ def start_terrain_viewer(
                 viewer_state['current_frame'] = (current_frame - 1) % n
             elif key == 46: # .
                 viewer_state['current_frame'] = (current_frame + 1) % n
+            elif key == 87: # w
+                viewer_state['view_water'] = not viewer_state['view_water']
         
         camera_control.key_callback(window, key, scancode, action, mods)
     
@@ -302,28 +311,42 @@ def visualize_water_flow(key):
     from geology import fractal_noise
     from water import flow_step, flow_step_twodir
     
-    world_size=(128,512)
-    
+    # generate terrain
+    world_size=(512,512)
     terrain = fractal_noise(
         key=key,
         world_size=world_size,
-        octaves=6,
+        octaves=12,
         persistence=0.5,
         lacunarity=2.0,
-        grid_unit_scale=0.005,
-        height_scale=50,
+        grid_unit_scale=0.0025,
+        height_scale=100,
     )
-    water = jnp.full(world_size, 0.5)
-    flow_rate = 0.25
     
-    terrain_maps = [terrain]
-    water_maps = [water]
-    for i in range(2048):
-        water = flow_step_twodir(terrain, water, flow_rate)
-        if i % 64 == 0:
-            terrain_maps.append(terrain)
-            water_maps.append(water)
-
+    # initailize the water
+    initial_water = 2.
+    flow_rate = 0.25
+    water = jnp.full(world_size, initial_water)
+    
+    # generate the water steps
+    visualization_steps = 64 
+    steps_per_visualization = 256
+    def generate_maps(water, i):
+        jax.debug.print('computing {i}/{steps}', i=i, steps=visualization_steps)
+        def step(water, _):
+            water = flow_step_twodir(terrain, water, flow_rate)
+            return water, None
+        
+        water, _ = jax.lax.scan(
+            step, water, None, length=steps_per_visualization)
+        
+        return water, water
+    
+    terrain_maps = [terrain] * visualization_steps
+    water, water_maps = jax.lax.scan(
+        generate_maps, water, jnp.arange(visualization_steps))
+    
+    # start the viewer
     start_terrain_viewer(
         terrain_maps,
         water_maps,
@@ -333,55 +356,93 @@ def visualize_water_flow(key):
 
 def visualize_erosion(key):
     from geology import fractal_noise
+    from water import flow_step_twodir
     from erosion import simulate_erosion
     
-    world_size=(1024,1024)
-    
+    # generate the initial terrain
+    world_size=(512,512)
     terrain = fractal_noise(
         key=key,
         world_size=world_size,
         octaves=12,
-        persistence=1./1.5, #0.5,
-        lacunarity=1.5, #2.0,
-        grid_unit_scale=0.005,
-        height_scale=50,
+        persistence=0.5,
+        lacunarity=2.0,
+        grid_unit_scale=0.0025,
+        height_scale=100,
     )
-    water_initial = 0.1
-    water_flow_rate = 0.25
-    erosion_steps = 100
-    erosion_endurance = 0.0 #0.01 #0.2
-    erosion_ratio = 0.25 #0.25/erosion_steps
+    initial_terrain = terrain
     
-    water = jnp.full(world_size, water_initial)
+    # initialize the water
+    evaporation = 0.01
+    initial_water = 2.0
+    water_flow_rate = 0.1 #0.25
+    water = jnp.full(world_size, initial_water)
     
-    macro_steps = 32
-    visualize_freq = 1
-    rain_freq = 8
-    rain_percent = 0.05
-    terrain_maps = [terrain]
-    water_maps = [water]
-    for i in range(macro_steps):
-        print('macro step', i, '/', macro_steps)
+    # step the water to form the initial lakes
+    #initial_water_steps = 1024 * 64
+    #def initialize_water(water, _):
+    #    water = flow_step_twodir(terrain, water, water_flow_rate)
+    #    return water, None
+    #water, _ = jax.lax.scan(
+    #    initialize_water, water, None, length=initial_water_steps)
+    
+    # initialize the water already all the way downhill
+    print('initializing water')
+    total_water = initial_water * world_size[0] * world_size[1]
+    water_level = jnp.min(terrain)
+    water = jnp.zeros_like(terrain)
+    while jnp.sum(water) < total_water:
+        water_level += 0.001
+        water = water_level - terrain
+        water = jnp.where(water < 0., 0, water)
+    initial_water = water
+    print('finished initializing water')
+    
+    # erosion parameters
+    erosion_steps = 1024
+    erosion_endurance = 0. #0.01 #0.2
+    erosion_ratio = 0.1 #0.25/erosion_steps
+    accumulated_erosion = jnp.zeros_like(water)
+    
+    # generate the water and terrain steps
+    visualization_steps = 64
+    
+    def generate_maps(state, i):
+        jax.debug.print('computing {i}/{steps}', i=i, steps=visualization_steps)
         
-        if i % rain_freq == 0:
-            total_water = jnp.sum(water)
-            total_locations = world_size[0] * world_size[1]
-            water = water * (1.-rain_percent) + rain_percent * total_water / total_locations
+        # evaporate and rain a little bit
+        # (this will get replaced by the weather next)
+        terrain, water, accumulated_erosion = state
+        total_water = jnp.sum(water)
+        total_locations = world_size[0] * world_size[1]
+        water = (
+            water * (1. - evaporation) +
+            (total_water / total_locations) * evaporation
+        )
         
-        erosion_initial = jnp.zeros(world_size)
-        terrain, water = simulate_erosion(
+        # simulate the erosion
+        terrain, water, accumulated_erosion = simulate_erosion(
             terrain,
             water,
-            erosion_initial,
+            accumulated_erosion,
             water_flow_rate,
             erosion_steps,
             erosion_endurance,
             erosion_ratio,
         )
         
-        if i % visualize_freq == 0:
-            terrain_maps.append(terrain)
-            water_maps.append(water)
+        return (terrain, water, accumulated_erosion), (terrain, water)
+    
+    state, terrain_water_maps = jax.lax.scan(
+        generate_maps,
+        (terrain, water, accumulated_erosion),
+        jnp.arange(visualization_steps),
+    )
+    
+    terrain_maps, water_maps = terrain_water_maps
+    
+    terrain_maps = jnp.concatenate((initial_terrain[None,...], terrain_maps))
+    water_maps = jnp.concatenate((initial_water[None,...], water_maps))
     
     start_terrain_viewer(
         terrain_maps,

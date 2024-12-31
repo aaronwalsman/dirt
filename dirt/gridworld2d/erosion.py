@@ -52,7 +52,7 @@ def erosion_step_direction(
 
     erosion_amount = jnp.where(erosion_mask, current_erosion * erosion_ratio, 0)
 
-    return erosion_amount
+    return erosion_amount, current_erosion
 
 
 def reset_erosion_status(
@@ -92,7 +92,7 @@ def simulate_erosion_step(
     ]
 
     new_terrain = terrain
-    for erosion, (x_offset, y_offset) in zip(erosions, offsets):
+    for (erosion, accumulated_erosion), (x_offset, y_offset) in zip(erosions, offsets):
         new_terrain = new_terrain - erosion
         padded_erosion = jnp.pad(
             erosion,
@@ -106,7 +106,9 @@ def simulate_erosion_step(
             max(0, -x_offset) : erosion.shape[1] + max(0, -x_offset),
         ]
     
-    return new_terrain
+        current_erosion = current_erosion + accumulated_erosion
+    
+    return new_terrain, current_erosion
 
 
 def simulate_erosion(
@@ -128,7 +130,7 @@ def simulate_erosion(
         terrain, current_erosion, water = carry
 
         new_water = flow_step_twodir(terrain, water, flow_rate)
-        new_terrain = simulate_erosion_step(terrain, water, current_erosion, flow_rate, erosion_endurance, erosion_ratio)
+        new_terrain, current_erosion = simulate_erosion_step(terrain, water, current_erosion, flow_rate, erosion_endurance, erosion_ratio)
         current_erosion = reset_erosion_status(new_terrain, terrain, current_erosion)
 
         return (new_terrain, current_erosion, new_water), None
@@ -136,7 +138,7 @@ def simulate_erosion(
     initial_state = (terrain, current_erosion, water)
     (final_terrain, final_erosion, final_water), _ = jax.lax.scan(erosion_step, initial_state, None, length=time)
 
-    return final_terrain, final_water
+    return final_terrain, final_water, final_erosion
 
 if __name__ == '__main__':
     key = jrng.PRNGKey(1022)
