@@ -245,35 +245,7 @@ def nomnom_transition(
     
     return state
 
-def nomnom_observe(
-    key: chex.PRNGKey,
-    params: TNomNomParams,
-    state: TNomNomState,
-) -> TNomNomObservation :
-    '''
-    Computes the observation of a NomNom environment given the environment
-    params and state.
-    
-    When used inside a jit compiled program, params must come from a static
-    variable as it controls the shapes of various arrays.
-    '''
-    
-    # construct a grid that contains class labels at each location
-    # (0 = free space, 1 = food, 2 = player, 3 = out-of-bounds)
-    view_grid = state.food_grid.astype(jnp.uint8)
-    view_grid.at[state.player_x[...,0], state.player_x[...,1]].set(
-        2 * (state.player_id != -1))
-    
-    # clip the viewing rectangles out for each player
-    view = observations.first_person_view(
-        state.player_x,
-        state.player_r,
-        view_grid,
-        params.view_width,
-        params.view_distance,
-        out_of_bounds=3,
-    )
-    return NomNomObservation(view, state.player_energy)
+
 
 def nomnom(
     params: TNomNomParams = NomNomParams,
@@ -285,13 +257,45 @@ def nomnom(
     step will take a random key, a previous state and an action and produce
     a new state, observation, list of players and their parents. 
     '''
-    reset, step = population_game(
-        params,
-        nomnom_initialize,
-        nomnom_transition,
-        nomnom_observe,
-        lambda params, state : state.player_id,
-        lambda params, state : state.parent_id,
-    )
+    def init():
+        reset, step = population_game(
+            nomnom_initialize,
+            nomnom_transition,
+            nomnom_observe,
+            (lambda params, state : state.player_id, 
+            lambda params, state : state.parent_id,
+            lambda params, state : state.children_id,
+            )
+        )
     
-    return reset, step
+        return reset, step
+
+    def nomnom_observe(
+        key: chex.PRNGKey,
+        # config: TNomNomParams,
+        state: TNomNomState,
+    ) -> TNomNomObservation :
+        '''
+        Computes the observation of a NomNom environment given the environment
+        params and state.
+    
+        When used inside a jit compiled program, params must come from a static
+        variable as it controls the shapes of various arrays.
+        '''
+    
+        # construct a grid that contains class labels at each location
+        # (0 = free space, 1 = food, 2 = player, 3 = out-of-bounds)
+        view_grid = state.food_grid.astype(jnp.uint8)
+        view_grid.at[state.player_x[...,0], state.player_x[...,1]].set(
+            2 * (state.player_id != -1))
+    
+        # clip the viewing rectangles out for each player
+        view = observations.first_person_view(
+            state.player_x,
+            state.player_r,
+            view_grid,
+            params.view_width,
+            params.view_distance,
+            out_of_bounds=3,
+        )
+        return NomNomObservation(view, state.player_energy)

@@ -10,7 +10,7 @@ import jax.numpy as jnp
 import jax.random as jrng
 
 from mechagogue.pop.natural_selection import (
-    natural_selection, NaturalSelectionParams)
+    natural_selection, NaturalSelectionState)
 
 from dirt.examples.nomnom import nomnom, NomNomParams, NomNomAction
 
@@ -77,7 +77,7 @@ if __name__ == '__main__':
         max_players=5000000, # this is very slow on laptop
         world_size=(10000,10000)
     )
-    algo_params = NaturalSelectionParams()
+    algo_params = NaturalSelectionState()
 
     key = jrng.key(1234)
     iterations = 100
