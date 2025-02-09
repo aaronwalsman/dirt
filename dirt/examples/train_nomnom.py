@@ -11,6 +11,8 @@ import jax.random as jrng
 
 from mechagogue.pop.natural_selection import (
     natural_selection, NaturalSelectionState)
+from mechagogue.breed.normal import normal_mutate
+from mechagogue.nn.mlp import mlp
 
 from dirt.examples.nomnom import nomnom, NomNomParams, NomNomAction
 
@@ -37,7 +39,7 @@ def train(key, env_params, algo_params, iterations):
         step_env,
         randomized_policy,
         lambda key : 0,
-        lambda w, players, parents, next_players, next_parents : w
+        normal_mutate
     )
     
     # reset the algorithm to get an initial state
