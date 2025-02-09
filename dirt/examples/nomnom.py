@@ -92,9 +92,6 @@ class NomNomObservation:
 
 
 
-
-
-
 def nomnom(
     params: TNomNomParams = NomNomParams,
 ):
@@ -120,7 +117,6 @@ def nomnom(
     
     def nomnom_initialize(
         key : chex.PRNGKey,
-        params : TNomNomParams,
     ) -> TNomNomState :
         '''
         Returns a NomNomState object representing the start of a new episode.
@@ -197,7 +193,6 @@ def nomnom(
     
     def nomnom_transition(
         key: chex.PRNGKey,
-        params: TNomNomParams,
         state: TNomNomState,
         action: TNomNomAction,
     ) -> TNomNomState :
