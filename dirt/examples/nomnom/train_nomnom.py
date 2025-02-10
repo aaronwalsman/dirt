@@ -10,7 +10,9 @@ import jax.numpy as jnp
 import jax.random as jrng
 
 from mechagogue.pop.natural_selection import (
-    natural_selection, NaturalSelectionParams)
+    natural_selection, NaturalSelectionState)
+from mechagogue.breed.normal import normal_mutate
+from mechagogue.nn.mlp import mlp
 
 from dirt.examples.nomnom.nomnom_env import nomnom, NomNomParams, NomNomAction
 
@@ -37,7 +39,7 @@ def train(key, env_params, algo_params, iterations):
         step_env,
         randomized_policy,
         lambda key : 0,
-        lambda w, players, parents, next_players, next_parents : w
+        normal_mutate
     )
     
     # reset the algorithm to get an initial state
@@ -77,7 +79,7 @@ if __name__ == '__main__':
         max_players=5000000, # this is very slow on laptop
         world_size=(10000,10000)
     )
-    algo_params = NaturalSelectionParams()
+    algo_params = NaturalSelectionState()
 
     key = jrng.key(1234)
     iterations = 100
