@@ -4,11 +4,10 @@ import jax
 import jax.numpy as jnp
 import jax.random as jrng
 
-from flax.struct import dataclass
-
 import chex
 
-from decisionprocess.pomdp import pomdp
+from mechagogue.static_dataclass import static_dataclass
+from mechagogue.dp.pomdp import pomdp
 
 from dirt.gridworld2d import dynamics, observations, spawn
 from dirt.wrappers import make_step_auto_reset
@@ -18,7 +17,7 @@ TNomState = TypeVar('TNomState', bound='NomState')
 TNomAction = TypeVar('TNomAction', bound='NomAction')
 TNomObservation = TypeVar('TNomObservation', bound='NomObservation')
 
-@dataclass
+@static_dataclass
 class NomParams:
     '''
     Configuration parameters for the Nom environment that will remain constant
@@ -39,7 +38,7 @@ class NomParams:
     view_width : int = 5
     view_distance : int = 5
 
-@dataclass
+@static_dataclass
 class NomState:
     '''
     State information about a single Nom environment.
@@ -53,7 +52,7 @@ class NomState:
     def agent_alive(self):
         return self.agent_energy > 0.
 
-@dataclass
+@static_dataclass
 class NomAction:
     '''
     An action in the Nom environment.
@@ -61,7 +60,7 @@ class NomAction:
     forward : bool
     rotate : int
 
-@dataclass
+@static_dataclass
 class NomObservation:
     '''
     An observation in the Nom environment.

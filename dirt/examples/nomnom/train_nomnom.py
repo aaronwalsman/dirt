@@ -12,7 +12,7 @@ import jax.random as jrng
 from mechagogue.pop.natural_selection import (
     natural_selection, NaturalSelectionParams)
 
-from dirt.examples.nomnom import nomnom, NomNomParams, NomNomAction
+from dirt.examples.nomnom.nomnom_env import nomnom, NomNomParams, NomNomAction
 
 def train(key, env_params, algo_params, iterations):
 
