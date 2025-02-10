@@ -59,8 +59,10 @@ class NomNomState:
     player_r : jnp.ndarray
     player_energy : jnp.ndarray
     
+    
     # constant shaped data
     next_new_player_id : int
+    children : jnp.ndarray
 
 @dataclass
 class NomNomAction:
@@ -129,6 +131,7 @@ def nomnom(
         player_id = player_id.at[:params.initial_players].set(
             jnp.arange(params.initial_players))
         parent_id = jnp.full(params.max_players, -1, dtype=jnp.int32)
+        children = jnp.full(params.max_players, -1, dtype=jnp.int32)
         key, xr_key = jrng.split(key)
         player_x, player_r = spawn.unique_xr(
             xr_key, params.max_players, params.world_size)
@@ -157,6 +160,7 @@ def nomnom(
             player_r,
             player_energy,
             params.initial_players,
+            children
         )
 
         return state
@@ -297,7 +301,7 @@ def nomnom(
         )
         return state
     
-    def player_info(state):
-        return state.players, state.parents, state.children
+    def nomnom_player_info(state):
+        return state.player_id, state.parent_id, state.children
 
-    return population_game(nomnom_initialize, nomnom_transition, nomnom_observe, player_info)
+    return population_game(nomnom_initialize, nomnom_transition, nomnom_observe, nomnom_player_info)
