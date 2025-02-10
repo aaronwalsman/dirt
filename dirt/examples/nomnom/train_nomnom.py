@@ -32,13 +32,17 @@ def train(key, env_params, algo_params, iterations):
         
         return sampler, lambda x : 0
 
+    init_mlp, model_mlp = mlp(hidden_layers=4,
+        in_channels=256,
+        hidden_channels=32,
+        out_channels=16)
     # build the natural selection algorithm
     reset_algo, step_algo = natural_selection(
         algo_params,
         reset_env,
         step_env,
-        randomized_policy,
-        lambda key : 0,
+        init_mlp,
+        model_mlp,
         normal_mutate
     )
     
@@ -50,13 +54,23 @@ def train(key, env_params, algo_params, iterations):
     # this is just the algorithm's step function, but structured so that it
     # can be scanned
     def step(algo_state, key):
-        env_state, _, players, _, _ = algo_state
+        # import pdb; pdb.set_trace()
+        env_state = algo_state.env_state
+        players = algo_state.players
         jax.debug.print(
             'Population: {p}, Food: {f}',
             p=jnp.sum(players != -1),
             f=jnp.sum(env_state.food_grid)
         )
-        return step_algo(key, *algo_state)
+        
+        # return step_algo(key, *algo_state)
+    
+        algo_state, _ = jax.lax.scan(
+            lambda train_state, key : (step_algo(key, algo_state), None),
+            algo_state,
+            jrng.split(key, steps_per_epoch),
+        )
+        return train_state, None
     
     # generate step keys
     key, step_key = jrng.split(key)
@@ -80,6 +94,7 @@ if __name__ == '__main__':
         world_size=(10000,10000)
     )
     algo_params = NaturalSelectionState()
+    import pdb; pdb.set_trace()
 
     key = jrng.key(1234)
     iterations = 100
