@@ -15,6 +15,7 @@ from mechagogue.breed.normal import normal_mutate
 from mechagogue.nn.mlp import mlp
 
 from dirt.examples.nomnom.nomnom_env import nomnom, NomNomParams, NomNomAction
+from dirt.examples.nomnom.nomnom_model import nomnom_model
 
 def train(key, env_params, algo_params, iterations):
 
@@ -32,17 +33,23 @@ def train(key, env_params, algo_params, iterations):
         
         return sampler, lambda x : 0
 
-    init_mlp, model_mlp = mlp(hidden_layers=4,
-        in_channels=256,
-        hidden_channels=32,
-        out_channels=16)
+    #init_mlp, model_mlp = mlp(hidden_layers=4,
+    #    in_channels=256,
+    #    hidden_channels=32,
+    #    out_channels=16)
+    model_config = NomNomModelConfig(
+        view_width=env_params.view_width,
+        view_distance=env_params.view_distance,
+    )
+    init_model, model = nomnom_model(model_config)
+    
     # build the natural selection algorithm
     reset_algo, step_algo = natural_selection(
         algo_params,
         reset_env,
         step_env,
-        init_mlp,
-        model_mlp,
+        init_model,
+        model,
         normal_mutate
     )
     
