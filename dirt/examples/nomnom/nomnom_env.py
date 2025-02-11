@@ -88,36 +88,35 @@ class NomNomObservation:
     energy : jnp.ndarray
 
 def nomnom(config):
-    def nomnom_initialize(
+    def init(
         key : chex.PRNGKey,
     ) -> TNomNomState :
         '''
         Returns a NomNomState object representing the start of a new episode.
         '''
         # initialize the players
-        #player_id = jnp.full(params.max_players, -1, dtype=jnp.int32)
-        #player_id = player_id.at[:params.initial_players].set(
-        #    jnp.arange(params.initial_players))
-        player_alive = jnp.zeros(params.max_players, dtype=jnp.bool)
-        player_alive = alive.at[:params.initial_players].set(True)
-        #parent_id = jnp.full(params.max_players, -1, dtype=jnp.int32)
+        player_alive = jnp.zeros(config.max_players, dtype=jnp.bool)
+        player_alive = alive.at[:config.initial_players].set(True)
         key, xr_key = jrng.split(key)
         player_x, player_r = spawn.unique_xr(
-            xr_key, params.max_players, params.world_size)
-        player_energy = jnp.full((params.max_players,), params.initial_energy)
+            xr_key, config.max_players, config.world_size)
+        player_energy = jnp.full((config.max_players,), config.initial_energy)
+        player_energy = player_energy * player_alive
         
         # initialize the object grid
-        object_grid = jnp.full(params.world_size, -1, dtype=jnp.int32)
-        object_grid.at[player_x[...,0], player_x[...,1]].set(
-            jnp.arange(params.initial_players))
+        object_grid = jnp.full(config.world_size, -1, dtype=jnp.int32)
+        object_grid.at[
+            player_x[:config.initial_players,0],
+            player_x[:config.initial_players,1]].set(
+            jnp.arange(config.initial_players))
         
         # initialize the food grid
-        key, foodkey = jrng.split(key)
+        key, food_key = jrng.split(key)
         food_grid = spawn.poisson_grid(
-            foodkey,
-            params.mean_initial_food,
-            params.max_initial_food,
-            params.world_size,
+            food_key,
+            config.mean_initial_food,
+            config.max_initial_food,
+            config.world_size,
         )
         
         # build the state
@@ -134,16 +133,12 @@ def nomnom(config):
 
     def nomnom_transition(
         key: chex.PRNGKey,
-        params: TNomNomParams,
         state: TNomNomState,
         action: TNomNomAction,
     ) -> TNomNomState :
         '''
         Transition function for the NomNom environment.  Samples a new state
-        given the environment params, a previous state and an action.
-        
-        When used inside a jit compiled program, params must come from a static
-        variable as it controls the shapes of various arrays.
+        given a previous state and an action.
         '''
         
         # move
@@ -162,9 +157,9 @@ def nomnom(config):
         eaten_food = food_at_player * state.player_alive
         # - update the player energy with the food they have just eaten
         player_energy = jnp.clip(
-            state.player_energy + eaten_food * params.food_metabolism,
+            state.player_energy + eaten_food * config.food_metabolism,
             0,
-            params.max_energy,
+            config.max_energy,
         )
         # - remove the eaten food from the food grid
         food_grid = state.food_grid.at[player_x[...,0], player_x[...,1]].set(
@@ -175,8 +170,8 @@ def nomnom(config):
         moved = action.forward | (action.rotate != 0)
         player_energy = (
             player_energy +
-            moved * params.move_metabolism +
-            (1. - moved) * params.wait_metabolism
+            moved * config.move_metabolism +
+            (1. - moved) * config.wait_metabolism
         ) * player_alive
         
         # kill players that have starved
@@ -184,7 +179,7 @@ def nomnom(config):
         
         # update the object grid to account for dead players
         player_id = (
-            jnp.arange(params.max_players) * player_alive + -1 * ~player_alive)
+            jnp.arange(config.max_players) * player_alive + -1 * ~player_alive)
         object_grid = object_grid.at[player_x[...,0], player_x[...,1]].set(
             player_id)
         
@@ -193,34 +188,13 @@ def nomnom(config):
         #   enough energy to create offspring
         reproduce = (
             action.reproduce &
-            (player_energy > params.initial_energy) &
+            (player_energy > config.initial_energy) &
             player_alive
         )
-        ## - generate the new players
-        #(
-        #    next_new_player_id,
-        #    player_new,
-        #    player_id,
-        #    parent_id,
-        #    player_x,
-        #    player_r,
-        #    player_energy,
-        #    object_grid,
-        #) = spawn.reproduce_from_parents(
-        #    reproduce,
-        #    state.next_new_player_id,
-        #    player_id,
-        #    state.parent_id,
-        #    player_x,
-        #    player_r,
-        #    player_energy,
-        #    jnp.full_like(player_energy, params.initial_energy),
-        #    object_grid=object_grid,
-        #)
         
         player_data, child_locations = heredity.produce_children(
             parents,
-            (,),
+            (),
             birth_process,
         )
         
@@ -228,9 +202,9 @@ def nomnom(config):
         key, food_key = jrng.split(key)
         food_grid = food_grid | spawn.poisson_grid(
             food_key,
-            params.mean_food_growth,
-            params.max_food_growth,
-            params.world_size,
+            config.mean_food_growth,
+            config.max_food_growth,
+            config.world_size,
         )
         
         # compute new state
@@ -249,15 +223,11 @@ def nomnom(config):
 
     def nomnom_observe(
         key: chex.PRNGKey,
-        params: TNomNomParams,
         state: TNomNomState,
     ) -> TNomNomObservation :
         '''
         Computes the observation of a NomNom environment given the environment
-        params and state.
-        
-        When used inside a jit compiled program, params must come from a static
-        variable as it controls the shapes of various arrays.
+        state.
         '''
         
         # construct a grid that contains class labels at each location
@@ -271,35 +241,16 @@ def nomnom(config):
             state.player_x,
             state.player_r,
             view_grid,
-            params.view_width,
-            params.view_distance,
+            config.view_width,
+            config.view_distance,
             out_of_bounds=3,
         )
         return NomNomObservation(view, state.player_energy)
 
-    def nomnom(
-        params: TNomNomParams = NomNomParams,
-    ):
-        '''
-        This bundles the function above into reset and step functions.
-        reset will take a random key and produce a new state, observation, list of
-        players and their parents.
-        step will take a random key, a previous state and an action and produce
-        a new state, observation, list of players and their parents. 
-        '''
-        reset, step = population_game(
-            params,
-            nomnom_initialize,
-            nomnom_transition,
-            nomnom_observe,
-            lambda params, state : state.player_id,
-            lambda params, state : state.parent_id,
-        )
-        
-        return reset, step
-    
     return population_game(
-        initialize_nomnom,
-        transition_nomnom,
-        observe_nomnom,
-        
+        init,
+        transition,
+        observe,
+        alive,
+        children,
+    )
