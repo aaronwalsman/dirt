@@ -137,6 +137,7 @@ def nomnom(
         key, xr_key = jrng.split(key)
         player_x, player_r = spawn.unique_xr(
             xr_key, params.max_players, params.world_size)
+        
         player_energy = jnp.full((params.max_players,), params.initial_energy)
     
         # initialize the object grid
@@ -158,6 +159,7 @@ def nomnom(
             object_grid,
             player_id,
             parent_id,
+            
             player_x,
             player_r,
             player_energy,
@@ -183,8 +185,9 @@ def nomnom(
         # construct a grid that contains class labels at each location
         # (0 = free space, 1 = food, 2 = player, 3 = out-of-bounds)
         view_grid = state.food_grid.astype(jnp.uint8)
+        import pdb; pdb.set_trace()
         view_grid.at[state.player_x[...,0], state.player_x[...,1]].set(
-            2 * (state.player_id != -1))
+            2 * (state.players != -1))
     
         # clip the viewing rectangles out for each player
         view = observations.first_person_view(
