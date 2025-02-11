@@ -53,8 +53,10 @@ class NomNomState:
     object_grid : jnp.ndarray
     
     # player shaped data
-    player_id : jnp.ndarray
-    parent_id : jnp.ndarray
+    players : jnp.ndarray
+    #parent_id : jnp.ndarray
+    parents : jnp.ndarray
+    children : jnp.ndarray
     player_x : jnp.ndarray
     player_r : jnp.ndarray
     player_energy : jnp.ndarray
