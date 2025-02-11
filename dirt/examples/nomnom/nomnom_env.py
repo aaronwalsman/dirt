@@ -259,23 +259,26 @@ def nomnom(
         )
         # - generate the new players
         (
-            next_new_player_id,
-            player_new,
-            player_id,
-            parent_id,
+            # next_new_player_id,
+            # player_new,
+            # player_id,
+            # parent_id,
             player_x,
             player_r,
-            player_energy,
+            players,
+            parents,
+            children,
             object_grid,
         ) = spawn.reproduce_from_parents(
             reproduce,
             state.next_new_player_id,
-            player_id,
-            state.parent_id,
+            state.players,
+            # player_id,
+            # state.parent_id,
             player_x,
             player_r,
-            player_energy,
-            jnp.full_like(player_energy, params.initial_energy),
+            # player_energy,
+            # jnp.full_like(player_energy, params.initial_energy),
             object_grid=object_grid,
         )
     
