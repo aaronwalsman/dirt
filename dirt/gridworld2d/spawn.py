@@ -199,9 +199,12 @@ def poisson_grid(
     
     return grid
 
-def spawn_from_parent(
-    parent_x,
-    parent_r,
+def reproduce_from_parents(
+    reproduce,
+    next_player_id,
+    players,
+    player_x,
+    player_r,
     #player_data,
     #birth_process,
     world_size=None,
@@ -219,12 +222,12 @@ def spawn_from_parent(
     '''
     
     if object_grid is not None:
-        assert (world_size is None) or (world_size == object_grid.shape)
+        # assert (world_size is None) or (world_size == object_grid.shape)
         world_size = object_grid.shape
     
     child_x, child_r = dynamics.step(
-        player_x[first_parent],
-        player_r[first_parent],
+        player_x,
+        player_r,
         jnp.array(child_x_offset)[None,:],
         jnp.array(child_r_offset)[None],
         space='local',
@@ -232,7 +235,7 @@ def spawn_from_parent(
     )
     
     # filter out children that don't fit onto the grid
-    n = parent_x.shape[0]
+    n = player_x.shape[0]
     valid_children = jnp.ones(n, dtype=jnp.bool)
     # - first, make sure the child locations would be inside the world
     if world_size is not None:
@@ -254,37 +257,69 @@ def spawn_from_parent(
     child_x = jnp.where(valid_children[:,None], child_x, out_of_bounds_x)
     
     # reproduce
-    player_data, child_ids = heredity.produce_children(
-        parents,
-        player_data,
-        birth_process,
-        empty=empty,
-    )
+    # player_data, child_ids = heredity.produce_children(
+    #     parents,
+    #     player_data,
+    #     birth_process,
+    #     empty=empty,
+    # )
+    parents, = jnp.nonzero(
+            reproduce,
+            size=n,
+            fill_value=n,
+        )
+    parents = parents[:,None]
+    num_new_players = jnp.sum(reproduce)
+        
+    # find locations for the new children
+    all_locations = jnp.arange(n)
+    active_children = all_locations < num_new_players
+    alive = players != -1
+    available_locations, = jnp.nonzero(
+        ~alive, size=n, fill_value=n)
+    children = jnp.where(
+        active_children, available_locations, n)
+    child_ids = jnp.where(
+        active_children, all_locations + next_player_id, -1)
+    players = players.at[children].set(child_ids)
     
+
+    player_x = player_x.at[children].set(child_x)
+    player_r = player_r.at[children].set(child_r)
     # update the object grid
     if object_grid is not None:
         object_grid = object_grid.at[child_x[...,0], child_x[...,1]].set(
             child_ids)
         return (
-            next_child_start_id,
-            all_new,
-            all_id,
-            all_parents,
-            all_x,
-            all_r,
-            all_data,
+            player_x,
+            player_r,
+            players,
+            parents,
+            children,
+            # next_child_start_id,
+            # all_new,
+            # all_id,
+            # all_parents,
+            # all_x,
+            # all_r,
+            # all_data,
             object_grid,
         )
     
     else:
         return (
-            next_child_start_id,
-            all_new,
-            all_id,
-            all_parents,
-            all_x,
-            all_r,
-            all_data,
+            player_x,
+            player_r,
+            players,
+            parents,
+            children,
+            # next_child_start_id,
+            # all_new,
+            # all_id,
+            # all_parents,
+            # all_x,
+            # all_r,
+            # all_data,
         )
 
 def reproduce_from_parents_old(
