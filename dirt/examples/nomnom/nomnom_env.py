@@ -54,7 +54,6 @@ class NomNomState:
     
     # player shaped data
     players : jnp.ndarray
-    #parent_id : jnp.ndarray
     parents : jnp.ndarray
     children : jnp.ndarray
     player_x : jnp.ndarray
@@ -129,11 +128,11 @@ def nomnom(
         variable as it controls the shapes of various arrays.
         '''
         # initialize the players
-        player_id = jnp.full(params.max_players, -1, dtype=jnp.int32)
-        player_id = player_id.at[:params.initial_players].set(
+        players = jnp.full(params.max_players, -1, dtype=jnp.int32)
+        players = players.at[:params.initial_players].set(
             jnp.arange(params.initial_players))
-        parent_id = jnp.full(params.max_players, -1, dtype=jnp.int32)
-        children = jnp.full(params.max_players, -1, dtype=jnp.int32)
+        parents = jnp.full((params.max_players, 1), -1, dtype=jnp.int32)
+        children = jnp.full((params.max_players,), -1, dtype=jnp.int32)
         key, xr_key = jrng.split(key)
         player_x, player_r = spawn.unique_xr(
             xr_key, params.max_players, params.world_size)
@@ -142,7 +141,7 @@ def nomnom(
     
         # initialize the object grid
         object_grid = jnp.full(params.world_size, -1, dtype=jnp.int32)
-        object_grid.at[player_x[...,0], player_x[...,1]].set(player_id)
+        object_grid.at[player_x[...,0], player_x[...,1]].set(players)
     
         # initialize the food grid
         key, foodkey = jrng.split(key)
@@ -157,14 +156,13 @@ def nomnom(
         state =  NomNomState(
             food_grid,
             object_grid,
-            player_id,
-            parent_id,
-            
+            players,
+            parents,
+            children,
             player_x,
             player_r,
             player_energy,
             params.initial_players,
-            children
         )
 
         return state
@@ -185,7 +183,6 @@ def nomnom(
         # construct a grid that contains class labels at each location
         # (0 = free space, 1 = food, 2 = player, 3 = out-of-bounds)
         view_grid = state.food_grid.astype(jnp.uint8)
-        import pdb; pdb.set_trace()
         view_grid.at[state.player_x[...,0], state.player_x[...,1]].set(
             2 * (state.players != -1))
     
@@ -225,7 +222,7 @@ def nomnom(
 
         # eat
         # - figure out who will eat which food
-        player_alive = (state.player_id != -1)
+        player_alive = (state.players != -1)
         food_at_player = state.food_grid[player_x[...,0], player_x[...,1]]
         eaten_food = food_at_player * player_alive
         # - update the player energy with the food they have just eaten
@@ -248,11 +245,11 @@ def nomnom(
     
         # kill players that have starved
         player_alive = player_alive & (player_energy > 0.)
-        player_id = state.player_id * player_alive + -1 * ~player_alive
+        players = state.players * player_alive + -1 * ~player_alive
     
         # update the object grid to account for dead players
         object_grid = object_grid.at[player_x[...,0], player_x[...,1]].set(
-            player_id)
+            players)
     
         # make new players based on reproduction
         # - filter the reproduce vector to remove dead players and those without
@@ -260,7 +257,7 @@ def nomnom(
         reproduce = (
             action.reproduce &
             (player_energy > params.initial_energy) &
-            (player_id != -1)
+            player_alive
         )
         # - generate the new players
         (
@@ -300,8 +297,9 @@ def nomnom(
         state = NomNomState(
             food_grid,
             object_grid,
-            player_id,
-            parent_id,
+            players,
+            parents,
+            children,
             player_x,
             player_r,
             player_energy,
@@ -310,6 +308,6 @@ def nomnom(
         return state
     
     def nomnom_player_info(state):
-        return state.player_id, state.parent_id, state.children
+        return state.players, state.parents, state.children
 
     return population_game(nomnom_initialize, nomnom_transition, nomnom_observe, nomnom_player_info)
