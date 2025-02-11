@@ -50,6 +50,7 @@ def train(key, env_params, algo_params, iterations):
     key, reset_key = jrng.split(key)
     algo_state = reset_algo(reset_key)
     
+    steps_per_epoch = 1000
     # step function that will be run at each iteration
     # this is just the algorithm's step function, but structured so that it
     # can be scanned
@@ -66,11 +67,11 @@ def train(key, env_params, algo_params, iterations):
         # return step_algo(key, *algo_state)
     
         algo_state, _ = jax.lax.scan(
-            lambda train_state, key : (step_algo(key, algo_state), None),
+            lambda algo_state, key : (step_algo(key, algo_state), None),
             algo_state,
             jrng.split(key, steps_per_epoch),
         )
-        return train_state, None
+        return algo_state, None
     
     # generate step keys
     key, step_key = jrng.split(key)
@@ -94,7 +95,6 @@ if __name__ == '__main__':
         world_size=(10000,10000)
     )
     algo_params = NaturalSelectionState()
-    import pdb; pdb.set_trace()
 
     key = jrng.key(1234)
     iterations = 100
