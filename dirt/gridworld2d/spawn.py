@@ -199,7 +199,95 @@ def poisson_grid(
     
     return grid
 
-def reproduce_from_parents(
+def spawn_from_parent(
+    parent_x,
+    parent_r,
+    #player_data,
+    #birth_process,
+    world_size=None,
+    object_grid=None,
+    child_x_offset=(-1,0),
+    child_r_offset=2,
+    empty=-1,
+):
+    '''
+    Generate new child positions (child_x) and rotations (child_r) based on
+    local offsets from a single parent.  If given a world_size or object_grid
+    this will also check to make sure new children are in bounds and do not
+    collide with another object.  If an object_grid is provided, an updated
+    
+    '''
+    
+    if object_grid is not None:
+        assert (world_size is None) or (world_size == object_grid.shape)
+        world_size = object_grid.shape
+    
+    child_x, child_r = dynamics.step(
+        player_x[first_parent],
+        player_r[first_parent],
+        jnp.array(child_x_offset)[None,:],
+        jnp.array(child_r_offset)[None],
+        space='local',
+        out_of_bounds='none',
+    )
+    
+    # filter out children that don't fit onto the grid
+    n = parent_x.shape[0]
+    valid_children = jnp.ones(n, dtype=jnp.bool)
+    # - first, make sure the child locations would be inside the world
+    if world_size is not None:
+        inbounds = (
+            (child_x[:,0] >= 0) & (child_x[:,0] < world_size[0]) &
+            (child_x[:,1] >= 0) & (child_x[:,1] < world_size[1])
+        )
+        valid_children = valid_children & inbounds
+    
+    # - second make sure the children will not be on top of any existing objects
+    if object_grid is not None:
+        child_colliders = object_grid[child_x[:,0], child_x[:,1]]
+        no_collisions = (child_colliders == empty)
+        valid_children = valid_children & (child_colliders == empty)
+    
+    # update the non-reproduced child_x locations to be off the grid so they
+    # don't overwrite important values in the object array
+    out_of_bounds_x = jnp.array(world_size)[None,:]
+    child_x = jnp.where(valid_children[:,None], child_x, out_of_bounds_x)
+    
+    # reproduce
+    player_data, child_ids = heredity.produce_children(
+        parents,
+        player_data,
+        birth_process,
+        empty=empty,
+    )
+    
+    # update the object grid
+    if object_grid is not None:
+        object_grid = object_grid.at[child_x[...,0], child_x[...,1]].set(
+            child_ids)
+        return (
+            next_child_start_id,
+            all_new,
+            all_id,
+            all_parents,
+            all_x,
+            all_r,
+            all_data,
+            object_grid,
+        )
+    
+    else:
+        return (
+            next_child_start_id,
+            all_new,
+            all_id,
+            all_parents,
+            all_x,
+            all_r,
+            all_data,
+        )
+
+def reproduce_from_parents_old(
     reproduce,
     child_start_id,
     player_id,
