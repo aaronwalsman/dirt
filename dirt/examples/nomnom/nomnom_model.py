@@ -35,12 +35,15 @@ def nomnom_model(config=NomNomModelConfig()):
     )
     
     # energy encoder
-    energy_encoder = mlp(
-        hidden_layers=1,
-        in_channels=1,
-        hidden_channels=32,
-        out_channels=128,
-    )
+    energy_encoder = layer_sequence((
+        (lambda: None, lambda x : x.reshape(-1)),
+        mlp(
+            hidden_layers=1,
+            in_channels=1,
+            hidden_channels=32,
+            out_channels=128,
+        ),
+    ))
     
     # combine the encoders
     encoder = layer_sequence((

@@ -15,7 +15,7 @@ from mechagogue.breed.normal import normal_mutate
 from mechagogue.nn.mlp import mlp
 
 from dirt.examples.nomnom.nomnom_env import nomnom, NomNomParams, NomNomAction
-from dirt.examples.nomnom.nomnom_model import nomnom_model
+from dirt.examples.nomnom.nomnom_model import NomNomModelConfig, nomnom_model
 
 def train(key, env_params, algo_params, iterations):
 
@@ -72,7 +72,8 @@ def train(key, env_params, algo_params, iterations):
         )
         
         # return step_algo(key, *algo_state)
-    
+        steps_per_epoch = 100
+        
         algo_state, _ = jax.lax.scan(
             lambda algo_state, key : (step_algo(key, algo_state), None),
             algo_state,
