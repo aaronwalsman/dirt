@@ -115,7 +115,7 @@ def test_inherit_multi_parent_tree():
     assert jnp.all(inherited_data[1] ==
         jnp.array([ 8. , 11. , 11.5, 14.5, 12. , 13. , 14. , 15. ]))
 
-def available_child_locations(
+def available_child_ids_old(
     population_alive,
     child_mask,
     max_children=None,
@@ -126,9 +126,18 @@ def available_child_locations(
         ~population_alive, size=max_children, fill_value=n)
     child_mask_locations = jnp.nonzero(
         child_mask, size=max_children, fill_value=n)
-    child_locations = jnp.zeros(n, dtype=jnp.int32)
-    child_locations.at[child_mask_locations] = available_locations
-    return child_locations
+    child_ids = jnp.zeros(n, dtype=jnp.int32)
+    child_ids.at[child_mask_locations] = available_locations
+    return child_ids
+
+def available_child_ids(
+    population_alive,
+    num_children,
+):
+    n, = population_alive.shape
+    available_locations = jnp.nonzero(
+        ~population_alive, size=num_children, fill_value=n)
+    return available_locations
 
 def produce_children(
     parents,
@@ -147,19 +156,23 @@ def produce_children(
         _, *leaf_shape = leaf.shape
         return leaf[parents.reshape(-1)].reshape(
             max_children, parents_per_child, *leaf_shape)
-    parent_data = jax.tree.map(get_multi_parent_data, parent_data) 
+    parent_data = jax.tree.map(get_multi_parent_data, player_data) 
     
     # apply the birth process
     child_data = birth_process(parent_data)
     
+    return child_data
+    
+'''
     # assign the child data to the appropriate locations
-    child_locations = available_child_locations(
+    child_ids = available_child_ids(
         alive, valid_children, max_children)
     def set_child_data(player_leaf, child_leaf):
-        return player_leaf.at[child_locations].set(child_leaf)
+        return player_leaf.at[child_ids].set(child_leaf)
     player_data = jax.tree.map(set_child_data, player_data, child_data)
     
-    return player_data, child_locations
+    return player_data, child_ids
+'''
 
 if __name__ == '__main__':
     
