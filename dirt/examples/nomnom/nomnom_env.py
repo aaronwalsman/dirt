@@ -265,6 +265,7 @@ def nomnom(
             # parent_id,
             player_x,
             player_r,
+            next_new_player_id,
             players,
             parents,
             children,
