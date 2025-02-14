@@ -7,8 +7,6 @@ import jax.random as jrng
 import jax.numpy as jnp
 import jax
 
-from typing import Tuple, Optional, Union
-
 '''
 Outside of the day!
 

@@ -16,6 +16,8 @@ def step(
     x = jnp.arange(-kernel_radius, kernel_radius + 1)
     kernel = jnp.exp(-x**2 / (2 * sigma**2))
     kernel = kernel / kernel.sum()
+    kernel = kernel[:, None]  # Reshape for separable conv
+    kernel = kernel[..., None, None]  # Ensure (H, 1, 1, 1) shape
 
     # Reshape input for conv operations (needs 4D: NHWC format)
     #x = gas_grid.reshape(1, *gas_grid.shape, 1)
@@ -24,14 +26,14 @@ def step(
     diffused_gas_grid = gas_grid[None,:,:,None]
     diffused_gas_grid = jax.lax.conv_general_dilated(
         diffused_gas_grid,
-        kernel[:,None,None,None],
+        kernel,
         window_strides=(1, 1),
         padding='SAME',
         dimension_numbers=('NHWC', 'HWIO', 'NHWC')
     )
     diffused_gas_grid = jax.lax.conv_general_dilated(
         diffused_gas_grid,
-        kernel[None,:,None,None],
+        kernel.transpose((1, 0, 2, 3)),
         window_strides=(1, 1),
         padding='SAME',
         dimension_numbers=('NHWC', 'HWIO', 'NHWC')
@@ -47,12 +49,12 @@ def step(
     wind_y, wind_x = wind
 
     # Get the four nearest grid points
-    h = jnp.arange(gas_grid.shape[1]) + wind[1]
-    w = jnp.arange(gas_grid.shape[0]) + wind[0]
+    h = jnp.arange(gas_grid.shape[0]) + wind[0]
+    w = jnp.arange(gas_grid.shape[1]) + wind[1]
 
     breakpoint()
 
-    wind_x, wind_y = jnp.meshgrid(w, h)
+    wind_y, wind_x = jnp.meshgrid(h, w, indexing="ij")
     breakpoint()
     x0 = jnp.floor(wind_x).astype(int)
     y0 = jnp.floor(wind_y).astype(int)
@@ -67,10 +69,11 @@ def step(
     
     # Distribute gas to the four nearest points
     breakpoint()
-    gas_grid = gas_grid.at[x0, y0].add(gas_grid * (wx0 * wy0))
-    gas_grid = gas_grid.at[x1, y0].add(gas_grid * (wx1 * wy0))
-    gas_grid = gas_grid.at[x0, y1].add(gas_grid * (wx0 * wy1))
-    gas_grid = gas_grid.at[x1, y1].add(gas_grid * (wx1 * wy1))
+    gas_grid = gas_grid.at[x0.ravel(), y0.ravel()].add((gas_grid * (wx0 * wy0)).ravel())
+    gas_grid = gas_grid.at[x1.ravel(), y0.ravel()].add((gas_grid * (wx1 * wy0)).ravel())
+    gas_grid = gas_grid.at[x0.ravel(), y1.ravel()].add((gas_grid * (wx0 * wy1)).ravel())
+    gas_grid = gas_grid.at[x1.ravel(), y1.ravel()].add((gas_grid * (wx1 * wy1)).ravel())
+
     
     return gas_grid
 

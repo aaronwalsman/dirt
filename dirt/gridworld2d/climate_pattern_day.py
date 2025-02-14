@@ -6,8 +6,6 @@ import jax.random as jrng
 import jax.numpy as jnp
 import jax
 
-from typing import Tuple, Optional, Union
-
 '''
 Then it's time for the climate system to work!
 In expectation, Half time will have daylight while the other half...

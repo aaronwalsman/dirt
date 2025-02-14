@@ -3,8 +3,6 @@ import jax.random as jrng
 import jax.numpy as jnp
 import jax
 
-from typing import Tuple, Optional, Union
-
 #from dirt.gridworld2d.visualization import visualize_height_water
 
 '''
