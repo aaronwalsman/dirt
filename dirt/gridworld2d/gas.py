@@ -49,8 +49,8 @@ def step(
     wind_y, wind_x = wind
 
     # Get the four nearest grid points
-    h = jnp.arange(gas_grid.shape[0]) + wind[0]
-    w = jnp.arange(gas_grid.shape[1]) + wind[1]
+    h = jnp.arange(gas_grid.shape[0]) + wind[0] # Change H/W according to the specification
+    w = jnp.arange(gas_grid.shape[1]) + wind[1] # Change H/W according to the specification
 
     breakpoint()
 
@@ -69,7 +69,7 @@ def step(
     
     # Distribute gas to the four nearest points
     breakpoint()
-    gas_grid = gas_grid.at[x0.ravel(), y0.ravel()].add((gas_grid * (wx0 * wy0)).ravel())
+    gas_grid = gas_grid.at[x0.ravel(), y0.ravel()].add((gas_grid * (wx0 * wy0)).ravel()) # Adjust using jax methods since x0 and y0 are not floats but matrices of float
     gas_grid = gas_grid.at[x1.ravel(), y0.ravel()].add((gas_grid * (wx1 * wy0)).ravel())
     gas_grid = gas_grid.at[x0.ravel(), y1.ravel()].add((gas_grid * (wx0 * wy1)).ravel())
     gas_grid = gas_grid.at[x1.ravel(), y1.ravel()].add((gas_grid * (wx1 * wy1)).ravel())
