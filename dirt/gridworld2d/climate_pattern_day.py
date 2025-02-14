@@ -230,7 +230,7 @@ if __name__ == '__main__':
     light_intensity_initial_value = 0.5
     temperature_initial_value = 1
     flow_rate = 0.45
-    terrain = Fractal_Noise(world_size=world_size, octaves = 6, persistence = 0.5, lacunarity = 2.0, key = key)
+    terrain = fractal_noise(world_size=world_size, octaves = 6, persistence = 0.5, lacunarity = 2.0, key = key)
     water = jnp.full(world_size, water_initial)
     time = 500
     rain_initial = jnp.full(world_size, rain_initial_value)
