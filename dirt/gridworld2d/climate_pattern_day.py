@@ -196,7 +196,7 @@ def simulate_full_weather_day(
         water = flow_step_twodir(terrain, water, flow_rate)
         
         # 2. Erosion
-        new_terrain = simulate_erosion_step(terrain, water, current_erosion, flow_rate, erosion_endurance, erosion_ratio)
+        new_terrain, current_erosion = simulate_erosion_step(terrain, water, current_erosion, flow_rate, erosion_endurance, erosion_ratio)
         current_erosion = reset_erosion_status(new_terrain, terrain, current_erosion)
 
         # 3. light
