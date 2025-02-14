@@ -68,15 +68,32 @@ def simulate_full_climate(
     Simulate the light and temperature change in one full weather day
     '''
     def step_fn(carry, step_idx):
-        terrain, water, current_evaporation, rain_status, current_erosion, day_status, light_intensity, current_temperature = carry
+        (
+            terrain,
+            water,
+            current_evaporation,
+            rain_status,
+            current_erosion,
+            day_status,
+            light_intensity,
+            current_temperature,
+        ) = carry
         
         current_time = step_idx
         # 1. Water flow
         water = flow_step_twodir(terrain, water, flow_rate)
         
         # 2. Erosion
-        new_terrain = simulate_erosion_step(terrain, water, current_erosion, flow_rate, erosion_endurance, erosion_ratio)
-        current_erosion = reset_erosion_status(new_terrain, terrain, current_erosion)
+        new_terrain = simulate_erosion_step(
+            terrain,
+            water,
+            current_erosion,
+            flow_rate,
+            erosion_endurance,
+            erosion_ratio,
+        )
+        current_erosion = reset_erosion_status(
+            new_terrain, terrain, current_erosion)
 
         # 3. light
         light_strength = get_day_light_strength(current_time)
