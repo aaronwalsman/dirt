@@ -45,7 +45,7 @@ def get_angle(
     '''
     time %= 24
     angle = jnp.where(
-        time <= 12,
+        time <= day_light_length,
         (time / day_light_length) * jnp.pi,
         ((time - day_light_length) / (24 - day_light_length)) * jnp.pi
     )
@@ -77,7 +77,6 @@ def light_step(
     water: jnp.ndarray,
     light_strength: float,
     day_light_length: int,
-    day_status: int,
     time: int,
     night_effect = 0.1
 ) -> jnp.ndarray:
@@ -96,7 +95,7 @@ def light_step(
     dot_products = jnp.einsum('ijk,ijk->ij', normals, light_direction)
     dot_products_norm = get_normalize(dot_products)
     light_intensity = jnp.clip(dot_products_norm * light_strength, 0, 1)
-    return jnp.where(time % 24 <= 12, light_intensity, night_effect * light_intensity)
+    return jnp.where(time % 24 <= day_light_length, light_intensity, night_effect * light_intensity)
 
 
 def absorb_temp(
@@ -149,7 +148,7 @@ def temperature_step(
     rain_status: jnp.ndarray,
     light_intensity: jnp.ndarray,
     current_evaporation: jnp.ndarray,
-    day_status: int, 
+    day_light_length: int,
     night_effect: float, 
     water_effect: float, 
     rain_effect: float, 
@@ -158,7 +157,7 @@ def temperature_step(
     '''
     Simulate the per step light and temperature system
     '''
-    return jnp.where(time % 24 <= 12, absorb_temp(light_intensity, water, temperature, rain_status, current_evaporation, water_effect, rain_effect, evaporation_effect), release_temp(light_intensity, water, temperature, rain_status, current_evaporation, night_effect, water_effect, rain_effect, evaporation_effect)
+    return jnp.where(time % 24 <= day_light_length, absorb_temp(light_intensity, water, temperature, rain_status, current_evaporation, water_effect, rain_effect, evaporation_effect), release_temp(light_intensity, water, temperature, rain_status, current_evaporation, night_effect, water_effect, rain_effect, evaporation_effect)
 )
 
 def simulate_full_weather_day(
@@ -171,6 +170,7 @@ def simulate_full_weather_day(
     initial_evaporation: jnp.ndarray,
     day_status_initial: jnp.ndarray,
     light_intensity_initial: jnp.ndarray,
+    day_light_length: int,
     evaporate_rate: float,
     air_up_limit: float,
     air_down_limit: float,
@@ -201,10 +201,10 @@ def simulate_full_weather_day(
 
         # 3. light
         new_day_status = get_day_status(light_length, current_time)
-        new_light_intensity = light_step(terrain, water, light_strength, light_length, new_day_status, current_time) #Porblem of getting None
+        new_light_intensity = light_step(terrain, water, light_strength, light_length, current_time) #Porblem of getting None
 
         # 4. Temperature
-        new_temperature = temperature_step(current_time, water, current_temperature, rain_status, light_intensity, current_evaporation, day_status, night_effect, water_effect, rain_effect, evaporation_effect)
+        new_temperature = temperature_step(current_time, water, current_temperature, rain_status, light_intensity, current_evaporation, day_light_length, night_effect, water_effect, rain_effect, evaporation_effect)
         
         # 5. Humidity
         new_water, new_evaporation, rain_status = weather_step(
@@ -249,19 +249,20 @@ if __name__ == '__main__':
     evaporation_effect = 0.5
     light_length = 12
     light_strength = 1
+    day_light_length = 12
 
     final_terrain, final_water, left_evaporation, final_rain_status, final_erosion, final_day_status, final_light_intensity, final_temperature = simulate_full_weather_day(
         terrain, water, temperature_initial, time, 
-        erosion_initial, rain_initial, evaporation_initial, day_status_initial, light_intensity_initial,  
+        erosion_initial, rain_initial, evaporation_initial, day_status_initial, light_intensity_initial, day_light_length,
         evaporate_rate, air_up_limit, air_down_limit, rain,
         flow_rate, erosion_ratio, erosion_endurance, light_strength, light_length, night_effect, water_effect, rain_effect, evaporation_effect
     )
     total_water = final_water + left_evaporation
-    # print(terrain.sum()) # -349.00833
-    # print(final_terrain.sum()) # -349.00824
-    # print(water.sum()) # 32768.0
-    # print(total_water.sum()) # 32767.992
-    # print(final_terrain == terrain) # Erosion happening with this paramter
+    print(terrain.sum()) # -349.00833
+    print(final_terrain.sum()) # -349.00824
+    print(water.sum()) # 32768.0
+    print(total_water.sum()) # 32767.992
+    print(final_terrain == terrain) # Erosion happening with this paramter
 
     import matplotlib.pyplot as plt
     plt.figure(figsize=(18, 6))
