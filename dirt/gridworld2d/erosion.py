@@ -4,8 +4,6 @@ import jax.random as jrng
 import jax.numpy as jnp
 import jax
 
-from typing import Tuple, Optional, Union
-
 '''
 Since we have our basic terrain system and water system...
 Why not add a little bit erosion inside the system?
@@ -152,7 +150,7 @@ if __name__ == '__main__':
     erosion_endurance = 0.2
     erosion_ratio = 0.001
 
-    final_terrain, final_water = simulate_erosion(terrain, water, erosion_initial, flow_rate, time, erosion_ratio, erosion_endurance)
+    final_terrain, final_water, _ = simulate_erosion(terrain, water, erosion_initial, flow_rate, time, erosion_ratio, erosion_endurance)
 
     # print(terrain.sum()) # -349.00833
     # print(final_terrain.sum()) # -349.0083

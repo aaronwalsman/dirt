@@ -5,7 +5,7 @@ import jax.random as jrng
 import jax.numpy as jnp
 import jax
 
-from typing import Tuple, Optional, Union
+from typing import Tuple
 
 '''
 To make the whole world little more interesting...

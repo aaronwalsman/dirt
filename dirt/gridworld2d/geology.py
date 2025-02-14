@@ -4,7 +4,7 @@ import chex
 from perlin_noise import perlin_noise
 from jax import vmap
 
-from typing import Tuple, Optional, Union
+from typing import Tuple
 
 '''
 The total world size is set to be (x,y,h)

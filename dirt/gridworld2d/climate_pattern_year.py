@@ -7,8 +7,6 @@ import jax.random as jrng
 import jax.numpy as jnp
 import jax
 
-from typing import Tuple, Optional, Union
-
 '''
 Outside of the day!
 
@@ -84,25 +82,17 @@ def simulate_full_climate(
         water = flow_step_twodir(terrain, water, flow_rate)
         
         # 2. Erosion
-        new_terrain = simulate_erosion_step(
-            terrain,
-            water,
-            current_erosion,
-            flow_rate,
-            erosion_endurance,
-            erosion_ratio,
-        )
-        current_erosion = reset_erosion_status(
-            new_terrain, terrain, current_erosion)
+        new_terrain, current_erosion = simulate_erosion_step(terrain, water, current_erosion, flow_rate, erosion_endurance, erosion_ratio)
+        current_erosion = reset_erosion_status(new_terrain, terrain, current_erosion)
 
         # 3. light
         light_strength = get_day_light_strength(current_time)
         light_length = get_day_light_length(current_time)
         new_day_status = get_day_status(light_length, current_time)
-        new_light_intensity = light_step(terrain, water, light_strength, light_length, new_day_status, current_time) #Porblem of getting None
+        new_light_intensity = light_step(terrain, water, light_strength, light_length, current_time, night_effect) #Porblem of getting None
 
         # 4. Temperature
-        new_temperature = temperature_step(current_time, water, current_temperature, rain_status, light_intensity, current_evaporation, day_status, night_effect, water_effect, rain_effect, evaporation_effect)
+        new_temperature = temperature_step(current_time, water, current_temperature, rain_status, light_intensity, current_evaporation, light_length, night_effect, water_effect, rain_effect, evaporation_effect)
         
         # 5. Humidity
         new_water, new_evaporation, rain_status = weather_step(
@@ -141,7 +131,7 @@ if __name__ == '__main__':
     rain = 0.08
     erosion_endurance = 0.05
     erosion_ratio = 0.01
-    night_effect = 0.17 # Under this, the temperature system doesn't seem to explode
+    night_effect = 0.35 # Under this, the temperature system doesn't seem to explode
     water_effect = 0.5
     rain_effect = 0.1 
     evaporation_effect = 0.5
