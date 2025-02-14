@@ -45,7 +45,7 @@ def fractal_noise(
     xx, yy = jnp.meshgrid(x, y, indexing='ij')
     coords = jnp.stack([xx.ravel(), yy.ravel()], axis=-1)
 
-    keys = jrng.split(key, num=octaves)
+    keys = jrng.split(key, num=12)[:octaves]
 
     # Frequency and amplitude for each octave
     frequencies = lacunarity ** jnp.arange(octaves)
