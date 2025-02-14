@@ -1,4 +1,4 @@
-from geology import Fractal_Noise
+from geology import fractal_noise
 from water import flow_step_twodir
 from erosion import simulate_erosion_step, reset_erosion_status
 from naive_weather_system import weather_step
