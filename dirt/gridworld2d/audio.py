@@ -3,4 +3,10 @@ def sample_audio(
 ):
     # TODO: Vincent explore ideas here
     
+
+
+
+
+
+
     return sampled_signals

@@ -6,39 +6,44 @@ def step(
     sigma: float,
     gas_diffusion: float,
     wind: jnp.ndarray,
+    C: int
 ) -> jnp.ndarray:
     '''
     Diffuses a gas grid based on a gaussian kernel using separable convolutions.
     '''
 
     # make the gaussian kernel
-    kernel_radius = jnp.ceil(3 * sigma)
+    kernel_radius = jnp.ceil(3 * sigma).astype(int)
     x = jnp.arange(-kernel_radius, kernel_radius + 1)
     kernel = jnp.exp(-x**2 / (2 * sigma**2))
     kernel = kernel / kernel.sum()
-    kernel = kernel[:, None]  # Reshape for separable conv
-    kernel = kernel[..., None, None]  # Ensure (H, 1, 1, 1) shape
+    kernel = kernel[:, None]
+    kernel = kernel[..., None, None]
+    kernel = jnp.tile(kernel, (1, 1, 1, C))
 
     # Reshape input for conv operations (needs 4D: NHWC format)
     #x = gas_grid.reshape(1, *gas_grid.shape, 1)
+    # gas_grid = gas_grid[..., None] if gas_grid.ndim == 2 else gas_grid
     
     # Apply horizontal then vertical convolution
-    diffused_gas_grid = gas_grid[None,:,:,None]
+    diffused_gas_grid = gas_grid[None, :, :, :]
     diffused_gas_grid = jax.lax.conv_general_dilated(
         diffused_gas_grid,
         kernel,
         window_strides=(1, 1),
         padding='SAME',
-        dimension_numbers=('NHWC', 'HWIO', 'NHWC')
+        dimension_numbers=('NHWC', 'HWIO', 'NHWC'),
+        feature_group_count=C
     )
     diffused_gas_grid = jax.lax.conv_general_dilated(
         diffused_gas_grid,
         kernel.transpose((1, 0, 2, 3)),
         window_strides=(1, 1),
         padding='SAME',
-        dimension_numbers=('NHWC', 'HWIO', 'NHWC')
+        dimension_numbers=('NHWC', 'HWIO', 'NHWC'),
+        feature_group_count=C
     )
-    diffused_gas_grid = diffused_gas_grid[0,:,:,0]
+    diffused_gas_grid = diffused_gas_grid[0,:,:,:]
     
     gas_grid = (
         gas_grid * (1 - gas_diffusion) +
@@ -49,35 +54,49 @@ def step(
     wind_y, wind_x = wind
 
     # Get the four nearest grid points
-    h = jnp.arange(gas_grid.shape[0]) + wind[0] # Change H/W according to the specification
-    w = jnp.arange(gas_grid.shape[1]) + wind[1] # Change H/W according to the specification
-
-    breakpoint()
-
+    h = jnp.arange(gas_grid.shape[0]) + wind_y # Change H/W according to the specification
+    w = jnp.arange(gas_grid.shape[1]) + wind_x # Change H/W according to the specification
     wind_y, wind_x = jnp.meshgrid(h, w, indexing="ij")
-    breakpoint()
     x0 = jnp.floor(wind_x).astype(int)
     y0 = jnp.floor(wind_y).astype(int)
     x1 = x0 + 1
     y1 = y0 + 1
+
+    # Clip indices so they remain within grid bounds.
+    y0 = jnp.clip(y0, 0, gas_grid.shape[0] - 1)
+    x0 = jnp.clip(x0, 0, gas_grid.shape[1] - 1)
+    y1 = jnp.clip(y1, 0, gas_grid.shape[0] - 1)
+    x1 = jnp.clip(x1, 0, gas_grid.shape[1] - 1)
     
     # Calculate interpolation weights
     wx1 = wind_x - x0
     wy1 = wind_y - y0
     wx0 = 1 - wx1
     wy0 = 1 - wy1
+
+    # # Ensure indices stay within bounds
+    # x0 = jnp.clip(x0, 0, gas_grid.shape[1] - 1)
+    # y0 = jnp.clip(y0, 0, gas_grid.shape[0] - 1)
+    # x1 = jnp.clip(x1, 0, gas_grid.shape[1] - 1)
+    # y1 = jnp.clip(y1, 0, gas_grid.shape[0] - 1)
     
     # Distribute gas to the four nearest points
-    breakpoint()
-    gas_grid = gas_grid.at[x0.ravel(), y0.ravel()].add((gas_grid * (wx0 * wy0)).ravel()) # Adjust using jax methods since x0 and y0 are not floats but matrices of float
-    gas_grid = gas_grid.at[x1.ravel(), y0.ravel()].add((gas_grid * (wx1 * wy0)).ravel())
-    gas_grid = gas_grid.at[x0.ravel(), y1.ravel()].add((gas_grid * (wx0 * wy1)).ravel())
-    gas_grid = gas_grid.at[x1.ravel(), y1.ravel()].add((gas_grid * (wx1 * wy1)).ravel())
 
-    
+    new_grid = jnp.zeros_like(gas_grid)
+
+    new_grid = new_grid.at[y0, x0, :].add(gas_grid * ((wy0 * wx0)[..., None]))
+    new_grid = new_grid.at[y0, x1, :].add(gas_grid * ((wy0 * wx1)[..., None]))
+    new_grid = new_grid.at[y1, x0, :].add(gas_grid * ((wy1 * wx0)[..., None]))
+    new_grid = new_grid.at[y1, x1, :].add(gas_grid * ((wy1 * wx1)[..., None]))
+
     return gas_grid
 
 if __name__ == '__main__':
-    gas_grid = jnp.zeros((5, 7))
-    gas_grid = gas_grid.at[3, 3].set(1)
-    print(step(gas_grid, 0.5, 0.5, (0.1, 0.5)))
+    gas_grid = jnp.zeros((5, 7, 3))
+    gas_grid = gas_grid.at[3, 3, :].set(1)
+    result = step(gas_grid, 0.5, 0.5, (0.1, 0.5), 3)
+
+    for c in range(result.shape[2]):
+        print(f"Channel {c}:")
+        print(result[:, :, c])
+        print()
