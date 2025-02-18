@@ -1,6 +1,6 @@
 import time
 import functools
-from typing import Tuple, TypeVar
+from typing import Tuple, TypeVar, Any
 
 import jax
 import jax.numpy as jnp
@@ -12,6 +12,7 @@ import chex
 
 from dirt.gridworld2d import dynamics, observations, spawn
 from mechagogue.dp.population_game import population_game
+from mechagogue.player_list import birthday_player_list, player_family_tree
 
 TNomNomParams = TypeVar('TNomNomParams', bound='NomNomParams')
 TNomNomState = TypeVar('TNomNomState', bound='NomNomState')
@@ -53,15 +54,13 @@ class NomNomState:
     object_grid : jnp.ndarray
     
     # player shaped data
-    players : jnp.ndarray
-    parents : jnp.ndarray
-    children : jnp.ndarray
+    family_tree : Any
     player_x : jnp.ndarray
     player_r : jnp.ndarray
     player_energy : jnp.ndarray
     
     # constant shaped data
-    next_new_player_id : int
+    #next_new_player_id : int
 
 @dataclass
 class NomNomAction:
@@ -91,8 +90,6 @@ class NomNomObservation:
     view : jnp.ndarray
     energy : jnp.ndarray
 
-
-
 def nomnom(
     params: TNomNomParams = NomNomParams,
 ):
@@ -103,34 +100,21 @@ def nomnom(
     step will take a random key, a previous state and an action and produce
     a new state, observation, list of players and their parents. 
     '''
-    # def init():
-    #     reset, step = population_game(
-    #         nomnom_initialize,
-    #         nomnom_transition,
-    #         nomnom_observe,
-    #         (lambda params, state : state.player_id, 
-    #         lambda params, state : state.parent_id,
-    #         lambda params, state : state.children_id,
-    #         )
-    #     )
     
-    #     return reset, step
+    init_players, step_players, active_players = birthday_player_list(
+        params.max_players)
+    init_family_tree, step_family_tree, active_family_tree = player_family_tree(
+        init_players, step_players, active_players, 1)
     
-    def nomnom_initialize(
+    def init_state(
         key : chex.PRNGKey,
     ) -> TNomNomState :
         '''
         Returns a NomNomState object representing the start of a new episode.
-    
-        When used inside a jit compiled program, params must come from a static
-        variable as it controls the shapes of various arrays.
         '''
         # initialize the players
-        players = jnp.full(params.max_players, -1, dtype=jnp.int32)
-        players = players.at[:params.initial_players].set(
-            jnp.arange(params.initial_players))
-        parents = jnp.full((params.max_players, 1), -1, dtype=jnp.int32)
-        children = jnp.full((params.max_players,), -1, dtype=jnp.int32)
+        family_tree = init_family_tree(params.max_players)
+        
         key, xr_key = jrng.split(key)
         player_x, player_r = spawn.unique_xr(
             xr_key, params.max_players, params.world_size)
@@ -139,7 +123,9 @@ def nomnom(
     
         # initialize the object grid
         object_grid = jnp.full(params.world_size, -1, dtype=jnp.int32)
-        object_grid.at[player_x[...,0], player_x[...,1]].set(players)
+        active_players = active_family_tree(family_tree)
+        object_grid.at[player_x[...,0], player_x[...,1]].set(
+            jnp.where(active_players, jnp.arange(params.max_players), -1))
     
         # initialize the food grid
         key, foodkey = jrng.split(key)
@@ -154,20 +140,20 @@ def nomnom(
         state =  NomNomState(
             food_grid,
             object_grid,
-            players,
-            parents,
-            children,
+            family_tree,
+            #players,
+            #parents,
+            #children,
             player_x,
             player_r,
             player_energy,
-            params.initial_players,
+            #params.initial_players,
         )
 
         return state
 
-    def nomnom_observe(
+    def observe(
         key: chex.PRNGKey,
-        # config: TNomNomParams,
         state: TNomNomState,
     ) -> TNomNomObservation :
         '''
@@ -181,8 +167,9 @@ def nomnom(
         # construct a grid that contains class labels at each location
         # (0 = free space, 1 = food, 2 = player, 3 = out-of-bounds)
         view_grid = state.food_grid.astype(jnp.uint8)
+        active_players = active_family_tree(state.family_tree)
         view_grid.at[state.player_x[...,0], state.player_x[...,1]].set(
-            2 * (state.players != -1))
+            2 * active_players)
     
         # clip the viewing rectangles out for each player
         view = observations.first_person_view(
@@ -195,7 +182,7 @@ def nomnom(
         )
         return NomNomObservation(view, state.player_energy)
     
-    def nomnom_transition(
+    def transition(
         key: chex.PRNGKey,
         state: TNomNomState,
         action: TNomNomAction,
@@ -220,9 +207,10 @@ def nomnom(
 
         # eat
         # - figure out who will eat which food
-        player_alive = (state.players != -1)
+        #player_alive = (state.players != -1)
+        active_players = active_family_tree(state.family_tree)
         food_at_player = state.food_grid[player_x[...,0], player_x[...,1]]
-        eaten_food = food_at_player * player_alive
+        eaten_food = food_at_player * active_players
         # - update the player energy with the food they have just eaten
         player_energy = jnp.clip(
             state.player_energy + eaten_food * params.food_metabolism,
@@ -239,25 +227,50 @@ def nomnom(
             player_energy +
             moved * params.move_metabolism +
             (1. - moved) * params.wait_metabolism
-        ) * player_alive
+        ) * active_players
     
         # kill players that have starved
-        player_alive = player_alive & (player_energy > 0.)
-        players = state.players * player_alive + -1 * ~player_alive
-    
+        #player_alive = player_alive & (player_energy > 0.)
+        #players = state.players * player_alive + -1 * ~player_alive
+        deaths = player_energy <= 0.
+
         # update the object grid to account for dead players
-        object_grid = object_grid.at[player_x[...,0], player_x[...,1]].set(
-            players)
-    
+        #object_grid = object_grid.at[player_x[...,0], player_x[...,1]].set(
+        #    players)
+
         # make new players based on reproduction
         # - filter the reproduce vector to remove dead players and those without
         #   enough energy to create offspring
         reproduce = (
             action.reproduce &
             (player_energy > params.initial_energy) &
-            player_alive
+            active_players
         )
-        # - generate the new players
+        
+        # - generate the new child locations (filter out colliding children)
+        reproduce, child_x, child_r = spawn.spawn_from_parents(
+            reproduce,
+            player_x,
+            player_r,
+            object_grid=object_grid,
+            #child_ids=child_ids,
+        )
+        
+        # - use reproduce to make new child ids and update the player data
+        #births = jnp.sum(reproduce)
+        n = reproduce.shape[0]
+        parent_locations, = jnp.nonzero(reproduce, size=n, fill_value=n)
+        parent_locations = parent_locations[...,None]
+        family_tree, child_locations = step_family_tree(
+            state.family_tree, deaths, parent_locations)
+        
+        # update the object grid
+        object_grid = object_grid.at[player_x[...,0], player_x[...,1]].set(
+            jnp.where(deaths, -1, jnp.arange(n)))
+        object_grid = object_grid.at[child_x[...,0], child_x[...,1]].set(
+            child_locations)
+        
+        '''
         (
             # next_new_player_id,
             # player_new,
@@ -282,7 +295,7 @@ def nomnom(
             # jnp.full_like(player_energy, params.initial_energy),
             object_grid=object_grid,
         )
-    
+        '''
         # grow new food
         key, food_key = jrng.split(key)
         food_grid = food_grid | spawn.poisson_grid(
@@ -296,17 +309,32 @@ def nomnom(
         state = NomNomState(
             food_grid,
             object_grid,
-            players,
-            parents,
-            children,
+            family_tree,
+            #players,
+            #parents,
+            #children,
             player_x,
             player_r,
             player_energy,
-            next_new_player_id
+            #next_new_player_id
         )
         return state
     
-    def nomnom_player_info(state):
-        return state.players, state.parents, state.children
+    def active_players(state):
+        return active_family_tree(state.family_tree)
+    
+    def family_info(next_state):
+        birthdays = next_state.family_tree.player_list.players[...,0]
+        current_time = next_state.family_tree.player_list.current_time 
+        child_locations, = jnp.nonzero(
+            birthdays == current_time,
+            size=params.max_players,
+            fill_value=params.max_players,
+        )
+        parent_info = next_state.family_tree.parents[child_locations]
+        parent_locations = parent_info[...,1]
+        
+        return parent_locations, child_locations
 
-    return population_game(nomnom_initialize, nomnom_transition, nomnom_observe, nomnom_player_info)
+    return population_game(
+        init_state, transition, observe, active_players, family_info)
