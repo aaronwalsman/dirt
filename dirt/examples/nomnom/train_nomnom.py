@@ -59,42 +59,47 @@ def train(key, params):
     # the outer loop is not scanned because it will have side effects
     # (saving checkpoints)
     #def train_block(train_state_active, key):
+    
+        
+    def scan_body(train_state_active, step_key):
+        train_state, _ = train_state_active
+        next_train_state, active_players, parents, children = step_train(
+            step_key, train_state)
+        return (
+            (next_train_state, active_players),
+            (active_players, parents, children),
+        )
+    scan_body = jax.jit(scan_body)   
+    
     for epoch in range(params.epochs):
+        key, epoch_key = jrng.split(key)
         env_state = train_state.env_state
         jax.debug.print(
-            'Population: {p}, Food: {f}',
-            p=jnp.sum(active_players != -1),
-            f=jnp.sum(env_state.food_grid)
+            'Population: {p}, Food: {f}', #, Energy: {e}',
+            p=jnp.sum(active_players),
+            f=jnp.sum(env_state.food_grid),
+            #e=env_state.player_energy,
         )
-        
-        def scan_body(train_state_active, key):
-            train_state, _ = train_state_active
-            next_train_state, active_players, parents, children = step_train(
-                key, train_state)
-            return (
-                (next_train_state, active_players),
-                (active_players, parents, children),
-            )
         
         train_state_active_players, trajectories = jax.lax.scan(
             scan_body,
             (train_state, active_players),
-            jrng.split(key, params.steps_per_epoch),
+            jrng.split(epoch_key, params.steps_per_epoch),
         )
         train_state, active_players = train_state_active_players
         
         # DUMP TRAJECTORIES HERE
     
     # generate step keys
-    key, step_key = jrng.split(key)
-    step_keys = jrng.split(step_key, params.epochs)
+    #key, step_key = jrng.split(key)
+    #step_keys = jrng.split(step_key, params.epochs)
     
     # iterate
-    train_state, _ = jax.lax.scan(
-        train_block,
-        (train_state, active_players),
-        step_keys,
-    )
+    #train_state, _ = jax.lax.scan(
+    #    train_block,
+    #    (train_state, active_players),
+    #    step_keys,
+    #)
     
     return train_state
 
@@ -104,9 +109,9 @@ if __name__ == '__main__':
     
     max_players = 256
     env_params = NomNomParams(
-        mean_initial_food=4**2,
+        mean_initial_food=8**2,
         max_initial_food=32**2,
-        mean_food_growth=1**2,
+        mean_food_growth=2**2,
         max_food_growth=16**2,
         initial_players=32,
         max_players=max_players,
@@ -119,7 +124,7 @@ if __name__ == '__main__':
         env_params=env_params,
         train_params=train_params,
         epochs=10,
-        steps_per_epoch=1,
+        steps_per_epoch=100,
     )
 
     train(key, params)

@@ -100,14 +100,16 @@ def nomnom(
         Returns a NomNomState object representing the start of a new episode.
         '''
         # initialize the players
-        family_tree = init_family_tree(params.max_players)
+        family_tree = init_family_tree(params.initial_players)
         
         key, xr_key = jrng.split(key)
         player_x, player_r = spawn.unique_xr(
             xr_key, params.max_players, params.world_size)
         
-        player_energy = jnp.full((params.max_players,), params.initial_energy)
-    
+        #player_energy = jnp.full((params.max_players,), params.initial_energy)
+        n_hot = jnp.arange(params.max_players) < params.initial_players
+        player_energy = n_hot * params.initial_energy
+        
         # initialize the object grid
         object_grid = jnp.full(params.world_size, -1, dtype=jnp.int32)
         active_players = active_family_tree(family_tree)
