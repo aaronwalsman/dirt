@@ -56,21 +56,28 @@ def train(key, params):
     key, reset_key = jrng.split(key)
     train_state, active_players = reset_train(reset_key)
     
-    # the outer loop is not scanned because it will have side effects
-    # (saving checkpoints)
-    #def train_block(train_state_active, key):
-    
+    # precompile the primary epoch training computation
+    def train_epoch(epoch_key, train_state, active_players):
+        def scan_body(train_state_active, step_key):
+            train_state, _ = train_state_active
+            next_train_state, active_players, parents, children = step_train(
+                step_key, train_state)
+            return (
+                (next_train_state, active_players),
+                (active_players, parents, children),
+            )
         
-    def scan_body(train_state_active, step_key):
-        train_state, _ = train_state_active
-        next_train_state, active_players, parents, children = step_train(
-            step_key, train_state)
-        return (
-            (next_train_state, active_players),
-            (active_players, parents, children),
+        train_state_active_players, trajectories = jax.lax.scan(
+            scan_body,
+            (train_state, active_players),
+            jrng.split(epoch_key, params.steps_per_epoch),
         )
-    scan_body = jax.jit(scan_body)   
+        
+        return train_state_active_players
     
+    train_epoch = jax.jit(train_epoch)
+    
+    # the outer loop is not scanned because it will have side effects
     for epoch in range(params.epochs):
         key, epoch_key = jrng.split(key)
         env_state = train_state.env_state
@@ -81,25 +88,10 @@ def train(key, params):
             #e=env_state.player_energy,
         )
         
-        train_state_active_players, trajectories = jax.lax.scan(
-            scan_body,
-            (train_state, active_players),
-            jrng.split(epoch_key, params.steps_per_epoch),
-        )
-        train_state, active_players = train_state_active_players
+        train_state, active_players = train_epoch(
+            epoch_key, train_state, active_players)
         
         # DUMP TRAJECTORIES HERE
-    
-    # generate step keys
-    #key, step_key = jrng.split(key)
-    #step_keys = jrng.split(step_key, params.epochs)
-    
-    # iterate
-    #train_state, _ = jax.lax.scan(
-    #    train_block,
-    #    (train_state, active_players),
-    #    step_keys,
-    #)
     
     return train_state
 
