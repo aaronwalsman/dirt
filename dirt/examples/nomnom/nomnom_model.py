@@ -13,28 +13,32 @@ from mechagogue.nn.distributions import categorical_sampler_layer
 from dirt.examples.nomnom.nomnom_env import NomNomObservation, NomNomAction
 
 @static_dataclass
-class NomNomModelConfig:
+class NomNomModelParams:
     num_input_classes : int = 4
     view_width : int = 5
     view_distance : int = 5
 
-def nomnom_model(config=NomNomModelConfig()):
+def nomnom_model(params=NomNomModelParams()):
     
-    # make a relu
+    # utility
+    # - make a relu
     relu = (lambda: None, jnn.relu)
     
-    # view encoder
-    view_embedding = embedding_layer(config.num_input_classes, 32)
+    # encoder
+    #   this section builds the components that convert the inputs to a fixed
+    #   hidden dimension that can be processed by the backbone
+    # - view encoder
+    view_embedding = embedding_layer(params.num_input_classes, 32)
     view_conv1 = conv_layer(32, 64, padding='VALID')
     view_conv2 = conv_layer(64, 128, padding='VALID')
-    flattened_channels = (config.view_width-4) * (config.view_distance-4) * 128
+    flattened_channels = (params.view_width-4) * (params.view_distance-4) * 128
     flatten = (lambda: None, lambda x : x.reshape(flattened_channels))
     view_fc1 = linear_layer(flattened_channels, 128)
     view_encoder = layer_sequence(
         (view_embedding, view_conv1, relu, view_conv2, flatten, relu, view_fc1)
     )
     
-    # energy encoder
+    # - energy encoder
     energy_encoder = layer_sequence((
         (lambda: None, lambda x : x.reshape(-1)),
         mlp(
@@ -45,7 +49,10 @@ def nomnom_model(config=NomNomModelConfig()):
         ),
     ))
     
-    # combine the encoders
+    # - combine the encoders
+    #   this first converts an observation object to a dictionary
+    #   then passes that dictionary to the corresponding encoders
+    #   then sums the output
     encoder = layer_sequence((
         (lambda: None, lambda x : {'view': x.view, 'energy': x.energy}),
         parallel_dict_layer({'view':view_encoder, 'energy':energy_encoder}),
@@ -54,6 +61,7 @@ def nomnom_model(config=NomNomModelConfig()):
     ))
     
     # backbone
+    #   this is a small MLP
     backbone = layer_sequence((
         linear_layer(128, 64),
         relu,
@@ -63,6 +71,9 @@ def nomnom_model(config=NomNomModelConfig()):
     ))
     
     # decoder heads
+    #   the decoders convert the output of the MLP to the individual
+    #   components of the action
+    # - these are three linear layers followed by categorical samplers
     decoder_heads = parallel_dict_layer({
         'forward' : layer_sequence(
             (linear_layer(32, 2), categorical_sampler_layer)),
@@ -72,11 +83,14 @@ def nomnom_model(config=NomNomModelConfig()):
             (linear_layer(32, 2), categorical_sampler_layer)),
     })
     
+    # - this runs the three decoders and then combines the result into a
+    #   new action
     decoder = layer_sequence((
         decoder_heads,
         (lambda: None, lambda x : NomNomAction(**x))
     ))
     
+    # combine the encoder, backbone and decoder
     return layer_sequence([
         encoder,
         backbone,

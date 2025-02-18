@@ -1,25 +1,23 @@
-import time
-import functools
 from typing import Tuple, TypeVar, Any
 
 import jax
 import jax.numpy as jnp
 import jax.random as jrng
 
-from flax.struct import dataclass
-
 import chex
 
-from dirt.gridworld2d import dynamics, observations, spawn
+from mechagogue.static_dataclass import static_dataclass
 from mechagogue.dp.population_game import population_game
 from mechagogue.player_list import birthday_player_list, player_family_tree
+
+from dirt.gridworld2d import dynamics, observations, spawn
 
 TNomNomParams = TypeVar('TNomNomParams', bound='NomNomParams')
 TNomNomState = TypeVar('TNomNomState', bound='NomNomState')
 TNomNomObservation = TypeVar('TNomNomObservation', bound='NomNomObservation')
 TNomNomAction = TypeVar('TNomNomAction', bound='NomNomAction')
 
-@dataclass
+@static_dataclass
 class NomNomParams:
     '''
     Configuration parameters.  This should only contain values that will be
@@ -44,7 +42,7 @@ class NomNomParams:
     view_width : int = 5
     view_distance : int = 5
 
-@dataclass
+@static_dataclass
 class NomNomState:
     '''
     State information about a single Nom environment.
@@ -58,11 +56,8 @@ class NomNomState:
     player_x : jnp.ndarray
     player_r : jnp.ndarray
     player_energy : jnp.ndarray
-    
-    # constant shaped data
-    #next_new_player_id : int
 
-@dataclass
+@static_dataclass
 class NomNomAction:
     '''
     An action in the Nom environment consists of three buttons:
@@ -73,16 +68,8 @@ class NomNomAction:
     forward : jnp.ndarray
     rotate : jnp.ndarray
     reproduce : jnp.ndarray
-    
-    @classmethod
-    def uniform_sample(cls, key, n):
-        forward_key, rotate_key, reproduce_key = jrng.split(key, 3)
-        forward = jrng.randint(forward_key, shape=(n,), minval=0, maxval=2)
-        rotate = jrng.randint(rotate_key, shape=(n,), minval=-1, maxval=2)
-        reproduce = jrng.randint(reproduce_key, shape=(n,), minval=0, maxval=2)
-        return NomNomAction(forward, rotate, reproduce)
 
-@dataclass
+@static_dataclass
 class NomNomObservation:
     '''
     An observation in the Nom environment.
@@ -141,13 +128,9 @@ def nomnom(
             food_grid,
             object_grid,
             family_tree,
-            #players,
-            #parents,
-            #children,
             player_x,
             player_r,
             player_energy,
-            #params.initial_players,
         )
 
         return state
@@ -159,9 +142,6 @@ def nomnom(
         '''
         Computes the observation of a NomNom environment given the environment
         params and state.
-    
-        When used inside a jit compiled program, params must come from a static
-        variable as it controls the shapes of various arrays.
         '''
     
         # construct a grid that contains class labels at each location
@@ -190,9 +170,6 @@ def nomnom(
         '''
         Transition function for the NomNom environment.  Samples a new state
         given the environment params, a previous state and an action.
-    
-        When used inside a jit compiled program, params must come from a static
-        variable as it controls the shapes of various arrays.
         '''
     
         # move
@@ -207,7 +184,6 @@ def nomnom(
 
         # eat
         # - figure out who will eat which food
-        #player_alive = (state.players != -1)
         active_players = active_family_tree(state.family_tree)
         food_at_player = state.food_grid[player_x[...,0], player_x[...,1]]
         eaten_food = food_at_player * active_players
@@ -230,13 +206,9 @@ def nomnom(
         ) * active_players
     
         # kill players that have starved
-        #player_alive = player_alive & (player_energy > 0.)
-        #players = state.players * player_alive + -1 * ~player_alive
         deaths = player_energy <= 0.
 
         # update the object grid to account for dead players
-        #object_grid = object_grid.at[player_x[...,0], player_x[...,1]].set(
-        #    players)
 
         # make new players based on reproduction
         # - filter the reproduce vector to remove dead players and those without
@@ -253,11 +225,9 @@ def nomnom(
             player_x,
             player_r,
             object_grid=object_grid,
-            #child_ids=child_ids,
         )
         
         # - use reproduce to make new child ids and update the player data
-        #births = jnp.sum(reproduce)
         n = reproduce.shape[0]
         parent_locations, = jnp.nonzero(reproduce, size=n, fill_value=n)
         parent_locations = parent_locations[...,None]
@@ -270,32 +240,6 @@ def nomnom(
         object_grid = object_grid.at[child_x[...,0], child_x[...,1]].set(
             child_locations)
         
-        '''
-        (
-            # next_new_player_id,
-            # player_new,
-            # player_id,
-            # parent_id,
-            player_x,
-            player_r,
-            next_new_player_id,
-            players,
-            parents,
-            children,
-            object_grid,
-        ) = spawn.reproduce_from_parents(
-            reproduce,
-            state.next_new_player_id,
-            state.players,
-            # player_id,
-            # state.parent_id,
-            player_x,
-            player_r,
-            # player_energy,
-            # jnp.full_like(player_energy, params.initial_energy),
-            object_grid=object_grid,
-        )
-        '''
         # grow new food
         key, food_key = jrng.split(key)
         food_grid = food_grid | spawn.poisson_grid(
@@ -310,13 +254,9 @@ def nomnom(
             food_grid,
             object_grid,
             family_tree,
-            #players,
-            #parents,
-            #children,
             player_x,
             player_r,
             player_energy,
-            #next_new_player_id
         )
         return state
     
