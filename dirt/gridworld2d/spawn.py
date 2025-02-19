@@ -199,18 +199,15 @@ def poisson_grid(
     
     return grid
 
-def reproduce_from_parents(
+def spawn_from_parents(
     reproduce,
-    next_player_id,
-    players,
-    player_x,
-    player_r,
-    #player_data,
-    #birth_process,
+    parent_x,
+    parent_r,
     world_size=None,
     object_grid=None,
+    #child_ids=None,
     child_x_offset=(-1,0),
-    child_r_offset=2,
+    child_r_offset=0,
     empty=-1,
 ):
     '''
@@ -218,25 +215,24 @@ def reproduce_from_parents(
     local offsets from a single parent.  If given a world_size or object_grid
     this will also check to make sure new children are in bounds and do not
     collide with another object.  If an object_grid is provided, an updated
-    
     '''
     
     if object_grid is not None:
-        # assert (world_size is None) or (world_size == object_grid.shape)
+        assert world_size is None
         world_size = object_grid.shape
     
     child_x, child_r = dynamics.step(
-        player_x,
-        player_r,
-        jnp.array(child_x_offset)[None,:],
-        jnp.array(child_r_offset)[None],
+        parent_x,
+        parent_r,
+        jnp.array(child_x_offset), #[None,:],
+        jnp.array(child_r_offset), #[None],
         space='local',
         out_of_bounds='none',
     )
     
-    # filter out children that don't fit onto the grid
-    n = player_x.shape[0]
-    valid_children = jnp.ones(n, dtype=jnp.bool)
+    # filter out invalid children
+    n, = parent_r.shape
+    valid_children = reproduce
     # - first, make sure the child locations would be inside the world
     if world_size is not None:
         inbounds = (
@@ -248,79 +244,34 @@ def reproduce_from_parents(
     # - second make sure the children will not be on top of any existing objects
     if object_grid is not None:
         child_colliders = object_grid[child_x[:,0], child_x[:,1]]
-        no_collisions = (child_colliders == empty)
         valid_children = valid_children & (child_colliders == empty)
     
     # update the non-reproduced child_x locations to be off the grid so they
     # don't overwrite important values in the object array
     out_of_bounds_x = jnp.array(world_size)[None,:]
     child_x = jnp.where(valid_children[:,None], child_x, out_of_bounds_x)
-    
-    # reproduce
-    # player_data, child_ids = heredity.produce_children(
-    #     parents,
-    #     player_data,
-    #     birth_process,
-    #     empty=empty,
-    # )
-    parents, = jnp.nonzero(
-            reproduce,
-            size=n,
-            fill_value=n,
-        )
-    parents = parents[:,None]
-    num_new_players = jnp.sum(reproduce)
-        
-    # find locations for the new children
-    all_locations = jnp.arange(n)
-    active_children = all_locations < num_new_players
-    alive = players != -1
-    available_locations, = jnp.nonzero(
-        ~alive, size=n, fill_value=n)
-    children = jnp.where(
-        active_children, available_locations, n)
-    child_ids = jnp.where(
-        active_children, all_locations + next_player_id, -1)
-    players = players.at[children].set(child_ids)
-    
 
-    player_x = player_x.at[children].set(child_x)
-    player_r = player_r.at[children].set(child_r)
+    #parent_x = parent_x.at[children].set(child_x)
+    #parent_r = parent_r.at[children].set(child_r)
     # update the object grid
+    '''
     if object_grid is not None:
+        assert child_ids is not None
         object_grid = object_grid.at[child_x[...,0], child_x[...,1]].set(
             child_ids)
         return (
-            player_x,
-            player_r,
-            players,
-            parents,
-            children,
-            # next_child_start_id,
-            # all_new,
-            # all_id,
-            # all_parents,
-            # all_x,
-            # all_r,
-            # all_data,
+            valid_children,
+            child_x,
+            child_r,
             object_grid,
         )
-    
-    else:
-        return (
-            player_x,
-            player_r,
-            players,
-            parents,
-            children,
-            # next_child_start_id,
-            # all_new,
-            # all_id,
-            # all_parents,
-            # all_x,
-            # all_r,
-            # all_data,
-        )
+    '''
+    #else:
+    return (
+        valid_children,
+        child_x,
+        child_r,
+    )
 
 def reproduce_from_parents_old(
     reproduce,

@@ -43,6 +43,8 @@ def rotate(
     pivot : The rotation pivot point.
     '''
     m = gridworld2d_rotation_matrices[r]
+    # the [...,None] forces jnp to recognize x as a 2x1-vector
+    # and [...,0] clips it back to a 2-vector again
     return (m @ (x-pivot)[...,None])[...,0] + pivot
 
 def wrap_x(
@@ -106,6 +108,10 @@ def collide(
     max_occupancy : int = 1,
 ) -> Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray] :
     '''
+    Checks for collisions as objects at x0 move to x1.  Objects are
+    considered to have collided if they land on a location that another object
+    moved either from or to.  The movement of any colliding objects is undone.
+    
     Updates the occupancy_grid based on the movement from x0 to x1, then
     checks if any of the updates have resulted in too many items in the
     same position and undoes all movements where this has occurred.
@@ -115,20 +121,19 @@ def collide(
     
     x0 : The starting position for each moving object.
     x1 : The ending position for each moving object.
-    occupancy_grid : The occupancy map before the motion.
+    occupancy_grid : The occupancy grid before the motion.
     '''
-    occupancy_grid = move_mass(x0, x1, occupancy_grid)
-    collided = (occupancy_grid[x1[:,0], x1[:,1]] > 1)[...,None]
-    x2 = x1 * ~collided + x0 * collided
-    occupancy_grid = move_mass(x1, x2, occupancy_grid)
+    collision_grid = occupancy_grid | move_mass(x0, x1, occupancy_grid)
+    collided = (collision_grid[x1[:,0], x1[:,1]] > 1)[...,None]
+    x2 = jnp.where(collided, x0, x1) #x1 * ~collided + x0 * collided
+    occupancy_grid = move_mass(x0, x2, occupancy_grid)
     return x2, collided, occupancy_grid
-
 
 def move_objects(
     x0 : jnp.ndarray,
     x1 : jnp.ndarray,
     object_grid : jnp.ndarray,
-    background : Union[int, float, jnp.ndarray] = -1,
+    empty : int = -1,
 ) -> jnp.ndarray :
     '''
     Returns a new object_grid after objects at position x0
@@ -143,7 +148,7 @@ def move_objects(
     object_grid : The existing object_grid.
     '''
     values = object_grid[x0[...,0], x0[...,1]]
-    object_grid = object_grid.at[x0[...,0], x0[...,1]].set(background)
+    object_grid = object_grid.at[x0[...,0], x0[...,1]].set(empty)
     object_grid = object_grid.at[x1[...,0], x1[...,1]].set(values)
     return object_grid
 
@@ -151,7 +156,7 @@ def move_and_collide_objects(
     x0 : jnp.ndarray,
     x1 : jnp.ndarray,
     object_grid : jnp.ndarray,
-    background : int = -1,
+    empty : int = -1,
 ) -> Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray] :
     '''
     Returns a new object_grid after attempting to move objects at
@@ -163,9 +168,9 @@ def move_and_collide_objects(
         added to these locations.
     object_grid : The existing object_grid.
     '''
-    occupancy_grid = (object_grid != background).astype(jnp.int32)
+    occupancy_grid = (object_grid != empty).astype(jnp.int32)
     x2, collided, _ = collide(x0, x1, occupancy_grid)
-    object_grid = move_objects(x0, x2, object_grid, background=background)
+    object_grid = move_objects(x0, x2, object_grid, empty=empty)
     return x2, collided, object_grid
 
 def step(
