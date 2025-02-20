@@ -57,6 +57,8 @@ class NomNomState:
     player_r : jnp.ndarray
     player_energy : jnp.ndarray
 
+    curr_step: jnp.int8
+
 @static_dataclass
 class NomNomAction:
     '''
@@ -133,6 +135,7 @@ def nomnom(
             player_x,
             player_r,
             player_energy,
+            0
         )
 
         return state
@@ -250,7 +253,7 @@ def nomnom(
             params.max_food_growth,
             params.world_size,
         )
-    
+
         # compute new state
         state = NomNomState(
             food_grid,
@@ -259,6 +262,7 @@ def nomnom(
             player_x,
             player_r,
             player_energy,
+            state.curr_step + 1
         )
         return state
     

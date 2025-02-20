@@ -20,6 +20,8 @@ from mechagogue.serial import save_leaf_data, load_from_example
 from dirt.examples.nomnom.nomnom_env import nomnom, NomNomParams, NomNomAction
 from dirt.examples.nomnom.nomnom_model import NomNomModelParams, nomnom_model
 
+import wandb
+
 @static_dataclass
 class NomNomTrainParams:
     env_params : Any
@@ -30,6 +32,9 @@ class NomNomTrainParams:
     load_from_file : Any = None
 
 def train(key, params):
+    wandb.init(project="nomnom",
+               entity="harvardml"
+               )
     
     # build the necessary functions
     # - build the environment functions
@@ -78,6 +83,7 @@ def train(key, params):
             scan_body,
             train_state,
             jrng.split(epoch_key, params.steps_per_epoch),
+            logging_info
         )
         
         return train_state, reports
@@ -98,11 +104,26 @@ def train(key, params):
             (key, epoch, train_state),
             f'{params.output_location}/train_state_{epoch}.state',
         )
+<<<<<<< HEAD
         save_leaf_data(
             reports,
             f'{params.output_location}/report_{epoch}.state',
         )
         epoch += 1
+=======
+        
+        train_state, active_players, logging_info = train_epoch(
+            epoch_key, train_state, active_players, logging_info)
+        
+        # For the 3 components of actions
+        wandb.log(logging_info, step=train_state)
+        wandb.log(logging_info, step=train_state)
+        wandb.log(logging_info, step=train_state)
+        
+        import pdb; pdb.set_trace()
+        
+        # DUMP TRAJECTORIES HERE
+>>>>>>> 8f13f412b36122cf02fc601bcd683b615c07a25d
     
     return train_state
 
