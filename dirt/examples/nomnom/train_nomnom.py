@@ -98,6 +98,11 @@ def train(key, params):
         train_state, active_players, logging_info = train_epoch(
             epoch_key, train_state, active_players, logging_info)
         
+        # For the 3 components of actions
+        wandb.log(logging_info, step=train_state)
+        wandb.log(logging_info, step=train_state)
+        wandb.log(logging_info, step=train_state)
+        
         import pdb; pdb.set_trace()
         
         # DUMP TRAJECTORIES HERE
