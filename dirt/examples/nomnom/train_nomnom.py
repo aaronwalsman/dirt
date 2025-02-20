@@ -104,13 +104,11 @@ def train(key, params):
             (key, epoch, train_state),
             f'{params.output_location}/train_state_{epoch}.state',
         )
-<<<<<<< HEAD
         save_leaf_data(
             reports,
             f'{params.output_location}/report_{epoch}.state',
         )
         epoch += 1
-=======
         
         train_state, active_players, logging_info = train_epoch(
             epoch_key, train_state, active_players, logging_info)
@@ -121,9 +119,6 @@ def train(key, params):
         wandb.log(logging_info, step=train_state)
         
         import pdb; pdb.set_trace()
-        
-        # DUMP TRAJECTORIES HERE
->>>>>>> 8f13f412b36122cf02fc601bcd683b615c07a25d
     
     return train_state
 
