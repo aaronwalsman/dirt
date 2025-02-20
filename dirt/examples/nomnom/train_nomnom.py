@@ -15,6 +15,7 @@ from mechagogue.pop.natural_selection import (
 from mechagogue.breed.normal import normal_mutate
 from mechagogue.nn.mlp import mlp
 from mechagogue.static_dataclass import static_dataclass
+from mechagogue.serial import save_leaf_data, load_from_example
 
 from dirt.examples.nomnom.nomnom_env import nomnom, NomNomParams, NomNomAction
 from dirt.examples.nomnom.nomnom_model import NomNomModelParams, nomnom_model
@@ -25,6 +26,8 @@ class NomNomTrainParams:
     train_params : Any
     epochs : int = 100
     steps_per_epoch : int = 1000
+    output_location : str = '.'
+    load_from_file : Any = None
 
 def train(key, params):
     
@@ -52,46 +55,54 @@ def train(key, params):
         mutate,
     )
     
-    # - reset the training algorithm to get an initial state
+    # get the initial state of the training function
     key, reset_key = jrng.split(key)
-    train_state, active_players = reset_train(reset_key)
+    train_state, _ = jax.jit(reset_train)(reset_key)
+    epoch = 0
+    if params.load_from_file is not None:
+        key, epoch, train_state = load_like(
+            (key, epoch, train_state), params.load_from_file)
     
-    # precompile the primary epoch training computation
-    def train_epoch(epoch_key, train_state, active_players):
-        def scan_body(train_state_active, step_key):
-            train_state, _ = train_state_active
-            next_train_state, active_players, parents, children = step_train(
-                step_key, train_state)
-            return (
-                (next_train_state, active_players),
-                (active_players, parents, children),
-            )
+    def make_report(
+        state, actions, next_state, players, parent_locations, child_locations
+    ):
+        return None
+    
+    # precompile the primary epoch train computation
+    def train_epoch(epoch_key, train_state):
+        def scan_body(train_state, step_key):
+            next_train_state, report = step_train(step_key, train_state)
+            return next_train_state, report
         
-        train_state_active_players, trajectories = jax.lax.scan(
+        train_state, reports = jax.lax.scan(
             scan_body,
-            (train_state, active_players),
+            train_state,
             jrng.split(epoch_key, params.steps_per_epoch),
         )
         
-        return train_state_active_players
-    
+        return train_state, reports
     train_epoch = jax.jit(train_epoch)
     
     # the outer loop is not scanned because it will have side effects
-    for epoch in range(params.epochs):
+    while epoch < params.epochs:
+        print(f'Epoch: {epoch}')
         key, epoch_key = jrng.split(key)
         env_state = train_state.env_state
-        jax.debug.print(
-            'Population: {p}, Food: {f}', #, Energy: {e}',
-            p=jnp.sum(active_players),
-            f=jnp.sum(env_state.food_grid),
-            #e=env_state.player_energy,
+        
+        #print('  Population: %i'%jnp.sum(active_players))
+        #print('  Food: %i'%jnp.sum(env_state.food_grid))
+        
+        train_state, reports = train_epoch(epoch_key, train_state)
+        
+        save_leaf_data(
+            (key, epoch, train_state),
+            f'{params.output_location}/train_state_{epoch}.state',
         )
-        
-        train_state, active_players = train_epoch(
-            epoch_key, train_state, active_players)
-        
-        # DUMP TRAJECTORIES HERE
+        save_leaf_data(
+            reports,
+            f'{params.output_location}/report_{epoch}.state',
+        )
+        epoch += 1
     
     return train_state
 
