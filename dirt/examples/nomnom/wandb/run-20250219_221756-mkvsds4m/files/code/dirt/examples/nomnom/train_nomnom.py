@@ -65,7 +65,7 @@ def train(key, params):
     # precompile the primary epoch training computation
     def train_epoch(epoch_key, train_state, active_players, logging_info):
         def scan_body(train_state_active, step_key, logging_info):
-            train_state, _ = train_state_active
+            train_state, _, _ = train_state_active
             next_train_state, logging_info, active_players, parents, children = step_train(
                 step_key, train_state)
             return (

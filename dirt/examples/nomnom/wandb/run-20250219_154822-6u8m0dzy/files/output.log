@@ -1,0 +1,30 @@
+/n/home13/chloe00/miniforge3/envs/eco/lib/python3.12/site-packages/jax/_src/ops/scatter.py:92: FutureWarning: scatter inputs have incompatible types: cannot safely cast value from dtype=int64 to dtype=int32 with jax_numpy_dtype_promotion='standard'. In future JAX releases this will result in an error.
+  warnings.warn(
+Population: 32, Food: 29
+NomNomAction(forward=Traced<ShapedArray(int64[256])>with<DynamicJaxprTrace(level=2/0)>, rotate=Traced<ShapedArray(int64[256])>with<DynamicJaxprTrace(level=2/0)>, reproduce=Traced<ShapedArray(int64[256])>with<DynamicJaxprTrace(level=2/0)>)
+Traceback (most recent call last):
+  File "/n/holylfs06/LABS/sham_lab/Users/chloe00/dirt/dirt/examples/nomnom/train_nomnom.py", line 127, in <module>
+    train(key, params)
+  File "/n/holylfs06/LABS/sham_lab/Users/chloe00/dirt/dirt/examples/nomnom/train_nomnom.py", line 96, in train
+    train_state, active_players = train_epoch(
+                                  ^^^^^^^^^^^^
+  File "/n/holylfs06/LABS/sham_lab/Users/chloe00/dirt/dirt/examples/nomnom/train_nomnom.py", line 75, in train_epoch
+    train_state_active_players, trajectories = jax.lax.scan(
+                                               ^^^^^^^^^^^^^
+  File "/n/holylfs06/LABS/sham_lab/Users/chloe00/dirt/dirt/examples/nomnom/train_nomnom.py", line 68, in scan_body
+    next_train_state, active_players, parents, children = step_train(
+                                                          ^^^^^^^^^^^
+  File "/n/holylfs06/LABS/sham_lab/Users/chloe00/mechagogue/mechagogue/pop/natural_selection.py", line 88, in step
+    wandb.log()
+  File "/n/home13/chloe00/miniforge3/envs/eco/lib/python3.12/site-packages/wandb/sdk/wandb_run.py", line 441, in wrapper
+    return func(self, *args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/n/home13/chloe00/miniforge3/envs/eco/lib/python3.12/site-packages/wandb/sdk/wandb_run.py", line 393, in wrapper_fn
+    return func(self, *args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/n/home13/chloe00/miniforge3/envs/eco/lib/python3.12/site-packages/wandb/sdk/wandb_run.py", line 383, in wrapper
+    return func(self, *args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+TypeError: Run.log() missing 1 required positional argument: 'data'
+--------------------
+For simplicity, JAX has removed its internal frames from the traceback of the following exception. Set JAX_TRACEBACK_FILTERING=off to include these.

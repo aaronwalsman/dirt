@@ -60,11 +60,10 @@ def train(key, params):
     # - reset the training algorithm to get an initial state
     key, reset_key = jrng.split(key)
     train_state, active_players = reset_train(reset_key)
-    logging_info = []
     
     # precompile the primary epoch training computation
-    def train_epoch(epoch_key, train_state, active_players, logging_info):
-        def scan_body(train_state_active, step_key, logging_info):
+    def train_epoch(epoch_key, train_state, active_players):
+        def scan_body(train_state_active, step_key):
             train_state, _ = train_state_active
             next_train_state, logging_info, active_players, parents, children = step_train(
                 step_key, train_state)
@@ -77,7 +76,6 @@ def train(key, params):
             scan_body,
             (train_state, active_players),
             jrng.split(epoch_key, params.steps_per_epoch),
-            logging_info
         )
         
         return train_state_active_players
@@ -96,7 +94,7 @@ def train(key, params):
         )
         
         train_state, active_players, logging_info = train_epoch(
-            epoch_key, train_state, active_players, logging_info)
+            epoch_key, train_state, active_players)
         
         import pdb; pdb.set_trace()
         
