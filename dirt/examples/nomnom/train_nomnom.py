@@ -2,9 +2,9 @@
 This example is designed to test the nomnom environment in a training loop
 with a random policy.
 '''
-
 import time
-from typing import Any
+import argparse
+from typing import Any, Optional
 
 import jax
 import jax.numpy as jnp
@@ -24,12 +24,23 @@ import wandb
 
 @static_dataclass
 class NomNomTrainParams:
-    env_params : Any
-    train_params : Any
+    max_players : int = 256
+    env_params : Any = NomNomParams(
+        mean_initial_food=8**2,
+        max_initial_food=32**2,
+        mean_food_growth=2**2,
+        max_food_growth=16**2,
+        initial_players=32,
+        max_players=max_players,
+        world_size=(32,32)
+    )
+    train_params : Any = NaturalSelectionParams(
+        max_population=max_players,
+    )
     epochs : int = 100
     steps_per_epoch : int = 1000
-    output_location : str = '.'
-    load_from_file : Any = None
+    output_directory : str = './'
+    load_from_file : Optional[str] = None
 
 def train(key, params):
     wandb.init(project="nomnom",
@@ -71,7 +82,13 @@ def train(key, params):
     def make_report(
         state, actions, next_state, players, parent_locations, child_locations
     ):
-        return None
+        player_x = next_state.env_state.player_x
+        player_r = next_state.env_state.player_r
+        
+        return {
+            'player_x' : player_x,
+            'player_r' : player_r,
+        }
     
     # precompile the primary epoch train computation
     def train_epoch(epoch_key, train_state):
@@ -89,24 +106,26 @@ def train(key, params):
         return train_state, reports
     train_epoch = jax.jit(train_epoch)
     
+    save_leaf_data(
+        train_params,
+        f'{params.output_directory}/train_params.state',
+    )
+    
     # the outer loop is not scanned because it will have side effects
     while epoch < params.epochs:
         print(f'Epoch: {epoch}')
         key, epoch_key = jrng.split(key)
         env_state = train_state.env_state
         
-        #print('  Population: %i'%jnp.sum(active_players))
-        #print('  Food: %i'%jnp.sum(env_state.food_grid))
-        
         train_state, reports = train_epoch(epoch_key, train_state)
         
         save_leaf_data(
             (key, epoch, train_state),
-            f'{params.output_location}/train_state_{epoch}.state',
+            f'{params.output_directory}/train_state_{epoch}.state',
         )
         save_leaf_data(
             reports,
-            f'{params.output_location}/report_{epoch}.state',
+            f'{params.output_directory}/report_{epoch}.state',
         )
         epoch += 1
         
@@ -145,5 +164,11 @@ if __name__ == '__main__':
         epochs=10,
         steps_per_epoch=100,
     )
+    
+    # update these defaults with commandline arguments
+    parser = argparse.ArgumentParser()
+    params.add_commandline_args(parser)
+    args = parser.parse_args()
+    params = params.from_commandline_args(args)
 
     train(key, params)
