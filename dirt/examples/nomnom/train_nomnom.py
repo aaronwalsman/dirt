@@ -54,8 +54,8 @@ def train(key, params):
     def make_report(
         state, actions, next_state, players, parent_locations, child_locations
     ):
-        
-        return actions
+
+        return actions, players
     # - build the training functions
     reset_train, step_train = natural_selection(
         params.train_params,
@@ -115,22 +115,24 @@ def train(key, params):
         
         # train_state, active_players, logging_info = train_epoch(
         #     epoch_key, train_state, active_players, logging_info)
-
         
+        actions, players = reports
         # For the 3 components of actions
         fig, axes = plt.subplots(1, 3, figsize=(15, 5))
 
-        axes[0].hist(jnp.mean(reports.forward, axis=0), bins=20, color="blue", alpha=0.7)
+        axes[0].hist(jnp.mean(actions.forward * players, axis=0), bins=20, color="blue", alpha=0.7)
         axes[0].set_title("Action distribution 1: forward")
 
-        axes[1].hist(jnp.mean(reports.rotate, axis=0), bins=20, color="red", alpha=0.7)
+        axes[1].hist(jnp.mean(actions.rotate * players, axis=0), bins=20, color="red", alpha=0.7)
         axes[1].set_title("Action distribution 2: rotate")
 
-        axes[2].hist(jnp.mean(reports.reproduce, axis=0), bins=20, color="green", alpha=0.7)
+        axes[2].hist(jnp.mean(actions.reproduce * players, axis=0), bins=20, color="green", alpha=0.7)
         axes[2].set_title("Action distribution 3: reproduce")
 
         fig.tight_layout()
         wandb.log({"plot/actions": wandb.Image(fig)})
+
+        # wandb.log({"ps": })
         
     
     return train_state
