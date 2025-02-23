@@ -148,7 +148,7 @@ def train(key, params):
         fig.tight_layout()
         wandb.log({"plot/actions": wandb.Image(fig)})
 
-        # wandb.log({"ps": })
+        wandb.log({"active players": players.sum()})
         
     
     return train_state
