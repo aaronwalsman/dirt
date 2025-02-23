@@ -21,6 +21,7 @@ from dirt.examples.nomnom.nomnom_env import nomnom, NomNomParams, NomNomAction
 from dirt.examples.nomnom.nomnom_model import NomNomModelParams, nomnom_model
 
 import wandb
+import matplotlib.pyplot as plt
 
 @static_dataclass
 class NomNomTrainParams:
@@ -41,6 +42,16 @@ class NomNomTrainParams:
     steps_per_epoch : int = 1000
     output_directory : str = './'
     load_from_file : Optional[str] = None
+
+@static_dataclass
+class NomNomReport:
+    action : Any = NomNomAction()
+    players : 
+    
+def make_report(
+    state, actions, next_state, players, parent_locations, child_locations
+):
+    return actions, players
 
 def train(key, params):
     wandb.init(project="nomnom",
@@ -69,6 +80,7 @@ def train(key, params):
         init_model,
         model,
         mutate,
+        make_report
     )
     
     # get the initial state of the training function
@@ -76,19 +88,8 @@ def train(key, params):
     train_state, _ = jax.jit(reset_train)(reset_key)
     epoch = 0
     if params.load_from_file is not None:
-        key, epoch, train_state = load_like(
+        key, epoch, train_state = load_from_example(
             (key, epoch, train_state), params.load_from_file)
-    
-    def make_report(
-        state, actions, next_state, players, parent_locations, child_locations
-    ):
-        player_x = next_state.env_state.player_x
-        player_r = next_state.env_state.player_r
-        
-        return {
-            'player_x' : player_x,
-            'player_r' : player_r,
-        }
     
     # precompile the primary epoch train computation
     def train_epoch(epoch_key, train_state):
@@ -100,7 +101,6 @@ def train(key, params):
             scan_body,
             train_state,
             jrng.split(epoch_key, params.steps_per_epoch),
-            logging_info
         )
         
         return train_state, reports
@@ -129,15 +129,27 @@ def train(key, params):
         )
         epoch += 1
         
-        train_state, active_players, logging_info = train_epoch(
-            epoch_key, train_state, active_players, logging_info)
+        # train_state, active_players, logging_info = train_epoch(
+        #     epoch_key, train_state, active_players, logging_info)
         
+        actions, players = reports
         # For the 3 components of actions
-        wandb.log(logging_info, step=train_state)
-        wandb.log(logging_info, step=train_state)
-        wandb.log(logging_info, step=train_state)
+        fig, axes = plt.subplots(1, 3, figsize=(15, 5))
+
+        axes[0].hist(jnp.mean(actions.forward * players, axis=0), bins=20, color="blue", alpha=0.7)
+        axes[0].set_title("Action distribution 1: forward")
+
+        axes[1].hist(jnp.mean(actions.rotate * players, axis=0), bins=20, color="red", alpha=0.7)
+        axes[1].set_title("Action distribution 2: rotate")
+
+        axes[2].hist(jnp.mean(actions.reproduce * players, axis=0), bins=20, color="green", alpha=0.7)
+        axes[2].set_title("Action distribution 3: reproduce")
+
+        fig.tight_layout()
+        wandb.log({"plot/actions": wandb.Image(fig)})
+
+        # wandb.log({"ps": })
         
-        import pdb; pdb.set_trace()
     
     return train_state
 
