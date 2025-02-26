@@ -9,145 +9,57 @@ import splendor.core as core
 import splendor.contexts.glfw_context as glfw_context
 from splendor.interactive_camera_glfw import InteractiveCameraGLFW
 import splendor.camera as camera
+from splendor.image import save_image
 
-#   o----o----o----o
-#   |\   |\   |\   |
-#   | \  | \  | \  |
-#   |  \ |  \ |  \ |
-#   |   \|   \|   \|
-#   o----o----o----o
-#   |\   |\   |\   |
-#   | \  | \  | \  |
-#   |  \ |  \ |  \ |
-#   |   \|   \|   \|
-#   o----o----o----o
-#   |\   |\   |\   |
-#   | \  | \  | \  |
-#   |  \ |  \ |  \ |
-#   |   \|   \|   \|
-#   o----o----o----o
+import dirt.gridworld2d.spawn as spawn
 
-def make_height_map_mesh_old(height_map, slope_spacing=0.5):
-    h,w = height_map.shape
-    flat_spacing = 1. - slope_spacing
-    half_flat_spacing = flat_spacing/2.
-    
-    # make vertices
-    vertices = jnp.zeros((h,2,w,2,3))
-    vertices = vertices.at[:,:,:,:,2].set(jnp.expand_dims(height_map, [1,3]))
-    vertices = vertices.at[:,:,:,0,0].set(jnp.expand_dims(
-        jnp.arange(-half_flat_spacing, w-half_flat_spacing), [0,1]))
-    vertices = vertices.at[:,:,:,1,0].set(jnp.expand_dims(
-        jnp.arange(half_flat_spacing, w+half_flat_spacing), [0,1]))
-    vertices = vertices.at[:,0,:,:,1].set(jnp.expand_dims(
-        jnp.arange(-half_flat_spacing, h-half_flat_spacing), [1,2]))
-    vertices = vertices.at[:,1,:,:,1].set(jnp.expand_dims(
-        jnp.arange(half_flat_spacing, h+half_flat_spacing), [1,2]))
-    
-    # make uvs
-    uvs = jnp.zeros((h*2, w*2, 2))
-    uvs = uvs.at[:,:,0].set(jnp.linspace(0,1,num=h*2)[:,None])
-    uvs = uvs.at[:,:,1].set(jnp.linspace(0,1,num=w*2)[None,:])
-    
-    # make normals
-    padded_height_map = jnp.pad(height_map, pad_width=1, mode='edge')
-    y_gradient = -(padded_height_map[2:,:] - padded_height_map[:-2,:])[:,1:-1]
-    x_gradient = -(padded_height_map[:,2:] - padded_height_map[:,:-2])[1:-1,:]
-    z_gradient = (1. - x_gradient**2 - y_gradient**2)**0.5
-    normals = jnp.stack((y_gradient, x_gradient, z_gradient), axis=-1)
-    
-    # make faces
-    faces = jnp.zeros((h*2-1,w*2-1,4), dtype=jnp.int32)
-    faces = faces.at[:,:,0].add(jnp.expand_dims(
-        jnp.arange(0, w*2-1), [0]))
-    faces = faces.at[:,:,1].add(jnp.expand_dims(
-        jnp.arange(1, w*2), [0]))
-    faces = faces.at[:,:,2].add(jnp.expand_dims(
-        jnp.arange(1, w*2) + w*2, [0]))
-    faces = faces.at[:,:,3].add(jnp.expand_dims(
-        jnp.arange(0, w*2-1) + w*2, [0]))
-    
-    faces = faces.at[:,:,:].add(jnp.expand_dims(
-        jnp.arange(0, h*2-1) * (w*2), [1,2]))
-    
-    return (
-        vertices.reshape(-1,3),
-        uvs.reshape(-1,2),
-        normals.reshape(-1, 3),
-        faces.reshape(-1,4),
+def add_players(
+    renderer,
+    color_indices,
+    color_index_values,
+):
+    renderer.load_mesh(
+        name='player_mesh',
+        mesh_primitive={
+            'shape':'sphere',
+            'radius':1,
+        },
+        color_mode='flat_color',
     )
+    
+    for i, color_index_value in enumerate(color_index_values):
+        material_name = f'player_material_{i}'
+        renderer.load_material(material_name, flat_color=color_index_value)
+    
+    player_instances = []
+    for i, color_index in enumerate(color_indices):
+        transform = np.eye(4)
+        renderer.add_instance(
+            f'player_{i}',
+            mesh_name='player_mesh',
+            material_name=f'player_material_{color_index}',
+            transform=transform
+        )
+        player_instances.append(f'player_{i}')
+    
+    return player_instances
 
-def make_height_map_mesh(height_map):
-    h, w = height_map.shape
-    
-    vertices = jnp.zeros((h, w, 3), dtype=jnp.float32)
-    vertices = vertices.at[:,:,0].set(jnp.arange(w)[None,:] - w/2.)
-    vertices = vertices.at[:,:,1].set(jnp.arange(h)[:,None] - h/2.)
-    vertices = vertices.at[:,:,2].set(height_map)
-    vertices = vertices.reshape(-1,3)
-    
-    normals = jnp.zeros((h, w, 3), dtype=jnp.float32)
-    # va (2, 0, dx)
-    lo_x_i = jnp.clip(jnp.arange(w)-1, min=0)
-    lo_x = height_map[:,lo_x_i]
-    hi_x_i = jnp.arange(w)+1
-    hi_x = height_map[:,hi_x_i]
-    dx = (hi_x - lo_x)/2.
-    # vb (0, 2, dy)
-    lo_y_i = jnp.clip(jnp.arange(h)-1, min=0)
-    lo_y = height_map[lo_y_i]
-    hi_y_i = jnp.arange(h)+1
-    hi_y = height_map[hi_y_i]
-    dy = (hi_y - lo_y)/2.
-    # cross product (ya*zb - za*yb), (za*xb - xa*zb), (xa*yb - ya*xb)
-    normals = normals.at[:,:,0].set(-dx)
-    normals = normals.at[:,:,1].set(-dy)
-    normals = normals.at[:,:,2].set(1)
-    normals = normals / jnp.linalg.norm(normals, axis=-1, keepdims=True)
-    normals = normals.reshape(-1,3)
-    
-    uvs = jnp.zeros((h, w, 2), dtype=jnp.float32)
-    uvs = uvs.at[:,:,0].set(jnp.arange(w)[None, :])
-    uvs = uvs.at[:,:,1].set(jnp.arange(h)[:,None])
-    uvs = uvs.reshape(-1,2)
-    
-    faces = jnp.zeros((2, h-1, w-1, 3), dtype=jnp.int32)
-    faces = faces.at[0,:,:,0].add(jnp.arange(0, w-1)[None, :])
-    faces = faces.at[0,:,:,1].add(jnp.arange(1, w)[None, :])
-    faces = faces.at[0,:,:,2].add(jnp.arange(1, w)[None, :] + w)
-    
-    faces = faces.at[1,:,:,0].add(jnp.arange(0, w-1)[None, :])
-    faces = faces.at[1,:,:,1].add(jnp.arange(1, w)[None, :] + w)
-    faces = faces.at[1,:,:,2].add(jnp.arange(0, w-1)[None, :] + w)
-    
-    faces = faces.at[:,:,:,:].add(jnp.arange(0, h-1)[:,None,None] * w)
-    faces = faces.reshape(-1,3)
-    
-    return vertices, normals, uvs, faces
-
-def make_obj(vertices, normals, uvs, faces, file_path=None):
-    lines = []
-    for x, y, z in vertices:
-        lines.append(f'v {float(x)} {float(y)} {float(z)}')
-    
-    for u, v in vertices:
-        lines.append(f'vt {float(u)} {float(v)}')
-    
-    for x, y, z in normals:
-        lines.append(f'vn {float(x)} {float(y)} {float(z)}')
-    
-    for face_vertices in faces:
-        lines.append('f ' + ' '.join(
-            [f'{int(v+1)}/{int(v+1)}/{int(v+1)}' for v in face_vertices]
-        ))
-    
-    text = '\n'.join(lines)
-    
-    if file_path is not None:
-        with open(file_path, 'w') as f:
-            f.write(text)
-    
-    return text
+def update_player_locations(renderer, locations, height_map):
+    rotate_upright = np.array([
+        [ 1, 0, 0, 0],
+        [ 0, 0, 1, 0],
+        [ 0,-1, 0, 0],
+        [ 0, 0, 0, 1],
+    ])
+    world_size = height_map.shape
+    half_h, half_w = world_size[0]//2, world_size[1]//2
+    for i, location in enumerate(locations):
+        transform = np.eye(4)
+        transform[0,3] = location[1] - half_w
+        transform[1,3] = location[0] - half_h
+        transform[2,3] = height_map[location[0], location[1]]
+        transform = rotate_upright @ transform
+        renderer.set_instance_transform(f'player_{i}', transform)
 
 def start_terrain_viewer(
     terrain_maps,
@@ -155,6 +67,11 @@ def start_terrain_viewer(
     water_offset=-0.01,
     window_width=512,
     window_height=512,
+    camera_distance=None,
+    player_locations=[],
+    player_color_indices=[],
+    player_color_values=[],
+    texture_terrain=False,
 ):
     glfw_context.initialize()
     window = glfw_context.GLFWWindowWrapper(
@@ -174,12 +91,14 @@ def start_terrain_viewer(
     renderer.set_projection(projection)
     
     h,w = terrain_maps[0].shape
+    if camera_distance is None:
+        camera_distance = h
     c = np.cos(np.radians(-45))
     s = np.sin(np.radians(-45))
     camera_pose = np.array([
         [1, 0, 0, 0],
-        [0, c,-s, h],
-        [0, s, c, h],
+        [0, c,-s, camera_distance],
+        [0, s, c, camera_distance],
         [0, 0, 0, 1],
     ])
     renderer.set_view_matrix(np.linalg.inv(camera_pose))
@@ -191,8 +110,10 @@ def start_terrain_viewer(
         wv, wn, wuv, wf = make_height_map_mesh(w)
         wv = wv.at[:,2].add(water_offset)
         
-        #tv = tv * 0.1
-        #wv = wv * 0.1
+        if texture_terrain:
+            color_mode='textured'
+        else:
+            color_mode='flat_color'
         
         renderer.load_mesh(
             name=f'terrain_mesh_{i}',
@@ -202,7 +123,7 @@ def start_terrain_viewer(
                 'uvs':np.array(tuv),
                 'faces':np.array(tf),
             },
-            color_mode='flat_color',
+            color_mode=color_mode,
         )
         renderer.load_mesh(
             name=f'water_mesh_{i}',
@@ -215,10 +136,22 @@ def start_terrain_viewer(
             color_mode='flat_color',
         )
     
-    renderer.load_material(
-        name='terrain_material',
-        flat_color=(0.5,0.5,0.5),
-    )
+    if texture_terrain:
+        texture = height_texture(terrain_maps[0], [1,0.25,0.25], [1,1,1])
+        renderer.load_texture(
+            name='terrain_texture',
+            texture_data = texture,
+        )
+        renderer.load_material(
+            name='terrain_material',
+            texture_name='terrain_texture',
+        )
+    else:
+        renderer.load_material(
+            name='terrain_material',
+            flat_color=(0.5,0.5,0.5),
+        )
+    
     renderer.load_material(
         name='water_material',
         flat_color=(0.25,0.25,0.75),
@@ -259,6 +192,14 @@ def start_terrain_viewer(
     )
     renderer.set_active_image_light('background')
     
+    player_instances = add_players(
+        renderer, player_color_indices, player_color_values)
+    update_player_locations(
+        renderer,
+        player_locations,
+        np.array(terrain_maps[0]+water_maps[0])
+    )
+    
     viewer_state = {
         'renderer' : renderer,
         'current_frame' : 0,
@@ -279,6 +220,8 @@ def start_terrain_viewer(
         else:
             instances = ['terrain_instance']
         
+        instances.extend(player_instances)
+        
         fbw, fbh = window.framebuffer_size()
         renderer.viewport_scissor(0,0,fbw,fbh)
         renderer.color_render(flip_y=False, instances=instances)
@@ -292,6 +235,21 @@ def start_terrain_viewer(
                 viewer_state['current_frame'] = (current_frame + 1) % n
             elif key == 87: # w
                 viewer_state['view_water'] = not viewer_state['view_water']
+            
+            elif key == 83: #s
+                color = camera_control.window.read_pixels()
+                save_image(color[::-1,:,:3], 'image_%04i.png'%current_frame)
+            
+            if key == 44 or key == 46:
+                height_map = np.array(
+                    terrain_maps[viewer_state['current_frame']] +
+                    water_maps[viewer_state['current_frame']]
+                )
+                update_player_locations(
+                    renderer,
+                    player_locations,
+                    height_map,
+                )
         
         camera_control.key_callback(window, key, scancode, action, mods)
     
@@ -307,6 +265,17 @@ def start_terrain_viewer(
     
     glfw_context.terminate()
 
+def height_texture(height_map, low_color, high_color):
+    low_color = jnp.array(low_color).reshape(3)
+    high_color = jnp.array(high_color).reshape(3)
+    height_min = jnp.min(height_map)
+    height_max = jnp.max(height_map)
+    t = (height_map - height_min) / (height_max - height_min)
+    t = t[:,:,None]
+    texture = ((1-t) * low_color + t * high_color) * 255
+    texture = np.array(texture.astype(jnp.uint8))
+    return texture
+
 def visualize_water_flow(key):
     from geology import fractal_noise
     from water import flow_step, flow_step_twodir
@@ -316,7 +285,7 @@ def visualize_water_flow(key):
     terrain = fractal_noise(
         key=key,
         world_size=world_size,
-        octaves=12,
+        octaves=12, #12
         persistence=0.5,
         lacunarity=2.0,
         grid_unit_scale=0.0025,
@@ -346,12 +315,25 @@ def visualize_water_flow(key):
     water, water_maps = jax.lax.scan(
         generate_maps, water, jnp.arange(visualization_steps))
     
+    player_density = 0.0
+    num_players = int((world_size[0] * world_size[1]) * player_density)
+    player_color_indices = np.zeros(num_players, dtype=int)
+    player_color_values = [[0,0.8,0]]
+    key, spawn_key = jrng.split(key)
+    player_locations = np.array(spawn.unique_x(
+        spawn_key, num_players, world_size))
+    
     # start the viewer
     start_terrain_viewer(
         terrain_maps,
         water_maps,
         window_height=1024,
         window_width=1024,
+        camera_distance=1024,
+        player_locations=player_locations,
+        player_color_indices=player_color_indices,
+        player_color_values=player_color_values,
+        texture_terrain=True,
     )
 
 def visualize_erosion(key):
@@ -360,7 +342,7 @@ def visualize_erosion(key):
     from erosion import simulate_erosion
     
     # generate the initial terrain
-    world_size=(512,512)
+    world_size=(1024,1024)
     terrain = fractal_noise(
         key=key,
         world_size=world_size,
@@ -468,5 +450,5 @@ if __name__ == '__main__':
     '''
     
     key = jrng.key(1022)
-    #visualize_water_flow(key)
-    visualize_erosion(key)
+    visualize_water_flow(key)
+    #visualize_erosion(key)
