@@ -56,6 +56,7 @@ def train(key, params):
     ):
 
         return actions, players
+    
     # - build the training functions
     reset_train, step_train = natural_selection(
         params.train_params,
@@ -132,7 +133,7 @@ def train(key, params):
         fig.tight_layout()
         wandb.log({"plot/actions": wandb.Image(fig)})
 
-        wandb.log({"active players": players.sum()})
+        wandb.log({"active players": players[-1].sum()})
         
     
     return train_state
@@ -145,7 +146,7 @@ if __name__ == '__main__':
     env_params = NomNomParams(
         mean_initial_food=8**2,
         max_initial_food=32**2,
-        mean_food_growth=2**2,
+        mean_food_growth=3**2,
         max_food_growth=16**2,
         initial_players=32,
         max_players=max_players,
@@ -157,7 +158,7 @@ if __name__ == '__main__':
     params = NomNomTrainParams(
         env_params=env_params,
         train_params=train_params,
-        epochs=10,
+        epochs=20,
         steps_per_epoch=100,
     )
 
