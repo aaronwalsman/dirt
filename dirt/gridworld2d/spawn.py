@@ -123,28 +123,6 @@ def uniform_r(
         maxval=4,
     )
 
-#def uniform_xr(
-#    key : chex.PRNGKey,
-#    n : int,
-#    world_size : Tuple[int, int],
-#) -> Tuple[jnp.ndarray, jnp.ndarray] :
-#    '''
-#    A convenience function that calls both uniform_x and uniform_r with the same
-#    set of parameters.
-#    
-#    When used in a jit compiled program, n must come from a static variable
-#    as it controls the shape of a new array.
-#    
-#    key : Jax RNG key.
-#    world_size : Shape to sample positions from.
-#    n : The number of positions to sample.
-#    '''
-#    key, x_key = jrng.split(key)
-#    x = uniform_x(x_key, n, world_size)
-#    key, r_key = jrng.split(key)
-#    r = uniform_r(r_key, n)
-#    return x, r
-
 def unique_xr(
     key : chex.PRNGKey,
     n : int,
