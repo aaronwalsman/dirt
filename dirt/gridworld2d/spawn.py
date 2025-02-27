@@ -123,32 +123,33 @@ def uniform_r(
         maxval=4,
     )
 
-def uniform_xr(
-    key : chex.PRNGKey,
-    n : int,
-    world_size : Tuple[int, int],
-) -> Tuple[jnp.ndarray, jnp.ndarray] :
-    '''
-    A convenience function that calls both uniform_x and uniform_r with the same
-    set of parameters.
-    
-    When used in a jit compiled program, n must come from a static variable
-    as it controls the shape of a new array.
-    
-    key : Jax RNG key.
-    world_size : Shape to sample positions from.
-    n : The number of positions to sample.
-    '''
-    key, x_key = jrng.split(key)
-    x = uniform_x(x_key, n, world_size)
-    key, r_key = jrng.split(key)
-    r = uniform_r(r_key, n)
-    return x, r
+#def uniform_xr(
+#    key : chex.PRNGKey,
+#    n : int,
+#    world_size : Tuple[int, int],
+#) -> Tuple[jnp.ndarray, jnp.ndarray] :
+#    '''
+#    A convenience function that calls both uniform_x and uniform_r with the same
+#    set of parameters.
+#    
+#    When used in a jit compiled program, n must come from a static variable
+#    as it controls the shape of a new array.
+#    
+#    key : Jax RNG key.
+#    world_size : Shape to sample positions from.
+#    n : The number of positions to sample.
+#    '''
+#    key, x_key = jrng.split(key)
+#    x = uniform_x(x_key, n, world_size)
+#    key, r_key = jrng.split(key)
+#    r = uniform_r(r_key, n)
+#    return x, r
 
 def unique_xr(
     key : chex.PRNGKey,
     n : int,
     world_size : Tuple[int, int],
+    active : Optional[int] = None,
     cell_size : Optional[Tuple[int, int]] = None,
 ) -> Tuple[jnp.ndarray, jnp.ndarray] :
     '''
@@ -166,6 +167,10 @@ def unique_xr(
     key, x_key, r_key = jrng.split(key, 3)
     x = unique_x(x_key, n, world_size, cell_size=cell_size)
     r = uniform_r(r_key, n=n)
+    if active is not None:
+        x = jnp.where(
+            active[:,None], x, jnp.array(world_size, dtype=jnp.int32))
+        r = jnp.where(active, r, 0)
     return x, r
 
 def poisson_grid(
