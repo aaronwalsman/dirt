@@ -180,45 +180,18 @@ def nomnom(
         given the environment params, a previous state and an action.
         '''
         
+        # TODO: It turns out that the order of operations in this code is
+        # actually somewhat sensitive, especially considering the updates to
+        # the object grid.  It turns out that there are many subtle bugs that
+        # can come up if this is not all handled correctly.  I think an
+        # it would be worthwhile in the near future to to take the components
+        # here and find a way to compartmentalize them further and make a
+        # computational primitive that handles the book-keeping of not only
+        # the list of active players, but their positions, rotations and
+        # the object_grid.
+        
+        # get the active players
         active_players = active_family_tree(state.family_tree)
-        
-        
-        #######################3
-        tmp_object_grid = dynamics.make_object_grid(
-            params.world_size, state.player_x, active_players)
-        
-        def print_stuff():
-            jax.debug.print('BAD THING MAN')
-            jax.debug.print('ACTIVE! {a}', a=active_players)
-            jax.debug.print('X {x}', x=state.player_x)
-        
-        correct = jnp.all(tmp_object_grid == state.object_grid)
-        jax.lax.cond(correct, lambda: None, print_stuff)
-        
-        
-        
-        
-        # check accurate pre object grid==========================
-        recorded_spots = state.object_grid[state.player_x[...,0], state.player_x[...,1]]
-        n = state.player_x.shape[0]
-        accurate_og = (
-            recorded_spots == jnp.arange(n)) | ~active_players
-        def print_info():
-            jax.debug.print('BAD PRE SETUP')
-            jax.debug.print('recorded {r}', r=recorded_spots)
-            jax.debug.print('accurate_og {a}', a=accurate_og)
-            jax.debug.print('active {a}', a=active_players)
-            jax.debug.print('object grid {og}', og=state.object_grid)
-            jax.debug.print('player_x {x}', x=state.player_x)
-        
-        jax.lax.cond(jnp.any(~accurate_og),
-            print_info,
-            lambda : None,
-        )
-        
-        
-        
-        
         
         # move
         player_x, player_r, _, object_grid = dynamics.forward_rotate_step(
@@ -230,51 +203,6 @@ def nomnom(
             check_collisions=True,
             object_grid=state.object_grid,
         )
-        
-        
-        # check accurate object grid==========================
-        recorded_spots = object_grid[player_x[...,0], player_x[...,1]]
-        n = player_x.shape[0]
-        accurate_og = (
-            recorded_spots == jnp.arange(n)) | ~active_players
-        def print_info():
-            jax.debug.print('BAD SETUP')
-            jax.debug.print('recorded {r}', r=recorded_spots)
-            jax.debug.print('accurate_og {a}', a=accurate_og)
-            jax.debug.print('active {a}', a=active_players)
-            jax.debug.print('pre object grid {og}', og=state.object_grid)
-            jax.debug.print('object grid {og}', og=object_grid)
-            jax.debug.print('pre player_x {x}', x=state.player_x)
-            jax.debug.print('player_x {x}', x=player_x)
-            jax.debug.print('forward {f}', f=action.forward)
-        
-        jax.lax.cond(jnp.any(~accurate_og),
-            print_info,
-            lambda : None,
-        )
-        
-        
-        
-        
-        overlapping = player_x[None] == player_x[:,None]
-        overlapping = overlapping[:,:,0] * overlapping[:,:,1]
-        overlapping = overlapping & active_players[:,None]
-        overlapping = overlapping & active_players
-        overlapping = overlapping & ~jnp.eye(active_players.shape[0], dtype=jnp.bool)
-        i,j = jnp.nonzero(overlapping, size=active_players.shape[0], fill_value=-1)
-        jax.lax.cond(jnp.any(overlapping),
-            lambda : jax.debug.print('overlapping after dynamics'),
-            #lambda : jax.debug.print('not overlapping after dynamics'),
-            lambda : None,
-        )
-        #jax.debug.print('ad {i} {j}', i=i, j=j)
-        #jax.debug.print('ad {p}', p=player_x[i][:4])
-        #jax.debug.print('x0 {x}', x=state.player_x[i][:4])
-        #jax.debug.print('x1 {x}', x=player_x[i][:4])
-        
-        
-        
-        
         
         # eat
         # - figure out who will eat which food
@@ -297,13 +225,8 @@ def nomnom(
             moved * params.move_metabolism +
             (1. - moved) * params.wait_metabolism
         ) * active_players
-    
-        # kill players that have starved
-        deaths = player_energy <= 0.
 
-        # update the object grid to account for dead players
-
-        # make new players based on reproduction
+        # update the players based on starvation and reproduction
         # - filter the reproduce vector to remove dead players and those without
         #   enough energy to create offspring
         reproduce = (
@@ -319,6 +242,9 @@ def nomnom(
             player_r,
             object_grid=object_grid,
         )
+    
+        # - kill players that have starved
+        deaths = player_energy <= 0.
         
         # - use reproduce to make new child ids and update the player data
         n = reproduce.shape[0]
@@ -327,84 +253,33 @@ def nomnom(
         family_tree, child_locations = step_family_tree(
             state.family_tree, deaths, parent_locations)
         
+        # - reorder child_x and child_r to be aligned with the parent
+        #   and child locations
         child_x = child_x[parent_locations[...,0]]
         child_r = child_r[parent_locations[...,0]]
         
-        # update the object grid, player_x and player_r
-        # this needs to happen before the positions are updated
-        pre_object_grid = object_grid
+        # update the object grid, player positions and rotations based on deaths
+        # - update the object grid before the positions
         object_grid = object_grid.at[player_x[...,0], player_x[...,1]].set(
             jnp.where(deaths, -1, jnp.arange(n)))
+        # - then update the positions and rotations
         player_x = jnp.where(
             deaths[:,None],
             jnp.array(params.world_size, dtype=jnp.int32),
             player_x,
         )
         player_r = jnp.where(deaths, 0, player_r)
-        mid_object_grid = object_grid
+        
+        # update the object grid, player positions, rotation and energy based on
+        # new children
         object_grid = object_grid.at[child_x[...,0], child_x[...,1]].set(
             child_locations)
-        
-        # update the player positions, rotation and energy
         player_x = player_x.at[child_locations].set(child_x)
         player_r = player_r.at[child_locations].set(child_r)
         player_energy = player_energy.at[parent_locations].add(
             -params.initial_energy)
         player_energy = player_energy.at[child_locations].set(
             params.initial_energy)
-        
-        ################################3
-        tmp_active = active_family_tree(family_tree)
-        tmp_object_grid = dynamics.make_object_grid(
-            params.world_size, player_x, tmp_active)
-        
-        
-        
-        
-        
-        correct_update = jnp.all(tmp_object_grid == object_grid)
-        def print_stuff():
-            jax.debug.print('deaths {d}', d=deaths)
-            jax.debug.print('child_locations {c}', c=child_locations)
-            jax.debug.print('player_x {x}', x=player_x)
-            jax.debug.print('child_x {x}', x=child_x)
-            jax.debug.print('POG {h}', h=pre_object_grid)
-            jax.debug.print('MOG {h}', h=mid_object_grid)
-            jax.debug.print('TOG {h}', h=tmp_object_grid)
-            jax.debug.print('OG {h}', h=object_grid)
-            jax.debug.print('ACT {a}', a=tmp_active)
-            jax.debug.print('X {x}', x=player_x)
-        
-        jax.lax.cond(correct_update, lambda: None, print_stuff)
-        
-        
-        
-        
-        
-        active_players = active_family_tree(family_tree)
-        #jax.debug.print('re ap {ap}', ap=jnp.sum(active_players))
-        
-        overlapping = player_x[None] == player_x[:,None]
-        overlapping = overlapping[:,:,0] * overlapping[:,:,1]
-        overlapping = overlapping & active_players[:,None]
-        overlapping = overlapping & active_players
-        overlapping = overlapping & ~jnp.eye(active_players.shape[0], dtype=jnp.bool)
-        i,j = jnp.nonzero(overlapping, size=active_players.shape[0], fill_value=-1)
-        def print_overlapping():
-            jax.debug.print('overlapping after reproduce')
-            jax.debug.print('child_locations {c}', c=child_locations)
-            
-        jax.lax.cond(jnp.any(overlapping),
-            print_overlapping,
-            #lambda : jax.debug.print('not overlapping after reproduce'),
-            lambda : None
-        )
-        #jax.debug.print('re {i} {j}', i=i, j=j)
-        #jax.debug.print('re {p}', p=player_x[i][:4])
-        
-        
-        
-        
         
         # grow new food
         key, food_key = jrng.split(key)
