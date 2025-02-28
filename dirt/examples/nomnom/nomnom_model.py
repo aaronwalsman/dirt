@@ -9,6 +9,7 @@ from mechagogue.nn.sequence import layer_sequence
 from mechagogue.nn.mlp import mlp
 from mechagogue.nn.structured import parallel_dict_layer
 from mechagogue.nn.distributions import categorical_sampler_layer
+from mechagogue.nn.debug import print_activations_layer
 
 from dirt.examples.nomnom.nomnom_env import NomNomObservation, NomNomAction
 
@@ -75,19 +76,32 @@ def nomnom_model(params=NomNomModelParams()):
     #   components of the action
     # - these are three linear layers followed by categorical samplers
     decoder_heads = parallel_dict_layer({
-        'forward' : layer_sequence(
-            (linear_layer(32, 2), categorical_sampler_layer)),
-        'rotate' : layer_sequence(
-            (linear_layer(32, 3), categorical_sampler_layer)),
-        'reproduce' : layer_sequence(
-            (linear_layer(32, 2), categorical_sampler_layer)),
+        'forward' : layer_sequence((
+            linear_layer(32, 2),
+            #print_activations_layer('forward:'),
+            categorical_sampler_layer(),
+            #print_activations_layer('forward_sample:'),
+        )),
+        'rotate' : layer_sequence((
+            linear_layer(32, 3),
+            #print_activations_layer('rotate:'),
+            categorical_sampler_layer(choices=jnp.array([-1,0,1])),
+            #print_activations_layer('rotate_sample:'),
+        )),
+        'reproduce' : layer_sequence((
+            linear_layer(32, 2),
+            #print_activations_layer('reproduce:'),
+            categorical_sampler_layer(),
+            #print_activations_layer('reproduce_sample:'),
+        )),
     })
     
     # - this runs the three decoders and then combines the result into a
     #   new action
     decoder = layer_sequence((
         decoder_heads,
-        (lambda: None, lambda x : NomNomAction(**x))
+        (lambda: None, lambda x : NomNomAction(**x)),
+        #print_activations_layer('action:'),
     ))
     
     # combine the encoder, backbone and decoder

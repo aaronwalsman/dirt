@@ -69,7 +69,7 @@ def clip_x(
     x : The position to clip.
     world_size : The size of the grid to determine the clip borders.
     '''
-    return jnp.clip(x, jnp.array([0,0]), jnp.array(world_size))
+    return jnp.clip(x, jnp.array([0,0]), jnp.array(world_size)-1)
 
 def wrap_r(
     r : jnp.ndarray,

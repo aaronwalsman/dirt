@@ -239,6 +239,16 @@ def nomnom(
         family_tree, child_locations = step_family_tree(
             state.family_tree, deaths, parent_locations)
         
+        child_x = child_x[parent_locations[...,0]]
+        child_r = child_r[parent_locations[...,0]]
+        
+        player_x = player_x.at[child_locations].set(child_x)
+        player_r = player_r.at[child_locations].set(child_r)
+        player_energy = player_energy.at[parent_locations].add(
+            -params.initial_energy)
+        player_energy = player_energy.at[child_locations].set(
+            params.initial_energy)
+        
         # update the object grid
         object_grid = object_grid.at[player_x[...,0], player_x[...,1]].set(
             jnp.where(deaths, -1, jnp.arange(n)))

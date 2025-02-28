@@ -2,9 +2,9 @@
 This example is designed to test the nomnom environment in a training loop
 with a random policy.
 '''
-
 import time
-from typing import Any
+import argparse
+from typing import Any, Optional
 
 import jax
 import jax.numpy as jnp
@@ -15,7 +15,7 @@ from mechagogue.pop.natural_selection import (
 from mechagogue.breed.normal import normal_mutate
 from mechagogue.nn.mlp import mlp
 from mechagogue.static_dataclass import static_dataclass
-from mechagogue.serial import save_leaf_data, load_from_example
+from mechagogue.serial import save_leaf_data, load_example_data
 
 from dirt.examples.nomnom.nomnom_env import nomnom, NomNomParams, NomNomAction
 from dirt.examples.nomnom.nomnom_model import NomNomModelParams, nomnom_model
@@ -25,17 +25,50 @@ import matplotlib.pyplot as plt
 
 @static_dataclass
 class NomNomTrainParams:
-    env_params : Any
-    train_params : Any
+    max_players : int = 256
+    env_params : Any = NomNomParams(
+        mean_initial_food=8**2,
+        max_initial_food=32**2,
+        mean_food_growth=2**2,
+        max_food_growth=16**2,
+        initial_players=32,
+        max_players=max_players,
+        world_size=(32,32)
+    )
+    train_params : Any = NaturalSelectionParams(
+        max_population=max_players,
+    )
     epochs : int = 100
     steps_per_epoch : int = 1000
-    output_location : str = '.'
-    load_from_file : Any = None
+    output_directory : str = '.'
+    load_from_file : Optional[str] = None
+
+@static_dataclass
+class NomNomReport:
+    actions : Any = NomNomAction(0,0,0)
+    players : jnp.array = False
+    player_x : jnp.array = False
+    player_r : jnp.array = False
+    food_grid : jnp.array = False
+
+def make_report(
+    state, actions, next_state, players, parent_locations, child_locations
+):
+    #jax.debug.print('player_x {x}', x=next_state.env_state.player_x)
+    #jax.debug.print('player_r {r}', r=next_state.env_state.player_r)
+    #jax.debug.print('action {a}', a=actions)
+    return NomNomReport(
+        actions,
+        players,
+        next_state.env_state.player_x,
+        next_state.env_state.player_r,
+        next_state.env_state.food_grid,
+    )
 
 def train(key, params):
-    wandb.init(project="nomnom",
-               entity="harvardml"
-               )
+    #wandb.init(project="nomnom",
+    #           entity="harvardml"
+    #           )
     
     # build the necessary functions
     # - build the environment functions
@@ -50,12 +83,6 @@ def train(key, params):
         view_distance=params.env_params.view_distance,
     )
     init_model, model = nomnom_model(model_params)
-    
-    def make_report(
-        state, actions, next_state, players, parent_locations, child_locations
-    ):
-
-        return actions, players
     
     # - build the training functions
     reset_train, step_train = natural_selection(
@@ -73,10 +100,8 @@ def train(key, params):
     train_state, _ = jax.jit(reset_train)(reset_key)
     epoch = 0
     if params.load_from_file is not None:
-        key, epoch, train_state = load_from_example(
+        key, epoch, train_state = load_example_data(
             (key, epoch, train_state), params.load_from_file)
-    
-    
     
     # precompile the primary epoch train computation
     def train_epoch(epoch_key, train_state):
@@ -93,31 +118,35 @@ def train(key, params):
         return train_state, reports
     train_epoch = jax.jit(train_epoch)
     
+    save_leaf_data(
+        params,
+        f'{params.output_directory}/train_params.state',
+    )
+    
     # the outer loop is not scanned because it will have side effects
     while epoch < params.epochs:
         print(f'Epoch: {epoch}')
         key, epoch_key = jrng.split(key)
         env_state = train_state.env_state
         
-        #print('  Population: %i'%jnp.sum(active_players))
-        #print('  Food: %i'%jnp.sum(env_state.food_grid))
-        
         train_state, reports = train_epoch(epoch_key, train_state)
         
         save_leaf_data(
             (key, epoch, train_state),
-            f'{params.output_location}/train_state_{epoch}.state',
+            f'{params.output_directory}/train_state_{epoch:08}.state',
         )
         save_leaf_data(
             reports,
-            f'{params.output_location}/report_{epoch}.state',
+            f'{params.output_directory}/report_{epoch:08}.state',
         )
         epoch += 1
         
         # train_state, active_players, logging_info = train_epoch(
         #     epoch_key, train_state, active_players, logging_info)
         
-        actions, players = reports
+        #actions, players = reports
+        actions = reports.actions
+        players = reports.players
         # For the 3 components of actions
         fig, axes = plt.subplots(1, 3, figsize=(15, 5))
 
@@ -131,24 +160,24 @@ def train(key, params):
         axes[2].set_title("Action distribution 3: reproduce")
 
         fig.tight_layout()
-        wandb.log({"plot/actions": wandb.Image(fig)})
+        #wandb.log({"plot/actions": wandb.Image(fig)})
 
-        wandb.log({"active players": players[-1].sum()})
+        #wandb.log({"active players": players.sum()})
         
     
     return train_state
 
 if __name__ == '__main__':
     
-    key = jrng.key(1234)
+    key = jrng.key(5432)
     
-    max_players = 256
+    max_players = 8
     env_params = NomNomParams(
         mean_initial_food=8**2,
         max_initial_food=32**2,
         mean_food_growth=3**2,
         max_food_growth=16**2,
-        initial_players=32,
+        initial_players=8,
         max_players=max_players,
         world_size=(32,32)
     )
@@ -158,8 +187,15 @@ if __name__ == '__main__':
     params = NomNomTrainParams(
         env_params=env_params,
         train_params=train_params,
-        epochs=20,
-        steps_per_epoch=100,
+        epochs=10,
+        steps_per_epoch=256,
     )
+    
+    # update these defaults with commandline arguments
+    parser = argparse.ArgumentParser()
+    params.add_commandline_args(parser)
+    args = parser.parse_args()
+    params = params.from_commandline_args(args)
 
     train(key, params)
+    print('Total running time:', time.time() - start)
