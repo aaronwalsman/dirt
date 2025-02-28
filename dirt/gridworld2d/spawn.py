@@ -225,6 +225,7 @@ def spawn_from_parents(
         valid_children = valid_children & inbounds
     
     # - second make sure the children will not be on top of any existing objects
+    #   or on top of each other
     if object_grid is not None:
         #child_colliders = object_grid[child_x[:,0], child_x[:,1]]
         #valid_children = valid_children & (child_colliders == empty)
