@@ -171,11 +171,12 @@ def poisson_grid(
         spawn locations.
     max_n : The maximum number of new spawn locations to add.
     '''
-    key, subkey = jrng.split(key)
-    spawn = poisson_vector(subkey, mean_n, max_n)
+    key, poisson_key = jrng.split(key)
+    spawn = poisson_vector(poisson_key, mean_n, max_n)
     
-    key, subkey = jrng.split(key)
-    x = uniform_x(subkey, max_n, world_size)
+    key, uniform_key = jrng.split(key)
+    x = uniform_x(uniform_key, max_n, world_size)
+    x = jnp.where(spawn[:,None], x, jnp.array(world_size, dtype=jnp.int32))
     
     grid = jnp.zeros(world_size, dtype=jnp.bool)
     grid = grid.at[x[...,0], x[...,1]].set(spawn)
