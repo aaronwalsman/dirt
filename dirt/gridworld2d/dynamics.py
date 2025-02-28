@@ -1,5 +1,6 @@
 from typing import Tuple, Optional, Union
 
+import jax
 import jax.numpy as jnp
 
 '''
@@ -123,9 +124,9 @@ def collide(
     x1 : The ending position for each moving object.
     occupancy_grid : The occupancy grid before the motion.
     '''
-    collision_grid = occupancy_grid | move_mass(x0, x1, occupancy_grid)
+    collision_grid = occupancy_grid + move_mass(x0, x1, occupancy_grid)
     collided = (collision_grid[x1[:,0], x1[:,1]] > 1)[...,None]
-    x2 = jnp.where(collided, x0, x1) #x1 * ~collided + x0 * collided
+    x2 = jnp.where(collided, x0, x1)
     occupancy_grid = move_mass(x0, x2, occupancy_grid)
     return x2, collided, occupancy_grid
 
@@ -180,6 +181,7 @@ def step(
     dr : jnp.ndarray,
     space : str = 'global',
     world_size : Optional[Tuple[int, int]] = None,
+    active : Optional[jnp.ndarray] = None,
     check_collisions : bool = False,
     object_grid : Optional[jnp.ndarray] = None,
     out_of_bounds : str = 'clip',
@@ -203,6 +205,8 @@ def step(
         from the object_grid grid if that is specified.  If neither are
         specified, out_of_bounds must be "none" indicating no border checks
         will be enforced.
+    active : A boolean mask for which position/rotations should be considered.
+        All x and r values where active is set to False will not move.
     check_collisions: Whether or not to check if two objects will collide if
         they move to the same location.
     object_grid: The object_grid to use for collision checking.  If
@@ -216,6 +220,10 @@ def step(
     '''
     if world_size is None and object_grid is not None:
         world_size = object_grid.shape
+    
+    if active is not None:
+        dx = dx * active[:, None]
+        dr = dr * active
     
     if space == 'global':
         x1 = x0 + dx
@@ -278,3 +286,10 @@ if __name__ == '__main__':
     ])
     
     x2, occupancy = collide(x0, x1, occupancy)
+
+def make_object_grid(world_size, x, active, empty=-1):
+    n, _ = x.shape
+    object_grid = jnp.full(world_size, empty, dtype=jnp.int32)
+    object_grid = object_grid.at[x[...,0], x[...,1]].set(
+        jnp.where(active, jnp.arange(n), -1))
+    return object_grid

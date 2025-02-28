@@ -123,32 +123,11 @@ def uniform_r(
         maxval=4,
     )
 
-def uniform_xr(
-    key : chex.PRNGKey,
-    n : int,
-    world_size : Tuple[int, int],
-) -> Tuple[jnp.ndarray, jnp.ndarray] :
-    '''
-    A convenience function that calls both uniform_x and uniform_r with the same
-    set of parameters.
-    
-    When used in a jit compiled program, n must come from a static variable
-    as it controls the shape of a new array.
-    
-    key : Jax RNG key.
-    world_size : Shape to sample positions from.
-    n : The number of positions to sample.
-    '''
-    key, x_key = jrng.split(key)
-    x = uniform_x(x_key, n, world_size)
-    key, r_key = jrng.split(key)
-    r = uniform_r(r_key, n)
-    return x, r
-
 def unique_xr(
     key : chex.PRNGKey,
     n : int,
     world_size : Tuple[int, int],
+    active : Optional[int] = None,
     cell_size : Optional[Tuple[int, int]] = None,
 ) -> Tuple[jnp.ndarray, jnp.ndarray] :
     '''
@@ -166,6 +145,10 @@ def unique_xr(
     key, x_key, r_key = jrng.split(key, 3)
     x = unique_x(x_key, n, world_size, cell_size=cell_size)
     r = uniform_r(r_key, n=n)
+    if active is not None:
+        x = jnp.where(
+            active[:,None], x, jnp.array(world_size, dtype=jnp.int32))
+        r = jnp.where(active, r, 0)
     return x, r
 
 def poisson_grid(
@@ -188,11 +171,12 @@ def poisson_grid(
         spawn locations.
     max_n : The maximum number of new spawn locations to add.
     '''
-    key, subkey = jrng.split(key)
-    spawn = poisson_vector(subkey, mean_n, max_n)
+    key, poisson_key = jrng.split(key)
+    spawn = poisson_vector(poisson_key, mean_n, max_n)
     
-    key, subkey = jrng.split(key)
-    x = uniform_x(subkey, max_n, world_size)
+    key, uniform_key = jrng.split(key)
+    x = uniform_x(uniform_key, max_n, world_size)
+    x = jnp.where(spawn[:,None], x, jnp.array(world_size, dtype=jnp.int32))
     
     grid = jnp.zeros(world_size, dtype=jnp.bool)
     grid = grid.at[x[...,0], x[...,1]].set(spawn)
@@ -214,7 +198,7 @@ def spawn_from_parents(
     Generate new child positions (child_x) and rotations (child_r) based on
     local offsets from a single parent.  If given a world_size or object_grid
     this will also check to make sure new children are in bounds and do not
-    collide with another object.  If an object_grid is provided, an updated
+    collide with another object or other new children.
     '''
     
     if object_grid is not None:
@@ -242,9 +226,14 @@ def spawn_from_parents(
         valid_children = valid_children & inbounds
     
     # - second make sure the children will not be on top of any existing objects
+    #   or on top of each other
     if object_grid is not None:
-        child_colliders = object_grid[child_x[:,0], child_x[:,1]]
-        valid_children = valid_children & (child_colliders == empty)
+        #child_colliders = object_grid[child_x[:,0], child_x[:,1]]
+        #valid_children = valid_children & (child_colliders == empty)
+        occupancy_map = (object_grid != empty).astype(jnp.int32)
+        occupancy_map = occupancy_map.at[child_x[:,0], child_x[:,1]].add(1)
+        child_occupancy = occupancy_map[child_x[:,0], child_x[:,1]]
+        valid_children = valid_children & (child_occupancy <= 1)
     
     # update the non-reproduced child_x locations to be off the grid so they
     # don't overwrite important values in the object array

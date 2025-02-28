@@ -160,7 +160,7 @@ class Viewer:
     
     def _init_players(self):
         active_players = self.get_active_players(self.params, self.report)
-        self.num_players, = active_players.shape
+        self.max_players, = active_players.shape
         
         '''
         self.renderer.load_mesh(
@@ -249,7 +249,7 @@ class Viewer:
         
         self.player_instances = []
         self.player_eye_instances = []
-        for player_id in range(self.num_players):
+        for player_id in range(self.max_players):
             material_name = f'player_material_{player_id}'
             player_color = color_index_to_float(player_id+1)
             self.renderer.load_material(
@@ -323,6 +323,7 @@ class Viewer:
         self.renderer.set_ambient_color((0.2, 0.2, 0.2))
         
     def _init_callbacks(self):
+        self._shift_down = False
         self.window.set_mouse_button_callback(
             self.camera_control.mouse_callback)
         self.window.set_cursor_pos_callback(
@@ -338,7 +339,6 @@ class Viewer:
         return block_index, block_step
     
     def change_step(self, step):
-        print('change step', step)
         step = max(self.step_0, min(self.step_N-1, step))
         block_index, block_step = self.step_to_block(step)
         if block_index != self.block_index:
@@ -347,7 +347,7 @@ class Viewer:
                 self.current_report_block, self.report_files[self.block_index])
         self.current_step = step
         
-        print(f'bi {block_index}, bs {block_step}, rpb{self.reports_per_block}')
+        print(f'Current Step: {step} Block Location: {block_index}, {block_step}')
         
         self.report = tree_getitem(
             self.current_report_block, block_step)
@@ -359,15 +359,14 @@ class Viewer:
         self._update_players()
     
     def _update_players(self):
-        print('updating')
         active_players = self.get_active_players(self.params, self.report)
         player_x = self.get_player_x(self.params, self.report)
         player_r = self.get_player_r(self.params, self.report)
         player_transforms = self._player_transform(player_x, player_r)
         
-        print(jnp.sum(active_players))
+        print(f'Active Players: {jnp.sum(active_players)}')
         
-        for player_id in range(self.num_players):
+        for player_id in range(self.max_players):
             player_name = f'player_{player_id}'
             eye_white_name = f'player_eye_white_{player_id}'
             eye_pupil_name = f'player_eye_pupil_{player_id}'
@@ -443,10 +442,18 @@ class Viewer:
         self.renderer.color_render(flip_y=False)
     
     def key_callback(self, window, key, scancode, action, mods):
-        print(key, scancode, action, mods)
+        if key in (340, 344):
+            self._shift_down = action
+        
         if action == glfw.PRESS or action == glfw.REPEAT:
             if key == 44:
-                self.change_step(self.current_step - 1)
+                if self._shift_down:
+                    self.change_step(self.current_step - self.reports_per_block)
+                else:
+                    self.change_step(self.current_step - 1)
             elif key == 46:
-                self.change_step(self.current_step + 1)
+                if self._shift_down:
+                    self.change_step(self.current_step + self.reports_per_block)
+                else:
+                    self.change_step(self.current_step + 1)
         self.camera_control.key_callback(window, key, scancode, action, mods)
