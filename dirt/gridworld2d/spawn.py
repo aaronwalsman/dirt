@@ -197,7 +197,7 @@ def spawn_from_parents(
     Generate new child positions (child_x) and rotations (child_r) based on
     local offsets from a single parent.  If given a world_size or object_grid
     this will also check to make sure new children are in bounds and do not
-    collide with another object.  If an object_grid is provided, an updated
+    collide with another object or other new children.
     '''
     
     if object_grid is not None:
@@ -226,8 +226,12 @@ def spawn_from_parents(
     
     # - second make sure the children will not be on top of any existing objects
     if object_grid is not None:
-        child_colliders = object_grid[child_x[:,0], child_x[:,1]]
-        valid_children = valid_children & (child_colliders == empty)
+        #child_colliders = object_grid[child_x[:,0], child_x[:,1]]
+        #valid_children = valid_children & (child_colliders == empty)
+        occupancy_map = (object_grid != empty).astype(jnp.int32)
+        occupancy_map = occupancy_map.at[child_x[:,0], child_x[:,1]].add(1)
+        child_occupancy = occupancy_map[child_x[:,0], child_x[:,1]]
+        valid_children = valid_children & (child_occupancy <= 1)
     
     # update the non-reproduced child_x locations to be off the grid so they
     # don't overwrite important values in the object array
