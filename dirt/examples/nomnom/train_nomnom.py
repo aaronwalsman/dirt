@@ -182,7 +182,8 @@ if __name__ == '__main__':
         max_food_growth=1000, #16**2,
         initial_players=8,
         max_players=max_players,
-        world_size=(32,32)
+        world_size=(32,32),
+        senescence=0.02,
     )
     train_params = NaturalSelectionParams(
         max_population=max_players,

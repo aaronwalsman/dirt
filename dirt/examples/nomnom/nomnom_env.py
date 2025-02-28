@@ -38,6 +38,7 @@ class NomNomParams:
     food_metabolism : float = 1
     move_metabolism : float = -0.05
     wait_metabolism : float = -0.025
+    senescence : float = 0.
     
     view_width : int = 5
     view_distance : int = 5
@@ -56,6 +57,7 @@ class NomNomState:
     player_x : jnp.ndarray
     player_r : jnp.ndarray
     player_energy : jnp.ndarray
+    player_age : jnp.ndarray
 
     curr_step: jnp.int8
 
@@ -113,9 +115,10 @@ def nomnom(
             active=active_players,
         )
         
-        #player_energy = jnp.full((params.max_players,), params.initial_energy)
         n_hot = jnp.arange(params.max_players) < params.initial_players
         player_energy = n_hot * params.initial_energy
+        
+        player_age = jnp.zeros((params.max_players,), dtype=jnp.int32)
         
         # initialize the object grid
         object_grid = dynamics.make_object_grid(
@@ -138,7 +141,8 @@ def nomnom(
             player_x,
             player_r,
             player_energy,
-            0
+            player_age,
+            0,
         )
 
         return state
@@ -204,6 +208,9 @@ def nomnom(
             object_grid=state.object_grid,
         )
         
+        # age
+        player_age = (state.player_age + active_players) * active_players
+        
         # eat
         # - figure out who will eat which food
         food_at_player = state.food_grid[player_x[...,0], player_x[...,1]]
@@ -220,11 +227,13 @@ def nomnom(
     
         # metabolism
         moved = action.forward | (action.rotate != 0)
-        player_energy = (
-            player_energy +
+        energy_consumption = (
             moved * params.move_metabolism +
             (1. - moved) * params.wait_metabolism
-        ) * active_players
+        )
+        energy_consumption *= (1. + params.senescence)**player_age
+        player_energy = (
+            player_energy + energy_consumption) * active_players
 
         # update the players based on starvation and reproduction
         # - filter the reproduce vector to remove dead players and those without
@@ -299,6 +308,7 @@ def nomnom(
             player_x,
             player_r,
             player_energy,
+            player_age,
             state.curr_step + 1
         )
         return state
