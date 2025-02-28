@@ -171,15 +171,15 @@ if __name__ == '__main__':
     
     key = jrng.key(5432)
     
-    max_players = 8
+    max_players = 64
     env_params = NomNomParams(
-        mean_initial_food=8**2,
-        max_initial_food=32**2,
-        mean_food_growth=2**2,
-        max_food_growth=16**2,
+        mean_initial_food=1000, #8**2,
+        max_initial_food=1000, #32**2,
+        mean_food_growth=1, #2**2,
+        max_food_growth=1000, #16**2,
         initial_players=8,
         max_players=max_players,
-        world_size=(32,32)
+        world_size=(8,8)
     )
     train_params = NaturalSelectionParams(
         max_population=max_players,
@@ -187,7 +187,7 @@ if __name__ == '__main__':
     params = NomNomTrainParams(
         env_params=env_params,
         train_params=train_params,
-        epochs=10,
+        epochs=5,
         steps_per_epoch=256,
     )
     
@@ -196,5 +196,5 @@ if __name__ == '__main__':
     params.add_commandline_args(parser)
     args = parser.parse_args()
     params = params.from_commandline_args(args)
-
+    
     train(key, params)

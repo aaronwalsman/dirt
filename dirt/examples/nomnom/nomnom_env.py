@@ -283,12 +283,13 @@ def nomnom(
         
         # grow new food
         key, food_key = jrng.split(key)
-        food_grid = food_grid | spawn.poisson_grid(
+        new_food = spawn.poisson_grid(
             food_key,
             params.mean_food_growth,
             params.max_food_growth,
             params.world_size,
         )
+        food_grid = food_grid | new_food
 
         # compute new state
         state = NomNomState(
