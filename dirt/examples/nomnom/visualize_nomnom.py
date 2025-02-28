@@ -25,6 +25,9 @@ def terrain_texture(report, texture_size):
     texture = jnp.repeat(texture[:,:,None], 3, axis=2)
     return np.array(texture)
 
+def get_player_energy(params, report):
+    return report.player_energy / params.env_params.max_energy
+
 def start_viewer(output_directory):
     params_path = f'{output_directory}/train_params.state'
     report_paths = sorted([
@@ -38,6 +41,7 @@ def start_viewer(output_directory):
         params_path,
         NomNomReport(),
         report_paths,
+        get_player_energy=get_player_energy,
         get_terrain_texture=terrain_texture,
     )
     viewer.begin()
