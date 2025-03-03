@@ -46,6 +46,7 @@ class Viewer:
         get_active_players=default_get_active_players,
         get_player_x=default_get_player_x,
         get_player_r=default_get_player_r,
+        get_player_energy=None,
         get_terrain_map=default_get_terrain_map,
         get_terrain_texture=None,
         get_water_map=default_get_water_map,
@@ -57,10 +58,16 @@ class Viewer:
             get_player_x, ('params', 'report'))
         self.get_player_r = ignore_unused_args(
             get_player_r, ('params', 'report'))
+        self.get_player_energy = get_player_energy
+        if get_player_energy:
+            self.get_player_energy = ignore_unused_args(
+                self.get_player_energy, ('params', 'report'))
         self.get_terrain_map = ignore_unused_args(
             get_terrain_map, ('params', 'report'))
-        self.get_terrain_texture = ignore_unused_args(
-            get_terrain_texture, ('params', 'report', 'texture_size'))
+        self.get_terrain_texture = get_terrain_texture
+        if self.get_terrain_texture:
+            self.get_terrain_texture = ignore_unused_args(
+                self.get_terrain_texture, ('params', 'report', 'texture_size'))
         self.get_water_map = ignore_unused_args(
             get_water_map, ('params', 'report'))
         
@@ -162,21 +169,7 @@ class Viewer:
         active_players = self.get_active_players(self.params, self.report)
         self.max_players, = active_players.shape
         
-        '''
-        self.renderer.load_mesh(
-            name='player_mesh',
-            mesh_primitive={
-                'shape':'sphere',
-                'radius':PLAYER_RADIUS,
-            },
-            color_mode='flat_color',
-        )
-        '''
-        
         # make player cube
-        player_cube = primitives.cube(
-        )
-        
         self.renderer.load_mesh(
             name='player_mesh',
             mesh_primitive={
@@ -247,6 +240,37 @@ class Viewer:
             flat_color=(0.,0.,0.),
         )
         
+        # make energy meters
+        if self.get_player_energy is not None:
+            self.renderer.load_mesh(
+                name='energy_background_mesh',
+                mesh_primitive={
+                    'shape':'cube',
+                    'x_extents':(-PLAYER_RADIUS, PLAYER_RADIUS),
+                    'y_extents':(-0.05, 0.05),
+                    'z_extents':(0, 0.4),
+                },
+                color_mode='flat_color',
+            )
+            self.renderer.load_material(
+                name='energy_background_material',
+                flat_color=(0.,0.,0.),
+            )
+            self.renderer.load_mesh(
+                name='energy_mesh',
+                mesh_primitive={
+                    'shape':'cube',
+                    'x_extents':(-PLAYER_RADIUS+0.05, PLAYER_RADIUS-0.05),
+                    'y_extents':(-0.1, 0.1),
+                    'z_extents':(0.05, 0.35),
+                },
+                color_mode='flat_color',
+            )
+            self.renderer.load_material(
+                name='energy_material',
+                flat_color=(0.,1.,0.),
+            )
+        
         self.player_instances = []
         self.player_eye_instances = []
         for player_id in range(self.max_players):
@@ -283,6 +307,25 @@ class Viewer:
                 transform=np.eye(4),
                 hidden=True,
             )
+            
+            if self.get_player_energy is not None:
+                player_energy_background_name = (
+                    f'player_energy_background_{player_id}')
+                self.renderer.add_instance(
+                    name=player_energy_background_name,
+                    mesh_name='energy_background_mesh',
+                    material_name='energy_background_material',
+                    transform=np.eye(4),
+                    hidden=True,
+                )
+                player_energy_name = f'player_energy_{player_id}'
+                self.renderer.add_instance(
+                    name=player_energy_name,
+                    mesh_name='energy_mesh',
+                    material_name='energy_material',
+                    transform=np.eye(4),
+                    hidden=True,
+                )
     
     def _init_camera_and_lights(self):
         
@@ -347,7 +390,8 @@ class Viewer:
                 self.current_report_block, self.report_files[self.block_index])
         self.current_step = step
         
-        print(f'Current Step: {step} Block Location: {block_index}, {block_step}')
+        print(f'Current Step: {step} '
+            f'Block Location: {block_index}, {block_step}')
         
         self.report = tree_getitem(
             self.current_report_block, block_step)
@@ -362,6 +406,7 @@ class Viewer:
         active_players = self.get_active_players(self.params, self.report)
         player_x = self.get_player_x(self.params, self.report)
         player_r = self.get_player_r(self.params, self.report)
+        player_energy = self.get_player_energy(self.params, self.report)
         player_transforms = self._player_transform(player_x, player_r)
         
         print(f'Active Players: {jnp.sum(active_players)}')
@@ -370,6 +415,8 @@ class Viewer:
             player_name = f'player_{player_id}'
             eye_white_name = f'player_eye_white_{player_id}'
             eye_pupil_name = f'player_eye_pupil_{player_id}'
+            energy_background_name = f'player_energy_background_{player_id}'
+            energy_name = f'player_energy_{player_id}'
             if active_players[player_id]:
                 self.renderer.show_instance(player_name)
                 self.renderer.set_instance_transform(
@@ -380,10 +427,38 @@ class Viewer:
                 self.renderer.show_instance(eye_pupil_name)
                 self.renderer.set_instance_transform(
                     eye_pupil_name, player_transforms[player_id])
+                
+                if self.get_player_energy is not None:
+                    background_transform = player_transforms[player_id].copy()
+                    background_transform[1,3] += PLAYER_RADIUS * 1.5
+                    self.renderer.show_instance(energy_background_name)
+                    self.renderer.set_instance_transform(
+                        energy_background_name, background_transform)
+                    
+                    #energy_transform = background_transform.copy()
+                    energy_scale = np.eye(4)
+                    energy_scale[0,0] = player_energy[player_id]
+                    energy_pivot = np.eye(4)
+                    energy_pivot[0,3] = PLAYER_RADIUS-0.05
+                    energy_anti_pivot = np.eye(4)
+                    energy_anti_pivot[0,3] = -PLAYER_RADIUS+0.05
+                    energy_transform = (
+                        background_transform @
+                        energy_pivot @
+                        energy_scale @
+                        energy_anti_pivot
+                    )
+                    self.renderer.show_instance(energy_name)
+                    self.renderer.set_instance_transform(
+                        energy_name, energy_transform)
+                
             else:
                 self.renderer.hide_instance(player_name)
                 self.renderer.hide_instance(eye_white_name)
                 self.renderer.hide_instance(eye_pupil_name)
+                if self.get_player_energy is not None:
+                    self.renderer.hide_instance(energy_background_name)
+                    self.renderer.hide_instance(energy_name)
     
     def _update_terrain(self):
         if self.get_terrain_texture is not None:
@@ -396,7 +471,6 @@ class Viewer:
     
     def _player_transform(self, player_x, player_r):
         height, width = self.world_size
-        #c = player_r.shape
         y = player_x[..., 0]
         x = player_x[..., 1]
         z = self.terrain_map[y, x] + PLAYER_RADIUS
