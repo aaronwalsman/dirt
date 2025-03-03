@@ -49,6 +49,7 @@ class NomNomReport:
     players : jnp.array = False
     player_x : jnp.array = False
     player_r : jnp.array = False
+    player_energy : jnp.array = False
     food_grid : jnp.array = False
 
 def make_report(
@@ -62,6 +63,7 @@ def make_report(
         players,
         next_state.env_state.player_x,
         next_state.env_state.player_r,
+        next_state.env_state.player_energy,
         next_state.env_state.food_grid,
     )
 
@@ -171,15 +173,17 @@ if __name__ == '__main__':
     
     key = jrng.key(5432)
     
-    max_players = 64
+    max_players = 256
     env_params = NomNomParams(
+        max_energy=4.,
         mean_initial_food=1000, #8**2,
         max_initial_food=1000, #32**2,
-        mean_food_growth=1, #2**2,
+        mean_food_growth=4, #2**2,
         max_food_growth=1000, #16**2,
         initial_players=8,
         max_players=max_players,
-        world_size=(8,8)
+        world_size=(32,32),
+        senescence=0.02,
     )
     train_params = NaturalSelectionParams(
         max_population=max_players,
@@ -187,7 +191,7 @@ if __name__ == '__main__':
     params = NomNomTrainParams(
         env_params=env_params,
         train_params=train_params,
-        epochs=5,
+        epochs=4,
         steps_per_epoch=256,
     )
     
