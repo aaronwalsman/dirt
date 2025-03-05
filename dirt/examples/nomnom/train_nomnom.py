@@ -40,7 +40,7 @@ class NomNomTrainParams:
     )
     epochs : int = 100
     steps_per_epoch : int = 1000
-    output_directory : str = '/n/holylfs06/LABS/kempner_fellow_awalsman/Lab/Development'
+    output_directory : str = '/n/holylfs06/LABS/kempner_fellow_awalsman/Lab/chloe00'
     load_from_file : Optional[str] = None
 
 @static_dataclass
