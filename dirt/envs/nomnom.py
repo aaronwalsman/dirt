@@ -265,7 +265,7 @@ def nomnom(
         # set the children's age to be zero
         # - this is necessary since some players are born into slots that were
         #   immediately freed by other dead players
-        player_age.at[child_locations].set(0)
+        player_age = player_age.at[child_locations].set(0)
         
         # - reorder child_x and child_r to be aligned with the parent
         #   and child locations
