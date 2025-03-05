@@ -147,9 +147,6 @@ def train(key, params):
         )
         epoch += 1
         
-        train_state, active_players, logging_info = train_epoch(
-            epoch_key, train_state, active_players, logging_info)
-        
         #actions, players = reports
         actions = reports.actions
         players = reports.players
