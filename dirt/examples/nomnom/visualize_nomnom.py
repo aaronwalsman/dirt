@@ -41,6 +41,8 @@ def start_viewer(output_directory):
         params_path,
         NomNomReport(),
         report_paths,
+        window_width=1024,
+        window_height=1024,
         get_player_energy=get_player_energy,
         get_terrain_texture=terrain_texture,
     )

@@ -19,6 +19,57 @@ class NomNomModelParams:
     view_width : int = 5
     view_distance : int = 5
 
+def nomnom_linear_model(params=NomNomModelParams()):
+    in_dim = (
+        (params.num_input_classes-1) *
+        params.view_width *
+        params.view_distance +
+        1   # energy
+    )
+    out_dim = 2+3+2
+    
+    def encoder_forward(x):
+        food = (x.view == 1).reshape(-1).astype(jnp.float32)
+        players = (x.view == 2).reshape(-1).astype(jnp.float32)
+        out_of_bounds = (x.view == 3).reshape(-1).astype(jnp.float32)
+        x = jnp.concatenate(
+            (food, players, out_of_bounds, x.energy[...,None]), axis=-1)
+        return {'forward' : x, 'rotate' : x, 'reproduce' : x}
+    
+    encoder = (lambda: None, encoder_forward)
+    
+    decoder_heads = parallel_dict_layer({
+        'forward' : layer_sequence((
+            linear_layer(in_dim, 2, use_bias=True),
+            #print_activations_layer('forward:'),
+            categorical_sampler_layer(),
+            #print_activations_layer('forward_sample:'),
+        )),
+        'rotate' : layer_sequence((
+            linear_layer(in_dim, 3, use_bias=True),
+            #print_activations_layer('rotate:'),
+            categorical_sampler_layer(choices=jnp.array([-1,0,1])),
+            #print_activations_layer('rotate_sample:'),
+        )),
+        'reproduce' : layer_sequence((
+            linear_layer(in_dim, 2, use_bias=True),
+            #print_activations_layer('reproduce:'),
+            categorical_sampler_layer(),
+            #print_activations_layer('reproduce_sample:'),
+        )),
+    })
+    
+    decoder = layer_sequence((
+        decoder_heads,
+        (lambda: None, lambda x : NomNomAction(**x)),
+        #print_activations_layer('action:'),
+    ))
+    
+    return layer_sequence([
+        encoder,
+        decoder,
+    ])
+
 def nomnom_model(params=NomNomModelParams()):
     
     # utility
