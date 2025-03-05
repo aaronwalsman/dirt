@@ -86,6 +86,7 @@ class Viewer:
         self._init_camera_and_lights()
         self._init_callbacks()
         
+        self.step_size = 1
         self.change_step(start_step)
     
     def _init_params_and_reports(
@@ -516,6 +517,12 @@ class Viewer:
         self.renderer.color_render(flip_y=False)
     
     def key_callback(self, window, key, scancode, action, mods):
+        if action == glfw.PRESS and key == 45:
+            self.step_size = max(1, self.step_size-1)
+            print(f'step size: {self.step_size}')
+        if action == glfw.PRESS and key == 61:
+            self.step_size += 1
+            print(f'step size: {self.step_size}')
         if key in (340, 344):
             self._shift_down = action
         
@@ -524,10 +531,10 @@ class Viewer:
                 if self._shift_down:
                     self.change_step(self.current_step - self.reports_per_block)
                 else:
-                    self.change_step(self.current_step - 1)
+                    self.change_step(self.current_step - self.step_size)
             elif key == 46:
                 if self._shift_down:
                     self.change_step(self.current_step + self.reports_per_block)
                 else:
-                    self.change_step(self.current_step + 1)
+                    self.change_step(self.current_step + self.step_size)
         self.camera_control.key_callback(window, key, scancode, action, mods)

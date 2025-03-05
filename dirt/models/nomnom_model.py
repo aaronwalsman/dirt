@@ -19,7 +19,36 @@ class NomNomModelParams:
     view_width : int = 5
     view_distance : int = 5
 
-def nomnom_linear_model(params=NomNomModelParams()):
+def nomnom_action_decoder(in_channels, dtype=jnp.float32):
+    return layer_sequence((
+        (
+            lambda: None, lambda x :
+            {'forward' : x, 'rotate' : x, 'reproduce' : x}
+        ),
+        parallel_dict_layer({
+            'forward' : layer_sequence((
+                linear_layer(in_channels, 2, use_bias=True, dtype=dtype),
+                categorical_sampler_layer(),
+            )),
+            'rotate' : layer_sequence((
+                linear_layer(in_channels, 3, use_bias=True, dtype=dtype),
+                categorical_sampler_layer(choices=jnp.array([-1,0,1])),
+            )),
+            'reproduce' : layer_sequence((
+                linear_layer(in_channels, 2, use_bias=True, dtype=dtype),
+                categorical_sampler_layer(),
+            )),
+        }),
+        (lambda: None, lambda x : NomNomAction(**x)),
+    ))
+
+def nomnom_unconditional_model(params=NomNomModelParams(), dtype=jnp.float32):
+    return layer_sequence((
+        (lambda : None, lambda x : jnp.ones_like(x.energy)),
+        nomnom_action_decoder(1, dtype=dtype),
+    ))
+
+def nomnom_linear_model(params=NomNomModelParams(), dtype=jnp.float32):
     in_dim = (
         (params.num_input_classes-1) *
         params.view_width *
@@ -29,46 +58,19 @@ def nomnom_linear_model(params=NomNomModelParams()):
     out_dim = 2+3+2
     
     def encoder_forward(x):
-        food = (x.view == 1).reshape(-1).astype(jnp.float32)
-        players = (x.view == 2).reshape(-1).astype(jnp.float32)
-        out_of_bounds = (x.view == 3).reshape(-1).astype(jnp.float32)
-        x = jnp.concatenate(
+        food = (x.view == 1).reshape(-1).astype(dtype)
+        players = (x.view == 2).reshape(-1).astype(dtype)
+        out_of_bounds = (x.view == 3).reshape(-1).astype(dtype)
+        return jnp.concatenate(
             (food, players, out_of_bounds, x.energy[...,None]), axis=-1)
-        return {'forward' : x, 'rotate' : x, 'reproduce' : x}
     
     encoder = (lambda: None, encoder_forward)
+    decoder = nomnom_action_decoder(in_dim, dtype=dtype)
     
-    decoder_heads = parallel_dict_layer({
-        'forward' : layer_sequence((
-            linear_layer(in_dim, 2, use_bias=True),
-            #print_activations_layer('forward:'),
-            categorical_sampler_layer(),
-            #print_activations_layer('forward_sample:'),
-        )),
-        'rotate' : layer_sequence((
-            linear_layer(in_dim, 3, use_bias=True),
-            #print_activations_layer('rotate:'),
-            categorical_sampler_layer(choices=jnp.array([-1,0,1])),
-            #print_activations_layer('rotate_sample:'),
-        )),
-        'reproduce' : layer_sequence((
-            linear_layer(in_dim, 2, use_bias=True),
-            #print_activations_layer('reproduce:'),
-            categorical_sampler_layer(),
-            #print_activations_layer('reproduce_sample:'),
-        )),
-    })
-    
-    decoder = layer_sequence((
-        decoder_heads,
-        (lambda: None, lambda x : NomNomAction(**x)),
-        #print_activations_layer('action:'),
-    ))
-    
-    return layer_sequence([
+    return layer_sequence((
         encoder,
         decoder,
-    ])
+    ))
 
 def nomnom_model(params=NomNomModelParams()):
     
