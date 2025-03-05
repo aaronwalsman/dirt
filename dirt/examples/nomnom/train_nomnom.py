@@ -42,7 +42,8 @@ class NomNomTrainParams:
     )
     epochs : int = 100
     steps_per_epoch : int = 1000
-    output_directory : str = '/n/holylfs06/LABS/kempner_fellow_awalsman/Lab/Development'
+    #output_directory : str = '/n/holylfs06/LABS/kempner_fellow_awalsman/Lab/Development'
+    output_directory : str = '.'
     load_from_file : Optional[str] = None
 
 @static_dataclass
@@ -176,16 +177,16 @@ if __name__ == '__main__':
     #key = jrng.key(5432)
     key = jrng.key(1234)
     
-    max_players = 512*16
+    max_players = 512#*16
     env_params = NomNomParams(
         max_energy=4.,
         mean_initial_food=100000, #8**2,
         max_initial_food=100000, #32**2,
-        mean_food_growth=16*16, #2**2,
+        mean_food_growth=16, #16*16, #2**2,
         max_food_growth=1000, #16**2,
         initial_players=8,
         max_players=max_players,
-        world_size=(512,512),
+        world_size=(64,64),#(512,512),
         senescence=0.01,
     )
     train_params = NaturalSelectionParams(
