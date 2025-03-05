@@ -40,7 +40,7 @@ class NomNomTrainParams:
     )
     epochs : int = 100
     steps_per_epoch : int = 1000
-    output_directory : str = '.'
+    output_directory : str = '/n/holylfs06/LABS/kempner_fellow_awalsman/Lab/Development'
     load_from_file : Optional[str] = None
 
 @static_dataclass
@@ -143,8 +143,8 @@ def train(key, params):
         )
         epoch += 1
         
-        # train_state, active_players, logging_info = train_epoch(
-        #     epoch_key, train_state, active_players, logging_info)
+        train_state, active_players, logging_info = train_epoch(
+            epoch_key, train_state, active_players, logging_info)
         
         #actions, players = reports
         actions = reports.actions
@@ -163,7 +163,6 @@ def train(key, params):
 
         fig.tight_layout()
         #wandb.log({"plot/actions": wandb.Image(fig)})
-
         #wandb.log({"active players": players.sum()})
         
     
