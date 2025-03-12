@@ -17,8 +17,10 @@ from mechagogue.nn.mlp import mlp
 from mechagogue.static_dataclass import static_dataclass
 from mechagogue.serial import save_leaf_data, load_example_data
 
-from dirt.examples.nomnom.nomnom_env import nomnom, NomNomParams, NomNomAction
-from dirt.examples.nomnom.nomnom_model import NomNomModelParams, nomnom_model
+#from dirt.examples.nomnom.nomnom_env import nomnom, NomNomParams, NomNomAction
+from dirt.envs.nomnom import nomnom, NomNomParams, NomNomAction
+from dirt.examples.nomnom.nomnom_model import (
+    NomNomModelParams, nomnom_model, nomnom_linear_model)
 
 import wandb
 import matplotlib.pyplot as plt
@@ -40,6 +42,7 @@ class NomNomTrainParams:
     )
     epochs : int = 100
     steps_per_epoch : int = 1000
+    #output_directory : str = '/n/holylfs06/LABS/kempner_fellow_awalsman/Lab/Development'
     output_directory : str = '.'
     load_from_file : Optional[str] = None
 
@@ -84,7 +87,8 @@ def train(key, params):
         view_width=params.env_params.view_width,
         view_distance=params.env_params.view_distance,
     )
-    init_model, model = nomnom_model(model_params)
+    #init_model, model = nomnom_model(model_params)
+    init_model, model = nomnom_linear_model(model_params)
     
     # - build the training functions
     reset_train, step_train = natural_selection(
@@ -143,9 +147,6 @@ def train(key, params):
         )
         epoch += 1
         
-        # train_state, active_players, logging_info = train_epoch(
-        #     epoch_key, train_state, active_players, logging_info)
-        
         #actions, players = reports
         actions = reports.actions
         players = reports.players
@@ -163,7 +164,6 @@ def train(key, params):
 
         fig.tight_layout()
         #wandb.log({"plot/actions": wandb.Image(fig)})
-
         #wandb.log({"active players": players.sum()})
         
     
@@ -171,19 +171,20 @@ def train(key, params):
 
 if __name__ == '__main__':
     
-    key = jrng.key(5432)
+    #key = jrng.key(5432)
+    key = jrng.key(1234)
     
-    max_players = 256
+    max_players = 512#*16
     env_params = NomNomParams(
         max_energy=4.,
-        mean_initial_food=1000, #8**2,
-        max_initial_food=1000, #32**2,
-        mean_food_growth=4, #2**2,
+        mean_initial_food=100000, #8**2,
+        max_initial_food=100000, #32**2,
+        mean_food_growth=16, #16*16, #2**2,
         max_food_growth=1000, #16**2,
         initial_players=8,
         max_players=max_players,
-        world_size=(32,32),
-        senescence=0.02,
+        world_size=(64,64),#(512,512),
+        senescence=0.01,
     )
     train_params = NaturalSelectionParams(
         max_population=max_players,
@@ -191,7 +192,7 @@ if __name__ == '__main__':
     params = NomNomTrainParams(
         env_params=env_params,
         train_params=train_params,
-        epochs=4,
+        epochs=32,
         steps_per_epoch=256,
     )
     
@@ -199,6 +200,6 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     params.add_commandline_args(parser)
     args = parser.parse_args()
-    params = params.from_commandline_args(args)
+    params = params.update_from_commandline(args)
     
     train(key, params)
