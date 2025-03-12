@@ -11,7 +11,7 @@ from mechagogue.nn.structured import parallel_dict_layer
 from mechagogue.nn.distributions import categorical_sampler_layer
 from mechagogue.nn.debug import print_activations_layer
 
-from dirt.examples.nomnom.nomnom_env import NomNomObservation, NomNomAction
+from dirt.envs.nomnom import NomNomObservation, NomNomAction
 
 @static_dataclass
 class NomNomModelParams:
