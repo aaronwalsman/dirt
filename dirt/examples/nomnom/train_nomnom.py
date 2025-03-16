@@ -146,9 +146,6 @@ def train(key, params):
         )
         epoch += 1
         
-        train_state, active_players, logging_info = train_epoch(
-            epoch_key, train_state, active_players, logging_info)
-        
         #actions, players = reports
         actions = reports.actions
         players = reports.players
@@ -176,16 +173,16 @@ if __name__ == '__main__':
     #key = jrng.key(5432)
     key = jrng.key(1234)
     
-    max_players = 512*16
+    max_players = 512#*16
     env_params = NomNomParams(
         max_energy=4.,
         mean_initial_food=100000, #8**2,
         max_initial_food=100000, #32**2,
-        mean_food_growth=16*16, #2**2,
+        mean_food_growth=16, #16*16, #2**2,
         max_food_growth=1000, #16**2,
         initial_players=8,
         max_players=max_players,
-        world_size=(512,512),
+        world_size=(64,64),#(512,512),
         senescence=0.01,
     )
     train_params = NaturalSelectionParams(
@@ -194,8 +191,8 @@ if __name__ == '__main__':
     params = NomNomTrainParams(
         env_params=env_params,
         train_params=train_params,
-        epochs=32,
-        steps_per_epoch=256,
+        epochs=830,
+        steps_per_epoch=2048,
     )
     
     # update these defaults with commandline arguments
@@ -204,4 +201,6 @@ if __name__ == '__main__':
     args = parser.parse_args()
     params = params.update_from_commandline(args)
     
+    start = time.time()
     train(key, params)
+    print(time.time() - start)
