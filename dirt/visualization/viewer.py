@@ -28,6 +28,7 @@ default_get_terrain_map = lambda params : jnp.zeros(
 #    xz = jnp.sin(jnp.linspace(0, 2*2*jnp.pi, w))
 #    return yz[:,None] + xz[None,:]
 default_get_water_map = lambda : None
+default_get_player_color = lambda player_id : color_index_to_float(player_id+1)
 
 PLAYER_RADIUS=0.4
 
@@ -50,6 +51,7 @@ class Viewer:
         get_terrain_map=default_get_terrain_map,
         get_terrain_texture=None,
         get_water_map=default_get_water_map,
+        get_player_color=default_get_player_color,
     ):
         
         self.get_active_players = ignore_unused_args(
@@ -70,6 +72,8 @@ class Viewer:
                 self.get_terrain_texture, ('params', 'report', 'texture_size'))
         self.get_water_map = ignore_unused_args(
             get_water_map, ('params', 'report'))
+        self.get_player_color = ignore_unused_args(
+            get_player_color, ('player_id', 'params', 'report'))
         
         self._init_params_and_reports(
             example_params,
@@ -276,10 +280,9 @@ class Viewer:
         self.player_eye_instances = []
         for player_id in range(self.max_players):
             material_name = f'player_material_{player_id}'
-            player_color = color_index_to_float(player_id+1)
             self.renderer.load_material(
                 name=material_name,
-                flat_color=player_color,
+                flat_color=(0,0,0),
             )
         
             player_name = f'player_{player_id}'
@@ -428,6 +431,12 @@ class Viewer:
                 self.renderer.show_instance(eye_pupil_name)
                 self.renderer.set_instance_transform(
                     eye_pupil_name, player_transforms[player_id])
+                
+                player_color = self.get_player_color(
+                    player_id, self.params, self.report)
+                material_name = f'player_material_{player_id}'
+                self.renderer.set_material_flat_color(
+                    material_name, player_color)
                 
                 if self.get_player_energy is not None:
                     background_transform = player_transforms[player_id].copy()

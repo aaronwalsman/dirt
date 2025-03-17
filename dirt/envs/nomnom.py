@@ -23,7 +23,7 @@ class NomNomParams:
     Configuration parameters.  This should only contain values that will be
     fixed throughout training.
     '''
-    world_size : Tuple = (32,32)
+    world_size : Tuple[int, int] = (32,32)
     
     mean_initial_food : float = 32
     max_initial_food : int = 32
