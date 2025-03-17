@@ -24,7 +24,7 @@ class TrainParams:
     seed : int = 1234
     max_players : int = 256
     output_directory : str = '.'
-    load_state : str = None
+    load_state : str = ''
     visualize : bool = False
     vis_width : int = 1024
     vis_height : int = 1024
@@ -43,6 +43,8 @@ class TrainParams:
     runner_params : Any = EpochRunnerParams(
         epochs=100,
         steps_per_epoch=1000,
+        save_state=True,
+        save_reports=True,
     )
 
 @static_dataclass
@@ -64,8 +66,9 @@ def make_report(state, players, parents, children, actions):
         state.env_state.food_grid,
     )
 
-def log(reports):
+def log(epoch, reports):
     population_size = jnp.sum(reports.players[-1])
+    print(f'Epoch: {epoch}')
     print(f'Population Size: {population_size}')
     # do other wandb stuff
 
@@ -138,7 +141,7 @@ if __name__ == '__main__':
         # build the trainer
         init_train, step_train = natural_selection(
             params.train_params, reset_env, step_env, init_model, model, mutate)
-
+        
         # run
         epoch_runner(
             key,
