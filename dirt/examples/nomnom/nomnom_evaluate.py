@@ -1,7 +1,6 @@
 import jax
 import jax.numpy as jnp
 import jax.random as jrng
-import chex
 import os
 import glob
 import re
@@ -17,7 +16,7 @@ from mechagogue.player_list import birthday_player_list, player_family_tree
 from mechagogue.tree import tree_getitem
 from mechagogue.serial import load_example_data
 
-from dirt.examples.nomnom.nomnom_model import nomnom_model
+from dirt.examples.nomnom.nomnom_model import nomnom_model, nomnom_linear_model
 from dirt.examples.nomnom.train_nomnom import NomNomTrainParams, NomNomModelParams, NomNomParams, make_report
 from dirt.examples.nomnom.nomnom_env_evaluate import nomnom_no_reproduce, place_food_in_middle
 
@@ -32,7 +31,7 @@ def simulate_player_single_agent(n_steps, single_player_params, key):
     state, obs, _ = reset_env(rng_key)
     state = place_food_in_middle(state)
     model_params = NomNomModelParams()
-    init, model = nomnom_model(model_params)
+    init, model = nomnom_linear_model(model_params)
     initial_food = jnp.sum(state.food_grid)
 
     for t in range(n_steps):
@@ -53,10 +52,11 @@ def evaluate_state_file(
     max_population, 
     trials_per_agent,
     steps_per_trial,
-    key = 12345
+    key = 1234
 ):
     key = jrng.key(key)
     epoch = 0
+    # reset_env, step_env = nomnom_no_reproduce(params.env_params)
     reset_env, step_env = nomnom_no_reproduce(params.env_params)
 
     # - build mutate function
@@ -67,7 +67,7 @@ def evaluate_state_file(
         view_width=params.env_params.view_width,
         view_distance=params.env_params.view_distance,
     )
-    init_model, model = nomnom_model(model_params)
+    init_model, model = nomnom_linear_model(model_params)
     
     # - build the training functions
     reset_train, step_train = natural_selection(
@@ -83,6 +83,9 @@ def evaluate_state_file(
     # get the initial state of the training function
     key, reset_key = jrng.split(key)
     train_state, _ = jax.jit(reset_train)(reset_key)
+    print(type(train_state))
+    print(train_state)
+    breakpoint()
 
     print(f"Loading checkpoint from {state_path}...")
     key, epoch, train_state = load_example_data(
@@ -90,6 +93,7 @@ def evaluate_state_file(
         state_path
     )
     print(f"Loaded train_state from epoch {epoch}.")
+    breakpoint()
 
     env_state = train_state.env_state
     model_state = train_state.model_state
@@ -165,10 +169,10 @@ def main(params):
     import matplotlib.pyplot as plt
     epochs = [r[0] for r in results]
     means = [r[1] for r in results]
-    vars_ = [r[2] for r in results]
+    vars = [r[2] for r in results]
 
     plt.figure()
-    plt.errorbar(epochs, means, yerr=jnp.sqrt(jnp.array(vars_)), fmt='-o')
+    plt.errorbar(epochs, means, yerr=jnp.sqrt(jnp.array(vars)), fmt='-o')
     plt.xlabel("Epoch / State Number")
     plt.ylabel("Mean Food Eaten (+/- stdev)")
     plt.title("Food Eaten vs. Training Epoch")

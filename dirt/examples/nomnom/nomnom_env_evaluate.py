@@ -158,6 +158,14 @@ def nomnom_no_reproduce(params: NomNomParams = custom_5x5_params_fixed_food):
             (player_energy > params.initial_energy) &
             active_players
         )
+
+        # - generate the new child locations (filter out colliding children)
+        reproduce, child_x, child_r = spawn.spawn_from_parents(
+            reproduce,
+            player_x,
+            player_r,
+            object_grid=object_grid,
+        )
         
         # Family updates
         n = reproduce.shape[0]
@@ -165,6 +173,8 @@ def nomnom_no_reproduce(params: NomNomParams = custom_5x5_params_fixed_food):
         parent_locations = parent_locations[...,None]
         family_tree, child_locations = step_family_tree(
             state.family_tree, deaths, parent_locations)
+        child_x = child_x[parent_locations[...,0]]
+        child_r = child_r[parent_locations[...,0]]
         
         # object_grid updates for dead players
         object_grid = object_grid.at[player_x[...,0], player_x[...,1]].set(
@@ -176,6 +186,15 @@ def nomnom_no_reproduce(params: NomNomParams = custom_5x5_params_fixed_food):
             player_x
         )
         player_r = jnp.where(deaths, 0, player_r)
+
+        object_grid = object_grid.at[child_x[...,0], child_x[...,1]].set(
+            child_locations)
+        player_x = player_x.at[child_locations].set(child_x)
+        player_r = player_r.at[child_locations].set(child_r)
+        player_energy = player_energy.at[parent_locations].add(
+            -params.initial_energy)
+        player_energy = player_energy.at[child_locations].set(
+            params.initial_energy)
         
         # food growth
         key, food_key = jrng.split(key)
@@ -255,7 +274,7 @@ def place_food_in_middle(state: NomNomState) -> NomNomState:
     """
     Sets a single piece of food in the center (2,2) of a 5x5 grid.
     """
-    updated_food_grid = state.food_grid.at[2, 2].set(1)
+    updated_food_grid = state.food_grid.at[2, 2].set(True)
     
     # Build a new state with the updated food grid
     new_state = NomNomState(
