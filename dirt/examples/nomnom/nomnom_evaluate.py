@@ -26,6 +26,7 @@ def simulate_player_single_agent(n_steps, single_player_params, key):
     one player's parameters.
     """
     reset_env, step_env = nomnom_no_reproduce()
+    # reset_env, step_env = nomnom()
 
     rng_key, step_key = jrng.split(key)
     state, obs, _ = reset_env(rng_key)
@@ -38,9 +39,10 @@ def simulate_player_single_agent(n_steps, single_player_params, key):
         action = model(step_key, obs, single_player_params)
         next_state, next_obs, _, _, _ = step_env(step_key, state, action)
         
-        print(f"  Step {t}, action={action}, energy={next_obs.energy}")
+        # print(f"  Step {t}, action={action}, energy={next_obs.energy}")
         
         state, obs = next_state, next_obs
+        # print("Agent View:\n", obs.view)
 
     final_food = jnp.sum(state.food_grid)
     food_eaten = float(initial_food - final_food)
@@ -83,9 +85,6 @@ def evaluate_state_file(
     # get the initial state of the training function
     key, reset_key = jrng.split(key)
     train_state, _ = jax.jit(reset_train)(reset_key)
-    print(type(train_state))
-    print(train_state)
-    breakpoint()
 
     print(f"Loading checkpoint from {state_path}...")
     key, epoch, train_state = load_example_data(
@@ -93,7 +92,6 @@ def evaluate_state_file(
         state_path
     )
     print(f"Loaded train_state from epoch {epoch}.")
-    breakpoint()
 
     env_state = train_state.env_state
     model_state = train_state.model_state
@@ -109,7 +107,7 @@ def evaluate_state_file(
     all_food_eaten = []
 
     for i in active_indices:
-        print(f"\n=== Simulating single-agent run for active player {i} ===")
+        # print(f"\n=== Simulating single-agent run for active player {i} ===")
         
         single_player_params = tree_getitem(model_state, i)
         
@@ -118,6 +116,7 @@ def evaluate_state_file(
             food_eaten = simulate_player_single_agent(
                 steps_per_trial, single_player_params, sim_key
             )
+            # print(f"player {i}: {food_eaten}")
             all_food_eaten.append(food_eaten)
     if len(all_food_eaten) == 0:
         return (epoch, 0.0, 0.0)
@@ -198,9 +197,6 @@ if __name__ == "__main__":
         move_metabolism=-0.05,
         wait_metabolism=-0.025,
         senescence=0.0,
-        
-        view_width=5,
-        view_distance=5
     )
 
     train_params = NaturalSelectionParams(

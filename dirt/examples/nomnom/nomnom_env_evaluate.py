@@ -28,9 +28,6 @@ custom_5x5_params_fixed_food = NomNomParams(
     move_metabolism=-0.05,
     wait_metabolism=-0.025,
     senescence=0.0,
-    
-    view_width=5,
-    view_distance=5
 )
 
 def nomnom_no_reproduce(params: NomNomParams = custom_5x5_params_fixed_food):
@@ -48,7 +45,7 @@ def nomnom_no_reproduce(params: NomNomParams = custom_5x5_params_fixed_food):
     ) -> NomNomState:
         """
         Creates a NomNomState for a single-agent 5x5 environment with the agent 
-        on the top edge facing 'down' (or whichever direction you choose).
+        on the top edge facing 'down'
         """
         # Initialize the players
         family_tree = init_family_tree(params.initial_players)
@@ -56,7 +53,7 @@ def nomnom_no_reproduce(params: NomNomParams = custom_5x5_params_fixed_food):
         
         # place it at the top row, column 2 => (0,2)
         player_x = jnp.array([[0, 2]])
-        player_r = jnp.array([2])
+        player_r = jnp.array([0])
         
         # keep them generalized
         maxp = params.max_players
@@ -70,7 +67,7 @@ def nomnom_no_reproduce(params: NomNomParams = custom_5x5_params_fixed_food):
         player_energy = player_energy.at[0].set(params.initial_energy)
         player_age = jnp.zeros((maxp,), dtype=jnp.int32)
         
-        # Make an object grid (no collisions with just one player)
+        # Make an object grid
         object_grid = dynamics.make_object_grid(params.world_size, full_player_x, active_players)
         
         # Make a food grid

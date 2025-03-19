@@ -33,7 +33,7 @@ def nomnom_linear_model(params=NomNomModelParams()):
         players = (x.view == 2).reshape(-1).astype(jnp.float32)
         out_of_bounds = (x.view == 3).reshape(-1).astype(jnp.float32)
         x = jnp.concatenate(
-            (food, players, out_of_bounds, x.energy[...,None]), axis=-1)
+            (food, players, out_of_bounds, x.energy.reshape(-1)), axis=-1)
         return {'forward' : x, 'rotate' : x, 'reproduce' : x}
     
     encoder = (lambda: None, encoder_forward)
@@ -163,7 +163,7 @@ def nomnom_model(params=NomNomModelParams()):
     ])
 
 def test_model(key):
-    init_model, model = nomnom_model()
+    init_model, model = nomnom_linear_model()
     
     model_state = init_model(key)
     observation = NomNomObservation(
