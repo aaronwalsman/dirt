@@ -13,7 +13,7 @@ from mechagogue.nn.distributions import categorical_sampler_layer
 from mechagogue.nn.debug import print_activations_layer
 from mechagogue.breed.normal import normal_mutate
 
-from dirt.envs.nomnom import NomNomObservation, NomNomAction
+from dirt.envs.nomnom import NomNomObservation, NomNomAction, NomNomTraits
 
 # utilities
 relu = (lambda: None, jnn.relu)
@@ -28,7 +28,7 @@ def nomnom_linear_observation_encoder(dtype=jnp.float32):
     
     return lambda: None, model
 
-def nomnom_action_decoder(in_channels, dtype=jnp.float32):
+def nomnom_action_decoder(in_channels, use_bias=True, dtype=jnp.float32):
     return layer_sequence((
         (
             lambda: None,
@@ -36,19 +36,19 @@ def nomnom_action_decoder(in_channels, dtype=jnp.float32):
         ),
         parallel_dict_layer({
             'forward' : layer_sequence((
-                linear_layer(in_channels, 2, use_bias=True, dtype=dtype),
+                linear_layer(in_channels, 2, use_bias=use_bias, dtype=dtype),
                 categorical_sampler_layer(),
             )),
             'rotate' : layer_sequence((
-                linear_layer(in_channels, 3, use_bias=True, dtype=dtype),
+                linear_layer(in_channels, 3, use_bias=use_bias, dtype=dtype),
                 categorical_sampler_layer(choices=jnp.array([-1,0,1])),
             )),
             'reproduce' : layer_sequence((
-                linear_layer(in_channels, 2, use_bias=True, dtype=dtype),
+                linear_layer(in_channels, 2, use_bias=use_bias, dtype=dtype),
                 categorical_sampler_layer(),
             )),
         }),
-        (lambda: None, lambda x : NomNomAction(**x)),
+        (lambda: None, lambda x : (NomNomAction(**x), None)),
     ))
 
 # params
@@ -104,7 +104,8 @@ def nomnom_unconditional_or_linear_population(
     
     unconditional_encoder = (
         lambda : None, lambda x : jnp.ones((1,), dtype=dtype))
-    unconditional_decoder = nomnom_action_decoder(1, dtype=dtype)
+    unconditional_decoder = nomnom_action_decoder(
+        1, use_bias=False, dtype=dtype)
     init_unconditional_model, unconditional_model = layer_sequence(
         (unconditional_encoder, unconditional_decoder))
     init_unconditional_model = jax.vmap(init_unconditional_model)
@@ -128,6 +129,9 @@ def nomnom_unconditional_or_linear_population(
         
         return (model_type, unconditional_state, linear_state)
     
+    def player_traits(model_state):
+        return NomNomTraits()
+    
     def model(key, x, state):
         model_type, unconditional_state, linear_state = state
         unconditional_key, linear_key = jrng.split(key)
@@ -140,13 +144,16 @@ def nomnom_unconditional_or_linear_population(
             return jnp.where(model_type, a, b)
         return jax.tree.map(select_leaf, linear_action, unconditional_action)
     
+    def adapt(model_state):
+        return model_state
+    
     def mutate(key, state):
         model_type, unconditional_state, linear_state = state
         unconditional_state, linear_state = mutator(
             key, (unconditional_state, linear_state))
         return (model_type[0], unconditional_state, linear_state)
     
-    return init, model, mutate
+    return init, player_traits, model, mutate, adapt
 
 def nomnom_model(parms=NomNomModelParams()):
     
