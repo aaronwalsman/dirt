@@ -1,4 +1,4 @@
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Any
 
 import jax.numpy as jnp
 import jax.random as jrng
@@ -18,9 +18,9 @@ def fractal_noise(
     key : chex.PRNGKey,
     world_size : Tuple[int, int],
     octaves : int,
-    max_octaves : Optional[int] = None,
     lacunarity : float,
     persistence: float,
+    max_octaves : Optional[int] = None,
     grid_unit_scale : float = 0.005,
     height_scale : float = 50,
     dtype : Any = DEFAULT_FLOAT_TYPE,

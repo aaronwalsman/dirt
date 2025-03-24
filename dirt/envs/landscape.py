@@ -4,8 +4,18 @@ import jax.random as jrng
 
 import chex
 
+from typing import Tuple, Optional, TypeVar, Any, Union
+
 from dirt.defaults import DEFAULT_FLOAT_TYPE
 from dirt.gridworld2d.gas import step as gas_step
+from dirt.gridworld2d.geology import fractal_noise
+from dirt.gridworld2d.erosion import simulate_erosion_step, reset_erosion_status
+from dirt.gridworld2d.water import flow_step, flow_step_twodir
+
+from mechagogue.static_dataclass import static_dataclass
+
+TLandscapeParams = TypeVar('TLandscapeParams', bound='LandscapeParams')
+TLandscapeState = TypeVar('TLandscapeState', bound='LandscapeState')
 
 @static_dataclass
 class LandscapeParams:
@@ -24,16 +34,24 @@ class LandscapeParams:
     water_per_cell : float = 2.
     water_initial_fill_rate : float = 0.01
     water_flow_rate : float = 0.01
-    rain_moisture_threshold = float = 0.1
-    air_moisture_diffusion = float 1./3.
+    rain_moisture_threshold : float = 0.1
+    air_moisture_diffusion : float = 1./3.
     
     # air
     wind_std : float = 0.1
     wind_reversion : float = 0.001
     air_initial_temperature : float = 0.
+
+    # light
+    light_initial_strength: float = SOMETHING
+    night_effect: float = SOMETHING
+
+    # temperature
+    water_effect: float  = SOMETHING
+    rain_effect: float = SOMETHING
     
     # climate
-    steps_per_day : 24*10
+    steps_per_day : 240     # 24*10
     days_per_year : 360
     evaporation_rate : float = 0.01
     
@@ -49,6 +67,7 @@ class LandscapeState:
     wind_velocity : jnp.array
     air_temperature : jnp.array
     air_moisture : jnp.array
+    air_light: jnp.array
     #ground_chemicals : jnp.array
     #water_chemicals : jnp.array
     #air_chemicals : jnp.array
@@ -60,14 +79,14 @@ class LandscapeAction:
     #water_chemical_update : jnp.array
     #air_chemical_update : jnp.array
 
-LandscapeObservation = LandscapeState
+LandscapeObservation = LandscapeState # V: Do we need observation here, or we put this in the tera_arium?
 
 def landscape(
     params : TLandscapeParams = LandscapeParams(),
     dtype : Any = DEFAULT_FLOAT_TYPE,
 ):
     
-    init_wind_velocity, step_wind_velocity = ou_process(
+    init_wind_velocity, step_wind_velocity = ou_process(   # what will be the ou_process here?
         params.wind_std,
         params.wind_reversion,
         jnp.zeros((2,), dtype=dtype),
@@ -81,12 +100,12 @@ def landscape(
         # - use fractal_noise to generate an initial terrain grid
         key, terrain_key = jrng.split(key)
         terrain = fractal_noise(
-            ground_key,
+            terrain_key,
             params.world_size,
             params.terrain_octaves,
-            params.terrain_max_octaves,
             params.terrain_lacunarity,
             params.terrain_persistence,
+            params.terrain_max_octaves,
             params.terrain_unit_scale,
             params.terrain_max_height,
             dtype=dtype,
@@ -114,7 +133,7 @@ def landscape(
         
         def water_level_body(water_water_level):
             water, water_level = water_water_level
-            water_level += water_initial_fill_rate
+            water_level += params.water_initial_fill_rate # Suppose Fix
             water = water_level - terrain
             water = jnp.where(water < 0., 0., water)
             return (water, water_level)
@@ -132,6 +151,7 @@ def landscape(
         air_temperature = jnp.full(
             params.world_size, params.initial_air_temperature, dtype=dtype)
         air_moisture = jnp.zeros(params.world_size, dtype=dtype)
+        air_light = jnp.zeros(params.world_size, dtype=dtype)
         
         return LandscapeState(
             terrain,
@@ -140,13 +160,14 @@ def landscape(
             wind_velocity,
             air_temperature,
             air_moisture,
+            air_light
         )
     
     step_functions = []
-    for step_size in step_sizes:
+    for step_size in params.step_sizes:
         def step(
             key : chex.PRNGKey,
-            action : TLandscapeAction,
+            action : TLandscapeAction,    # Also, do we build action here or in the full tera_arium?
             state : TLandscapeState,
         ) -> Tuple[TLandscapeState, TLandscapeObservation] :
             
@@ -185,8 +206,25 @@ def landscape(
             
             # - flow
             #   TODO: iterate if water_flow_rate * step_size is too large
+
+            # Suggest way of doing
+            # Needs to figure out a way to deal with new_terrain and terrain
+            water = flow_step_twodir(terrain, water, params.water_flow_rate)
+            new_terrain, erosion = simulate_erosion_step(terrain, water, erosion, params.water_flow_rate, params.erosion_endurance, params.erosion_ratio)
+            erosion = reset_erosion_status(new_terrain, terrain, erosion)
+
             terrain, water = water_erosion_step(
-                terrain, water, water_flow_rate * step_size)           
+                terrain, water, params.water_flow_rate * step_size)       
+
+            # - light
+            #    TODO: adjust the light based on the step point
+
+            # - air temperature
+            #    TODO: release and absorb the temperature accordingly
+
+            # - Season
+            #    TODO: shift the season so that the light_strength could adjust
+            
         
         step_functions.append(step)
     
