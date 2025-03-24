@@ -44,9 +44,18 @@ def simulate_player_single_agent(n_steps, single_player_params, key):
         state, obs = next_state, next_obs
         # print("Agent View:\n", obs.view)
 
+    # def step_fn(carry, _):
+    #     state, obs, key = carry
+    #     key, subkey = jax.random.split(key)
+    #     action = model(subkey, obs, single_player_params)
+    #     state, obs, _, _, _ = step_env(subkey, state, action)
+    #     return (state, obs, key), None
+
+    # carry_init = (state, obs, key)
+    # (final_state, final_obs, final_key), _ = jax.lax.scan(step_fn, carry_init, jnp.arange(n_steps))
     final_food = jnp.sum(state.food_grid)
-    food_eaten = float(initial_food - final_food)
-    return food_eaten
+    all_food_eaten = float(initial_food - final_food)
+    return all_food_eaten
 
 def evaluate_state_file(
     params,
@@ -118,6 +127,25 @@ def evaluate_state_file(
             )
             # print(f"player {i}: {food_eaten}")
             all_food_eaten.append(food_eaten)
+
+    # def simulate_agents_and_trials(n_steps, params_array, keys_array):
+    #     def run_agent(params, keys_for_agent):
+    #         return jax.vmap(simulate_player_single_agent,
+    #                     in_axes=(None, None, 0),
+    #                     out_axes=0)(n_steps, params, keys_for_agent)
+        
+    #     results = jax.vmap(run_agent, in_axes=(0, 0), out_axes=0)(params_array, keys_array)
+    #     return results
+    
+    # batch_params = jax.vmap(lambda i: tree_getitem(model_state, i))(active_indices)
+
+    # n_agents = active_indices.shape[0]
+    # keys_for_agents = jrng.split(key, n_agents * trials_per_agent)
+    # keys_for_agents = keys_for_agents.reshape(n_agents, trials_per_agent, 2)
+
+    # food_eaten_arr = simulate_agents_and_trials(steps_per_trial, batch_params, keys_for_agents)
+    # all_food_eaten = food_eaten_arr.reshape(-1)
+
     if len(all_food_eaten) == 0:
         return (epoch, 0.0, 0.0)
 
