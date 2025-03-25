@@ -85,16 +85,27 @@ def terrain_texture(report, texture_size):
     food_grid = report.food_grid
     world_size = food_grid.shape
     h, w = world_size
+    print(th, h, tw, w)
     assert th % h == 0
     assert tw % w == 0
 
     ry = th//h
     rx = tw//w
    
-    texture = food_grid.astype(jnp.uint8) * 128 + 127
-    texture = jnp.repeat(texture, ry, axis=0)
-    texture = jnp.repeat(texture, rx, axis=1)
-    texture = jnp.repeat(texture[:,:,None], 3, axis=2)
+    #texture = food_grid.astype(jnp.uint8) * 128 + 127
+    #texture = jnp.repeat(texture, ry, axis=0)
+    #texture = jnp.repeat(texture, rx, axis=1)
+    #texture = jnp.repeat(texture[:,:,None], 3, axis=2)
+    
+    nackground_color = jnp.array([255, 240, 212], dtype=jnp.uint8)
+    #food_color = jnp.array([163,214,115], dtype=jnp.uint8)
+    #food_color = jnp.array([96,163,84], dtype=jnp.uint8)
+    food_color = jnp.array([124,177,94], dtype=jnp.uint8)
+    food_grid_r = jnp.repeat(food_grid, ry, axis=0)
+    food_grid_r = jnp.repeat(food_grid_r, rx, axis=1)
+    
+    texture = jnp.where(food_grid_r[...,None], food_color, background_color)
+    
     return np.array(texture)
 
 def get_player_energy(params, report):
@@ -102,9 +113,9 @@ def get_player_energy(params, report):
 
 def get_player_color(player_id, report):
     if report.player_type[player_id]:
-        return (0,0,1)
+        return (0.25,0.25,1)
     else:
-        return (1,0,0)
+        return (1,0.25,0.25)
 
 if __name__ == '__main__':
 
@@ -135,6 +146,7 @@ if __name__ == '__main__':
             report_paths,
             window_width=params.vis_width,
             window_height=params.vis_height,
+            terrain_texture_multiple=4,
             get_player_energy=get_player_energy,
             get_terrain_texture=terrain_texture,
             get_player_color=get_player_color,
