@@ -41,7 +41,7 @@ class TrainParams:
     env_params : Any = NomNomParams(
         mean_initial_food=(exp_size//2)**2,
         max_initial_food=(exp_size//2)**2,
-        mean_food_growth=(exp_size/24.)**2,
+        mean_food_growth=max((exp_size/24.)**2,2),
         max_food_growth=(exp_size//8)**2,
         initial_players=(exp_size//4),
         max_players=max_players,
@@ -51,21 +51,21 @@ class TrainParams:
         max_population=max_players,
     )
     runner_params : Any = EpochRunnerParams(
-        epochs=10,
-        steps_per_epoch=1000,
-        save_state=True,
+        epochs=100,
+        steps_per_epoch=100,
+        save_state=False,
         save_reports=True,
     )
 
-@static_dataclass
-class TrainReport:
-    actions : Any = NomNomAction(0,0,0)
-    players : jnp.array = False
-    player_x : jnp.array = False
-    player_r : jnp.array = False
-    player_energy : jnp.array = False
-    food_grid : jnp.array = False
-    player_type : jnp.array = False
+#@static_dataclass
+#class TrainReport:
+#    actions : Any = NomNomAction(0,0,0)
+#    players : jnp.array = False
+#    player_x : jnp.array = False
+#    player_r : jnp.array = False
+#    player_energy : jnp.array = False
+#    food_grid : jnp.array = False
+#    player_type : jnp.array = False
 
 def make_report(
     state,
@@ -76,25 +76,32 @@ def make_report(
     traits,
     adaptations,
 ):
-    return TrainReport(
-        actions,
-        players,
-        state.env_state.player_x,
-        state.env_state.player_r,
-        state.env_state.player_energy,
-        state.env_state.food_grid,
-        state.model_state[0]
-    )
+    #return TrainReport(
+    #    actions,
+    #    players,
+    #    state.env_state.player_x,
+    #    state.env_state.player_r,
+    #    state.env_state.player_energy,
+    #    state.env_state.food_grid,
+    #    state.model_state[0]
+    #)
+    population_0 = jnp.sum((state.model_state[0] == 0) & players)
+    population_1 = jnp.sum((state.model_state[0] == 1) & players)
+    return (population_0, population_1)
 
 def log(epoch, reports):
-    population_size = jnp.sum(reports.players[-1])
+    #population_size = jnp.sum(reports.players[-1])
     print(f'Epoch: {epoch}')
-    print(f'Population Size: {population_size}')
+    #print(f'Population Size: {population_size}')
     
-    zero_type = (reports.player_type[-1] == 0) & reports.players[-1]
-    one_type = (reports.player_type[-1] == 1) & reports.players[-1]
-    print(f'Unconditional: {jnp.sum(zero_type)}')
-    print(f'Linear: {jnp.sum(one_type)}')
+    #zero_type = (reports.player_type[-1] == 0) & reports.players[-1]
+    #one_type = (reports.player_type[-1] == 1) & reports.players[-1]
+    #print(f'Unconditional: {jnp.sum(zero_type)}')
+    #print(f'Linear: {jnp.sum(one_type)}')
+    zero_type = reports[0][-1]
+    one_type = reports[1][-1]
+    print(f'Unconditional: {zero_type}')
+    print(f'Linear: {one_type}')
     
     # do other wandb stuff
 
@@ -171,7 +178,7 @@ if __name__ == '__main__':
         viewer.begin()
     
     else:
-        for seed in (0,1):
+        for seed in (0,1,2,3,4,5,6,7):
             print(f'seed: {seed}')
             params = params.replace(
                 seed=seed,
