@@ -25,7 +25,7 @@ from dirt.visualization.viewer import Viewer
 10 : 1024
 12 : 4096
 '''
-size = 8
+size = 10
 exp_size = 2**size
 
 @commandline_interface
@@ -211,6 +211,7 @@ if __name__ == '__main__':
             )
 
             # run
+            breakpoint()
             epoch_runner(
                 key,
                 params.runner_params,
