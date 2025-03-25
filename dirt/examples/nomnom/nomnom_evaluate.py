@@ -4,6 +4,7 @@ import jax.random as jrng
 import os
 import glob
 import re
+import json
 
 import argparse
 
@@ -191,21 +192,9 @@ def main(params):
         )
         # we store epoch, mean, var
         results.append((epoch, mean_food, var_food))
+        with open("linear.json", "w") as f:
+            json.dump(results, f)
         print(f"File={sf}, epoch={epoch}, mean={mean_food:.3f}, var={var_food:.3f}")
-
-    import matplotlib.pyplot as plt
-    epochs = [r[0] for r in results]
-    means = [r[1] for r in results]
-    vars = [r[2] for r in results]
-
-    plt.figure()
-    plt.errorbar(epochs, means, yerr=jnp.sqrt(jnp.array(vars)), fmt='-o')
-    plt.xlabel("Epoch / State Number")
-    plt.ylabel("Mean Food Eaten (+/- stdev)")
-    plt.title("Food Eaten vs. Training Epoch")
-    png_path = os.path.join(folder, "food_plot.png")
-    plt.savefig(png_path)
-    print(f"Plot saved to {png_path}")
     
 
 if __name__ == "__main__":
@@ -239,3 +228,28 @@ if __name__ == "__main__":
     )
 
     main(params)
+
+    with open('/Users/wangchengrui11/Desktop/SUPER/MARL_Scaled/dirt/dirt/my_list.json', 'r') as f:
+        results = json.load(f)
+
+    import matplotlib.pyplot as plt
+    import numpy as np
+    epochs = [r[0] for r in results]
+    means = [r[1] for r in results]
+    vars = [r[2] for r in results]
+
+    plt.figure(figsize=(10, 6))
+
+    plt.plot(epochs, means, 'g--', label='Mean Food')
+    plt.fill_between(epochs, means - 2*np.sqrt(vars), means + 2*np.sqrt(vars), color='green', alpha=0.3)
+
+    plt.xlabel("Epochs")
+    plt.ylabel("Mean Food")
+    plt.title("Food Get in 5*5 Test Bed for unconditional model")
+    plt.legend()
+    plt.grid(True)
+    plt.tight_layout()
+    plt.show()
+    png_path = os.path.join('/Users/wangchengrui11/Desktop/SUPER/MARL_Scaled/dirt/dirt', "food_plot.png")
+    plt.savefig(png_path)
+    print(f"Plot saved to {png_path}")
