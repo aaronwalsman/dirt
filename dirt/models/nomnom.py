@@ -11,19 +11,26 @@ from mechagogue.nn.structured import parallel_dict_layer
 from mechagogue.nn.distributions import categorical_sampler_layer
 from mechagogue.nn.debug import print_activations_layer
 
-from dirt.examples.nomnom.nomnom_env import NomNomObservation, NomNomAction
+from dirt.envs.nomnom import NomNomObservation, NomNomAction
 
-@static_dataclass
-class NomNomModelParams:
-    num_input_classes : int = 4
-    view_width : int = 5
-    view_distance : int = 5
+# utilities
+relu = (lambda: None, jnn.relu)
+
+def nomnom_linear_observation_encoder(dtype=jnp.float32):
+    def model(x):
+        food = (x.view == 1).reshape(-1).astype(dtype)
+        players = (x.view == 2).reshape(-1).astype(dtype)
+        out_of_bounds = (x.view == 3).reshape(-1).astype(dtype)
+        return jnp.concatenate(
+            (food, players, out_of_bounds, x.energy[...,None]), axis=-1)
+    
+    return lambda: None, model
 
 def nomnom_action_decoder(in_channels, dtype=jnp.float32):
     return layer_sequence((
         (
-            lambda: None, lambda x :
-            {'forward' : x, 'rotate' : x, 'reproduce' : x}
+            lambda: None,
+            lambda x : {'forward' : x, 'rotate' : x, 'reproduce' : x}
         ),
         parallel_dict_layer({
             'forward' : layer_sequence((
@@ -42,9 +49,17 @@ def nomnom_action_decoder(in_channels, dtype=jnp.float32):
         (lambda: None, lambda x : NomNomAction(**x)),
     ))
 
+# params
+@static_dataclass
+class NomNomModelParams:
+    num_input_classes : int = 4
+    view_width : int = 5
+    view_distance : int = 5
+
+# models
 def nomnom_unconditional_model(params=NomNomModelParams(), dtype=jnp.float32):
     return layer_sequence((
-        (lambda : None, lambda x : jnp.ones_like(x.energy)),
+        (lambda : None, lambda x : jnp.ones((1,), dtype=dtype)),
         nomnom_action_decoder(1, dtype=dtype),
     ))
 
@@ -55,28 +70,65 @@ def nomnom_linear_model(params=NomNomModelParams(), dtype=jnp.float32):
         params.view_distance +
         1   # energy
     )
-    out_dim = 2+3+2
     
-    def encoder_forward(x):
-        food = (x.view == 1).reshape(-1).astype(dtype)
-        players = (x.view == 2).reshape(-1).astype(dtype)
-        out_of_bounds = (x.view == 3).reshape(-1).astype(dtype)
-        return jnp.concatenate(
-            (food, players, out_of_bounds, x.energy[...,None]), axis=-1)
-    
-    encoder = (lambda: None, encoder_forward)
+    #def encoder_forward(x):
+    #    food = (x.view == 1).reshape(-1).astype(dtype)
+    #    players = (x.view == 2).reshape(-1).astype(dtype)
+    #    out_of_bounds = (x.view == 3).reshape(-1).astype(dtype)
+    #    return jnp.concatenate(
+    #        (food, players, out_of_bounds, x.energy[...,None]), axis=-1)
+    #
+    #encoder = (lambda: None, encoder_forward)
+    encoder = nomnom_linear_observation_encoder(dtype=dtype)
     decoder = nomnom_action_decoder(in_dim, dtype=dtype)
     
-    return layer_sequence((
-        encoder,
-        decoder,
-    ))
+    return layer_sequence((encoder, decoder))
+
+def nomnom_unconditional_or_linear_population(
+    params=NomNomModelParams(),
+    dtype=jnp.bfloat16
+):
+    in_dim = (
+        (params.num_input_classes-1) *
+        params.view_width *
+        params.view_distance +
+        1   # energy
+    )
+    linear_encoder = nomnom_linear_observation_encoder(dtype=dtype)
+    linear_decoder = nomnom_action_decoder(in_dim, dtype=dtype)
+    init_linear_model, linear_model = layer_sequence((encoder, decoder))
+    
+    unconditional_encoder = (
+        lambda : None, lambda x : jnp.ones((1,), dtype=dtype))
+    unconditional_decoder = nomnom_action_decoder(1, dtype=dtype)
+    init_unconditional_model, unconditional_model = layer_sequence(
+        (unconditional_encoder, unconditional_decoder))
+    
+    def init(key, population_size, max_population_size):
+        linear_key, unconditional_key = jrng.split(key)
+        linear_params = init_linear_params(linear_key)
+        unconditional_params = init_unconditional_params(unconditional_key)
+        
+
+def nomnom_model(parms=NomNomModelParams()):
+    
+    # encoder
+    # - view encoder
+    assert params.view_distance % params.view_patch_size == 0
+    assert params.view_width % params.view_patch_size == 0
+    distance_patches = params.view_patch_size // view.patch_size
+    width_patches = params.view_width // view.patch_size
+    view_patch_embedding = conv_layer(
+        in_channels,
+        params.view_hidden_channels,
+        kernel_size=params.view_patch_size,
+        stride=params.view_patch_size,
+        use_bas=params.view_patch_bias,
+        dtype=params.dtype,
+    )
+    view_linear = linear_layer(...)
 
 def nomnom_model(params=NomNomModelParams()):
-    
-    # utility
-    # - make a relu
-    relu = (lambda: None, jnn.relu)
     
     # encoder
     #   this section builds the components that convert the inputs to a fixed

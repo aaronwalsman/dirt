@@ -3,9 +3,9 @@ from typing import Tuple, TypeVar
 import jax.numpy as jnp
 import jax.random as jrng
 
-from flax.struct import dataclass
-
 import chex
+
+from mechagogue.static_dataclass import static_dataclass
 
 from dirt.gridworld2d import dynamics, observations, spawn
 
@@ -23,7 +23,7 @@ breathing costs health.  There is wind which blows the poots in random
 directions.
 '''
 
-@dataclass
+@static_dataclass
 class PootParams:
     world_size : Tuple = (32,32)
     
@@ -52,7 +52,7 @@ class PootParams:
     view_width : int = 7
     view_distance : int = 7
     
-@dataclass
+@static_dataclass
 class PootState:
     food_grid : jnp.ndarray
     poot_grid : jnp.ndarray
@@ -63,7 +63,7 @@ class PootState:
     agent_poot_juice : jnp.ndarray
     agent_poot_history = jnp.ndarray
 
-@dataclass
+@static_dataclass
 class PootAction:
     forward : bool
     rotate : int
@@ -77,7 +77,7 @@ class PootAction:
         poot = jrng.randint(poot_key, shape=(1,), min_val=0, maxval=2)
         return PootAction(forward, rotate)
 
-@dataclass
+@static_dataclass
 class PootObservation:
     view : jnp.ndarray
     wind : jnp.ndarray
