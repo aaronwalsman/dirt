@@ -19,7 +19,7 @@ from mechagogue.serial import load_example_data
 
 from dirt.models.nomnom_model import nomnom_linear_model, nomnom_unconditional_model
 from dirt.examples.nomnom.train_nomnom import NomNomTrainParams, NomNomModelParams, NomNomParams, make_report
-from dirt.examples.nomnom.nomnom_env_evaluate import nomnom_no_reproduce, place_food_in_middle
+from dirt.examples.nomnom.nomnom_env_evaluate import nomnom_no_reproduce, place_food_in_middle, place_food_at_edge, place_food_randomly
 
 def simulate_player_single_agent(n_steps, single_player_params, key):
     """
@@ -29,33 +29,39 @@ def simulate_player_single_agent(n_steps, single_player_params, key):
     reset_env, step_env = nomnom_no_reproduce()
     # reset_env, step_env = nomnom()
 
-    rng_key, step_key = jrng.split(key)
+    rng_key, state_key = jrng.split(key)
     state, obs, _ = reset_env(rng_key)
-    state = place_food_in_middle(state)
+    # state = place_food_in_middle(state)
+    # state = place_food_at_edge(state)
+    state = place_food_randomly(state, 10, state_key)
+    print(state)
+    breakpoint()
     model_params = NomNomModelParams()
     init, model = nomnom_linear_model(model_params)
     initial_food = jnp.sum(state.food_grid)
 
-    for t in range(n_steps):
-        action = model(step_key, obs, single_player_params)
-        next_state, next_obs, _, _, _ = step_env(step_key, state, action)
+    # for t in range(n_steps):
+    #     action = model(step_key, obs, single_player_params)
+    #     next_state, next_obs, _, _, _ = step_env(step_key, state, action)
         
-        # print(f"  Step {t}, action={action}, energy={next_obs.energy}")
+    #     # print(f"  Step {t}, action={action}, energy={next_obs.energy}")
         
-        state, obs = next_state, next_obs
-        # print("Agent View:\n", obs.view)
+    #     state, obs = next_state, next_obs
+    #     # print("Agent View:\n", obs.view)
 
-    # def step_fn(carry, _):
-    #     state, obs, key = carry
-    #     key, subkey = jax.random.split(key)
-    #     action = model(subkey, obs, single_player_params)
-    #     state, obs, _, _, _ = step_env(subkey, state, action)
-    #     return (state, obs, key), None
+    def step_fn(carry, _):
+        state, obs, key = carry
+        key, subkey = jrng.split(key)
+        action = model(subkey, obs, single_player_params)
+        state, obs, _, _, _ = step_env(subkey, state, action)
+        return (state, obs, key), None
 
-    # carry_init = (state, obs, key)
-    # (final_state, final_obs, final_key), _ = jax.lax.scan(step_fn, carry_init, jnp.arange(n_steps))
-    final_food = jnp.sum(state.food_grid)
-    all_food_eaten = float(initial_food - final_food)
+    carry_init = (state, obs, key)
+    (final_state, final_obs, final_key), _ = jax.lax.scan(step_fn, carry_init, jnp.arange(n_steps))
+    final_food = jnp.sum(final_state.food_grid)
+    # final_food = jnp.sum(state.food_grid)
+    # all_food_eaten = float(initial_food - final_food)
+    all_food_eaten = (initial_food - final_food).astype(jnp.float32)
     return all_food_eaten
 
 def evaluate_state_file(
@@ -114,38 +120,38 @@ def evaluate_state_file(
     
     print(f"Active players: {active_indices}")
 
-    all_food_eaten = []
+    # all_food_eaten = []
 
-    for i in active_indices:
-        # print(f"\n=== Simulating single-agent run for active player {i} ===")
+    # for i in active_indices:
+    #     # print(f"\n=== Simulating single-agent run for active player {i} ===")
         
-        single_player_params = tree_getitem(model_state, i)
+    #     single_player_params = tree_getitem(model_state, i)
         
-        for _ in range(trials_per_agent):
-            key, sim_key = jrng.split(key)
-            food_eaten = simulate_player_single_agent(
-                steps_per_trial, single_player_params, sim_key
-            )
-            # print(f"player {i}: {food_eaten}")
-            all_food_eaten.append(food_eaten)
+    #     for _ in range(trials_per_agent):
+    #         key, sim_key = jrng.split(key)
+    #         food_eaten = simulate_player_single_agent(
+    #             steps_per_trial, single_player_params, sim_key
+    #         )
+    #         # print(f"player {i}: {food_eaten}")
+    #         all_food_eaten.append(food_eaten)
 
-    # def simulate_agents_and_trials(n_steps, params_array, keys_array):
-    #     def run_agent(params, keys_for_agent):
-    #         return jax.vmap(simulate_player_single_agent,
-    #                     in_axes=(None, None, 0),
-    #                     out_axes=0)(n_steps, params, keys_for_agent)
+    def simulate_agents_and_trials(n_steps, params_array, keys_array):
+        def run_agent(params, keys_for_agent):
+            return jax.vmap(simulate_player_single_agent,
+                        in_axes=(None, None, 0),
+                        out_axes=0)(n_steps, params, keys_for_agent)
         
-    #     results = jax.vmap(run_agent, in_axes=(0, 0), out_axes=0)(params_array, keys_array)
-    #     return results
+        results = jax.vmap(run_agent, in_axes=(0, 0), out_axes=0)(params_array, keys_array)
+        return results
     
-    # batch_params = jax.vmap(lambda i: tree_getitem(model_state, i))(active_indices)
+    batch_params = jax.vmap(lambda i: tree_getitem(model_state, i))(active_indices)
 
-    # n_agents = active_indices.shape[0]
-    # keys_for_agents = jrng.split(key, n_agents * trials_per_agent)
-    # keys_for_agents = keys_for_agents.reshape(n_agents, trials_per_agent, 2)
+    n_agents = active_indices.shape[0]
+    keys_for_agents = jrng.split(key, n_agents * trials_per_agent)
+    keys_for_agents = keys_for_agents.reshape(n_agents, trials_per_agent)
 
-    # food_eaten_arr = simulate_agents_and_trials(steps_per_trial, batch_params, keys_for_agents)
-    # all_food_eaten = food_eaten_arr.reshape(-1)
+    food_eaten_arr = simulate_agents_and_trials(steps_per_trial, batch_params, keys_for_agents)
+    all_food_eaten = food_eaten_arr.reshape(-1)
 
     if len(all_food_eaten) == 0:
         return (epoch, 0.0, 0.0)
@@ -192,7 +198,7 @@ def main(params):
         )
         # we store epoch, mean, var
         results.append((epoch, mean_food, var_food))
-        with open("/Users/wangchengrui11/Desktop/SUPER/MARL_Scaled/dirt/dirt/linear.json", "w") as f:
+        with open("/Users/wangchengrui11/Desktop/SUPER/MARL_Scaled/dirt/dirt/linear_new.json", "w") as f:
             json.dump(results, f)
         print(f"File={sf}, epoch={epoch}, mean={mean_food:.3f}, var={var_food:.3f}")
     
@@ -227,7 +233,7 @@ if __name__ == "__main__":
         steps_per_epoch=8,
     )
 
-    # main(params)
+    main(params)
 
     with open('/Users/wangchengrui11/Desktop/SUPER/MARL_Scaled/dirt/dirt/linear.json', 'r') as f:
         results_linear = json.load(f)
@@ -244,8 +250,8 @@ if __name__ == "__main__":
     means_unconditional = [r[1] for r in results_unconditional]
     vars_unconditional = [r[2] for r in results_unconditional]
 
-    # print(np.mean(means_linear))
-    # print(np.mean(means_unconditional))
+    # print(np.mean(vars_linear))
+    # print(np.mean(vars_unconditional))
     # breakpoint()
 
     plt.figure(figsize=(10, 6))

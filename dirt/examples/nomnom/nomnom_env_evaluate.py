@@ -285,3 +285,51 @@ def place_food_in_middle(state: NomNomState) -> NomNomState:
         curr_step=state.curr_step
     )
     return new_state
+
+def place_food_at_edge(state: NomNomState) -> NomNomState:
+    """
+    Sets a single piece of food in the center (4,2) of a 5x5 grid.
+    """
+    updated_food_grid = state.food_grid.at[4, 2].set(True) # or others
+    
+    # Build a new state with the updated food grid
+    new_state = NomNomState(
+        food_grid=updated_food_grid,
+        object_grid=state.object_grid,
+        family_tree=state.family_tree,
+        player_x=state.player_x,
+        player_r=state.player_r,
+        player_energy=state.player_energy,
+        player_age=state.player_age,
+        curr_step=state.curr_step
+    )
+    return new_state
+
+def place_food_randomly(
+        state: NomNomState,
+        num_food: int,
+        key
+    ) -> NomNomState:
+    """
+    Sets a single piece of food in the center (2,2) of a 5x5 grid.
+    """
+    H, W = state.food_grid.shape
+
+    total_cells = H * W
+    # key = jrng.PRNGKey(key)
+    flat_indices = jrng.choice(key, total_cells, shape=(num_food,), replace=False)
+    rows = flat_indices // W
+    cols = flat_indices % W
+    updated_food_grid = state.food_grid.at[rows, cols].set(True)
+    # Build a new state with the updated food grid
+    new_state = NomNomState(
+        food_grid=updated_food_grid,
+        object_grid=state.object_grid,
+        family_tree=state.family_tree,
+        player_x=state.player_x,
+        player_r=state.player_r,
+        player_energy=state.player_energy,
+        player_age=state.player_age,
+        curr_step=state.curr_step
+    )
+    return new_state

@@ -62,7 +62,7 @@ def nomnom_linear_model(params=NomNomModelParams(), dtype=jnp.float32):
         players = (x.view == 2).reshape(-1).astype(dtype)
         out_of_bounds = (x.view == 3).reshape(-1).astype(dtype)
         return jnp.concatenate(
-            (food, players, out_of_bounds, x.energy[...,None]), axis=-1)
+            (food, players, out_of_bounds, x.energy.reshape(-1)), axis=-1)
     
     encoder = (lambda: None, encoder_forward)
     decoder = nomnom_action_decoder(in_dim, dtype=dtype)
