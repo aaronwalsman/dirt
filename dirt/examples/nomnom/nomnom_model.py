@@ -1,6 +1,7 @@
 import jax.random as jrng
 import jax.numpy as jnp
 import jax.nn as jnn
+import jax.tree_map as tree_map
 
 from mechagogue.static_dataclass import static_dataclass
 from mechagogue.nn.linear import (
@@ -69,6 +70,17 @@ def nomnom_linear_model(params=NomNomModelParams()):
         encoder,
         decoder,
     ])
+
+
+def mutate(params, mutation_rate=0.1):
+    """Apply Gaussian noise to parameters for mutation."""
+    return tree_map(lambda p: p + mutation_rate * jrng.normal(jrng.PRNGKey(0), p.shape), params)
+
+
+def crossover(parent1, parent2):
+    """Blend two parent parameter sets to create a child."""
+    return tree_map(lambda p1, p2: (p1 + p2) / 2, parent1, parent2)
+
 
 def nomnom_model(params=NomNomModelParams()):
     
