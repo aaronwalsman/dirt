@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Simple Web App</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.6.0/p5.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link rel="stylesheet" href="/css/styles.css">
+    <script src="./js/sketch.js" defer></script>
+</head>
+<body>
+<main>
+  <h1>Dirt Dashboard</h1>
+  <div class="column-container">
+    <div class="column">
+      <div id="canvas-container"></div>
+      <div id="controls">
+        <button type="button" id="prev">⏮️ Prev</button>
+        <button type="button" id="playPause">▶️ Play</button>
+        <button type="button" id="next">⏭️ Next</button>
+      </div>
+      <div id="timeline-container">
+        <div id="timeline-bar">
+            <div id="timeline-handle"></div>
+        </div>
+      </div>
+    </div>
+    <div class="column">
+      <canvas id="lineChart"></canvas>
+    </div>
+  </div>
+</main>
+</body>
+</html>

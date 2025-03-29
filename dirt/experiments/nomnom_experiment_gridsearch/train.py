@@ -25,9 +25,6 @@ class TrainParams:
     max_players : int = 256
     output_directory : str = '.'
     load_state : str = ''
-    visualize : bool = False
-    vis_width : int = 1024
-    vis_height : int = 1024
     env_params : Any = NomNomParams(
         mean_initial_food=8**2,
         max_initial_food=32**2,
@@ -42,7 +39,7 @@ class TrainParams:
     )
     runner_params : Any = EpochRunnerParams(
         epochs=4,
-        steps_per_epoch=256,
+        steps_per_epoch=100,
         save_state=True,
         save_reports=True,
     )
@@ -92,64 +89,68 @@ def terrain_texture(report, texture_size):
 def get_player_energy(params, report):
     return report.player_energy / params.env_params.max_energy
 
+def train(key, params):
+    # build the nomnom environment
+    reset_env, step_env = nomnom(params.env_params)
+    mutate = normal_mutate(learning_rate=3e-4)
+
+    # build the model
+    model_params = NomNomModelParams(
+        view_width=params.env_params.view_width,
+        view_distance=params.env_params.view_distance,
+    )
+    init_model, model = nomnom_linear_model(model_params)
+
+    # build the trainer
+    init_train, step_train = natural_selection(
+        params.train_params, reset_env, step_env, init_model, model, mutate)
+    
+    # run
+    epoch_runner(
+        key,
+        params.runner_params,
+        init_train,
+        step_train,
+        make_report,
+        log,
+        output_directory=params.output_directory,
+        load_state=params.load_state,
+    )
+
+def modify_params(params, field, value):
+    if hasattr(params, field):
+        params[field] = value
+    elif hasattr(params.env_params, field):
+        params.env_params[field] = value
+    elif hasattr(params.train_params, field):
+        params.train_params[field] = value
+    return params
+
+def run_experiment(key, params):
+    if not os.path.exists(params.output_directory):
+        os.makedirs(params.output_directory)
+    save_leaf_data(params, f'{params.output_directory}/params.state')
+    train(key, params)
+
 if __name__ == '__main__':
 
     # get the parameters from the commandline
     params = TrainParams().from_commandline()
     
-    if params.visualize:
-        # get the path to the params and reports
-        params_path = f'{params.output_directory}/params.state'
-        report_paths = sorted([
-            f'{params.output_directory}/{file_path}'
-            for file_path in os.listdir(params.output_directory)
-            if file_path.startswith('report') and file_path.endswith('.state')
-        ])
-       
-        # launch the viewer
-        viewer = Viewer(
-            TrainParams(),
-            params_path,
-            TrainReport(),
-            report_paths,
-            window_width=params.vis_width,
-            window_height=params.vis_height,
-            get_player_energy=get_player_energy,
-            get_terrain_texture=terrain_texture,
-        )
-        viewer.begin()
-    
-    else:
-        if not os.path.exists(params.output_directory):
-            os.makedirs(params.output_directory)
-        save_leaf_data(params, f'{params.output_directory}/params.state')
+    experiment = {
+      'name' : 'exp1_ip',
+      'field' : 'initial_players',
+      'values' : jnp.arange(2, 18, 4),
+      'prng_keys' : [747, 1337, 520, 999, 1999, 123, 246, 8462, 9428, 1111]
+    }
 
-        # setup the key
-        key = jrng.key(params.seed)
-
-        # build the nomnom environment
-        reset_env, step_env = nomnom(params.env_params)
-        mutate = normal_mutate(learning_rate=3e-4)
-
-        # build the model
-        model_params = NomNomModelParams(
-            view_width=params.env_params.view_width,
-            view_distance=params.env_params.view_distance,
-        )
-        init_model, model = nomnom_linear_model(model_params)
-
-        # build the trainer
-        init_train, step_train = natural_selection(
-            params.train_params, reset_env, step_env, init_model, model, mutate)
-        
-        # run
-        epoch_runner(
-            key,
-            params.runner_params,
-            init_train,
-            step_train,
-            make_report,
-            log,
-            output_directory=params.output_directory,
-            load_state=params.load_state,
-        )
+    # setup the key
+    field = experiment['field']
+    values = experiment['values']
+    key = jrng.key(params.seed)
+    for value in values:
+        params = modify_params(params, field, value)
+        for i, key in enumerate(experiment['prng_keys']):
+            output_directory = f'./experiments/{name}/{field}={value}/run{i}/'
+            params = modify_params(params, 'output_directory', output_directory)
+            run_experiment(key, params)

@@ -172,7 +172,7 @@ if __name__ == '__main__':
     #key = jrng.key(5432)
     key = jrng.key(1234)
     
-    max_players = 512#*16
+    max_players = 256#*16
     env_params = NomNomParams(
         max_energy=4.,
         mean_initial_food=100000, #8**2,
@@ -190,14 +190,14 @@ if __name__ == '__main__':
     params = NomNomTrainParams(
         env_params=env_params,
         train_params=train_params,
-        epochs=32,
+        epochs=4,
         steps_per_epoch=256,
     )
     
     # update these defaults with commandline arguments
-    parser = argparse.ArgumentParser()
-    params.add_commandline_args(parser)
-    args = parser.parse_args()
-    params = params.update_from_commandline(args)
+    # parser = argparse.ArgumentParser()
+    # params.add_commandline_args(parser)
+    # args = parser.parse_args()
+    # params = params.update_from_commandline(args)
     
     train(key, params)

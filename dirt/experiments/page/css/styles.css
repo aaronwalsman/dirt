@@ -1,0 +1,82 @@
+@font-face {
+  font-family: 'Pokemon';  /* Define a custom name */
+  src: url('../assets/fonts/pokemon_classic.ttf') format('truetype');  
+  font-weight: normal;
+  font-style: normal;
+}
+
+h1 {
+  font-family: 'Pokemon', sans-serif;
+}
+
+body {
+  font-family: 'Pokemon';
+  display: flex;
+  flex-direction: column;
+  text-align: center;
+}
+
+#controls {
+  margin-top: 10px;
+}
+
+button {
+  font-size: 20px;
+  padding: 10px;
+  margin: 5px;
+  cursor: pointer;
+}
+
+#canvas-container {
+  border: 2px solid black;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  width: fit-content;
+}
+
+#timeline {
+  width: 80%;
+  margin-top: 10px;
+}
+
+#timeline-container {
+  position: relative;
+  width: 80%;
+  height: 20px;
+  background: #ddd;
+  border: 2px solid black;
+  border-radius: 0px;
+  margin-top: 15px;
+  cursor: pointer;
+}
+
+#timeline-bar {
+  position: absolute;
+  height: 100%;
+  width: 100%;
+  background: white;
+  border-radius: 5px;
+}
+
+#timeline-handle {
+  position: absolute;
+  width: 3px;
+  height: 20px;
+  background: red;
+  top: 0px;
+  transform: translateX(-50%);
+  transition: left 0.1s ease-out;
+}
+
+.column-container {
+  display: flex;
+  flex-direction: row;
+}
+
+.column {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  flex: 1;
+}
