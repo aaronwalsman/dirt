@@ -5,13 +5,13 @@ import jax.numpy as jnp
 import jax.random as jrng
 
 from mechagogue.serial import load_example_data
-from dirt.experiments.nomnom_example_batched.train import TrainReport
+from dirt.experiments.nomnom_example_bulk.train import TrainReport
 
 import matplotlib.pyplot as plt
 
 
 if __name__ == '__main__':
-  exp_name = 'exp1_ip'
+  exp_name = 'ipcl_test5'
   num_steps = 256
   example_report = TrainReport()
   exp_path = f'./experiments/{exp_name}'
