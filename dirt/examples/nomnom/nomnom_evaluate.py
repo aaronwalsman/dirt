@@ -21,7 +21,7 @@ from dirt.models.nomnom_model import nomnom_linear_model, nomnom_unconditional_m
 from dirt.examples.nomnom.train_nomnom import NomNomTrainParams, NomNomModelParams, NomNomParams, make_report
 from dirt.examples.nomnom.nomnom_env_evaluate import nomnom_no_reproduce, place_food_in_middle, place_food_at_edge, place_food_randomly
 
-def simulate_player_single_agent(n_steps, single_player_params, key):
+def simulate_player_single_agent(n_steps, single_player_params, food_num, key):
     """
     Runs a single-agent simulation in a 5*5 no-reproduce environment using
     one player's parameters.
@@ -33,10 +33,9 @@ def simulate_player_single_agent(n_steps, single_player_params, key):
     state, obs, _ = reset_env(rng_key)
     # state = place_food_in_middle(state)
     # state = place_food_at_edge(state)
-    state = place_food_randomly(state, 10, state_key)
-    print(state)
-    breakpoint()
+    state = place_food_randomly(state, food_num, state_key)
     model_params = NomNomModelParams()
+    # init, model = nomnom_unconditional_model(model_params)
     init, model = nomnom_linear_model(model_params)
     initial_food = jnp.sum(state.food_grid)
 
@@ -70,6 +69,7 @@ def evaluate_state_file(
     max_population, 
     trials_per_agent,
     steps_per_trial,
+    food_num,
     key = 1234
 ):
     key = jrng.key(key)
@@ -85,6 +85,7 @@ def evaluate_state_file(
         view_width=params.env_params.view_width,
         view_distance=params.env_params.view_distance,
     )
+    # init_model, model = nomnom_unconditional_model(model_params)
     init_model, model = nomnom_linear_model(model_params)
     
     # - build the training functions
@@ -135,11 +136,11 @@ def evaluate_state_file(
     #         # print(f"player {i}: {food_eaten}")
     #         all_food_eaten.append(food_eaten)
 
-    def simulate_agents_and_trials(n_steps, params_array, keys_array):
+    def simulate_agents_and_trials(n_steps, food_num, params_array, keys_array):
         def run_agent(params, keys_for_agent):
             return jax.vmap(simulate_player_single_agent,
-                        in_axes=(None, None, 0),
-                        out_axes=0)(n_steps, params, keys_for_agent)
+                        in_axes=(None, None, None, 0),
+                        out_axes=0)(n_steps, params, food_num, keys_for_agent)
         
         results = jax.vmap(run_agent, in_axes=(0, 0), out_axes=0)(params_array, keys_array)
         return results
@@ -150,7 +151,7 @@ def evaluate_state_file(
     keys_for_agents = jrng.split(key, n_agents * trials_per_agent)
     keys_for_agents = keys_for_agents.reshape(n_agents, trials_per_agent)
 
-    food_eaten_arr = simulate_agents_and_trials(steps_per_trial, batch_params, keys_for_agents)
+    food_eaten_arr = simulate_agents_and_trials(steps_per_trial, food_num, batch_params, keys_for_agents)
     all_food_eaten = food_eaten_arr.reshape(-1)
 
     if len(all_food_eaten) == 0:
@@ -167,6 +168,7 @@ def main(params):
     parser.add_argument("--max_population", type=int, default=1)
     parser.add_argument("--trials_per_agent", type=int, default=5)
     parser.add_argument("--steps_per_trial", type=int, default=5)
+    parser.add_argument("--food_set_up", type=int, default=10)
     args = parser.parse_args()
     folder = args.folder
     state_files = glob.glob(os.path.join(folder, "train_state_*.state"))
@@ -194,11 +196,12 @@ def main(params):
             sf,
             max_population=args.max_population,
             trials_per_agent=args.trials_per_agent,
-            steps_per_trial=args.steps_per_trial
+            steps_per_trial=args.steps_per_trial,
+            food_num = args.food_set_up
         )
         # we store epoch, mean, var
         results.append((epoch, mean_food, var_food))
-        with open("/Users/wangchengrui11/Desktop/SUPER/MARL_Scaled/dirt/dirt/linear_new.json", "w") as f:
+        with open("/Users/wangchengrui11/Desktop/SUPER/MARL_Scaled/dirt/dirt/linear_random_10.json", "w") as f:
             json.dump(results, f)
         print(f"File={sf}, epoch={epoch}, mean={mean_food:.3f}, var={var_food:.3f}")
     
@@ -235,9 +238,9 @@ if __name__ == "__main__":
 
     main(params)
 
-    with open('/Users/wangchengrui11/Desktop/SUPER/MARL_Scaled/dirt/dirt/linear.json', 'r') as f:
+    with open('/Users/wangchengrui11/Desktop/SUPER/MARL_Scaled/dirt/dirt/linear_random_10.json', 'r') as f:
         results_linear = json.load(f)
-    with open('/Users/wangchengrui11/Desktop/SUPER/MARL_Scaled/dirt/dirt/unconditional.json', 'r') as f:
+    with open('/Users/wangchengrui11/Desktop/SUPER/MARL_Scaled/dirt/dirt/unconditional_random_10.json', 'r') as f:
         results_unconditional = json.load(f)
 
     import matplotlib.pyplot as plt
@@ -269,6 +272,6 @@ if __name__ == "__main__":
     plt.grid(True)
     plt.tight_layout()
     # plt.show()
-    png_path = os.path.join('/Users/wangchengrui11/Desktop/SUPER/MARL_Scaled/plots', "food_plot_comparison_sd.png")
+    png_path = os.path.join('/Users/wangchengrui11/Desktop/SUPER/MARL_Scaled/plots', "food_plot_comparison_sd_random10.png")
     plt.savefig(png_path)
     print(f"Plot saved to {png_path}")
