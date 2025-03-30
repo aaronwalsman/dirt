@@ -201,7 +201,7 @@ def main(params):
         )
         # we store epoch, mean, var
         results.append((epoch, mean_food, var_food))
-        with open("/Users/wangchengrui11/Desktop/SUPER/MARL_Scaled/dirt/dirt/linear_random_10.json", "w") as f:
+        with open(f"{folder}/test.json", "w") as f:
             json.dump(results, f)
         print(f"File={sf}, epoch={epoch}, mean={mean_food:.3f}, var={var_food:.3f}")
     
@@ -238,40 +238,36 @@ if __name__ == "__main__":
 
     main(params)
 
-    with open('/Users/wangchengrui11/Desktop/SUPER/MARL_Scaled/dirt/dirt/linear_random_10.json', 'r') as f:
-        results_linear = json.load(f)
-    with open('/Users/wangchengrui11/Desktop/SUPER/MARL_Scaled/dirt/dirt/unconditional_random_10.json', 'r') as f:
-        results_unconditional = json.load(f)
+    # with open('/Users/wangchengrui11/Desktop/SUPER/MARL_Scaled/dirt/dirt/linear_random_10.json', 'r') as f:
+    #     results_linear = json.load(f)
+    # with open('/Users/wangchengrui11/Desktop/SUPER/MARL_Scaled/dirt/dirt/unconditional_random_10.json', 'r') as f:
+    #     results_unconditional = json.load(f)
 
-    import matplotlib.pyplot as plt
-    import numpy as np
-    epochs = [r[0] for r in results_linear]
+    # import matplotlib.pyplot as plt
+    # import numpy as np
+    # epochs = [r[0] for r in results_linear]
 
-    means_linear = [r[1] for r in results_linear]
-    vars_linear = [r[2] for r in results_linear]
+    # means_linear = [r[1] for r in results_linear]
+    # vars_linear = [r[2] for r in results_linear]
 
-    means_unconditional = [r[1] for r in results_unconditional]
-    vars_unconditional = [r[2] for r in results_unconditional]
+    # means_unconditional = [r[1] for r in results_unconditional]
+    # vars_unconditional = [r[2] for r in results_unconditional]
 
-    # print(np.mean(vars_linear))
-    # print(np.mean(vars_unconditional))
-    # breakpoint()
+    # plt.figure(figsize=(10, 6))
 
-    plt.figure(figsize=(10, 6))
+    # plt.plot(epochs, means_linear, 'g--', label='Linear Model')
+    # plt.fill_between(epochs, means_linear - 2*np.sqrt(vars_linear), means_linear + 2*np.sqrt(vars_linear), color='green', alpha=0.3)
 
-    plt.plot(epochs, means_linear, 'g--', label='Linear Model')
-    plt.fill_between(epochs, means_linear - 2*np.sqrt(vars_linear), means_linear + 2*np.sqrt(vars_linear), color='green', alpha=0.3)
+    # plt.plot(epochs, means_unconditional, 'r--', label='Unconditional Model')
+    # plt.fill_between(epochs, means_unconditional - 2*np.sqrt(vars_unconditional), means_unconditional + 2*np.sqrt(vars_unconditional), color='red', alpha=0.3)
 
-    plt.plot(epochs, means_unconditional, 'r--', label='Unconditional Model')
-    plt.fill_between(epochs, means_unconditional - 2*np.sqrt(vars_unconditional), means_unconditional + 2*np.sqrt(vars_unconditional), color='red', alpha=0.3)
-
-    plt.xlabel("Epochs")
-    plt.ylabel("Food")
-    plt.title("Food Get in 5*5 Test Bed for linear and unconditional model")
-    plt.legend()
-    plt.grid(True)
-    plt.tight_layout()
-    # plt.show()
-    png_path = os.path.join('/Users/wangchengrui11/Desktop/SUPER/MARL_Scaled/plots', "food_plot_comparison_sd_random10.png")
-    plt.savefig(png_path)
-    print(f"Plot saved to {png_path}")
+    # plt.xlabel("Epochs")
+    # plt.ylabel("Food")
+    # plt.title("Food Get in 5*5 Test Bed for linear and unconditional model")
+    # plt.legend()
+    # plt.grid(True)
+    # plt.tight_layout()
+    # # plt.show()
+    # png_path = os.path.join('/Users/wangchengrui11/Desktop/SUPER/MARL_Scaled/plots', "food_plot_comparison_sd_random10.png")
+    # plt.savefig(png_path)
+    # print(f"Plot saved to {png_path}")
