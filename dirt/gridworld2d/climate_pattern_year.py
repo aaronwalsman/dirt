@@ -88,11 +88,11 @@ def simulate_full_climate(
         # 3. light
         light_strength = get_day_light_strength(current_time)
         light_length = get_day_light_length(current_time)
-        new_day_status = get_day_status(light_length, current_time)
-        new_light_intensity = light_step(terrain, water, light_strength, light_length, current_time, night_effect) #Porblem of getting None
+        new_day_status = get_day_status(time, light_length, current_time)
+        new_light_intensity = light_step(light_length, terrain, water, light_strength, light_length, current_time, night_effect) #Porblem of getting None
 
         # 4. Temperature
-        new_temperature = temperature_step(current_time, water, current_temperature, rain_status, light_intensity, current_evaporation, light_length, night_effect, water_effect, rain_effect, evaporation_effect)
+        new_temperature = temperature_step(light_length, current_time, water, current_temperature, rain_status, light_intensity, current_evaporation, light_length, night_effect, water_effect, rain_effect, evaporation_effect)
         
         # 5. Humidity
         new_water, new_evaporation, rain_status = weather_step(

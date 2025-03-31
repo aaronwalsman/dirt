@@ -11,16 +11,23 @@ from dirt.gridworld2d.gas import step as gas_step
 from dirt.gridworld2d.geology import fractal_noise
 from dirt.gridworld2d.erosion import simulate_erosion_step, reset_erosion_status
 from dirt.gridworld2d.water import flow_step, flow_step_twodir
+from dirt.gridworld2d.naive_weather_system import weather_step
+from dirt.gridworld2d.climate_pattern_day import temperature_step, light_step, get_day_status
+from dirt.gridworld2d.climate_pattern_year import get_day_light_length, get_day_light_strength
 
 from mechagogue.static_dataclass import static_dataclass
 
 TLandscapeParams = TypeVar('TLandscapeParams', bound='LandscapeParams')
 TLandscapeState = TypeVar('TLandscapeState', bound='LandscapeState')
+TLandscapeAction = TypeVar('TLandscapeAction', bound='LandscapeAction')
+TLandscapeObservation = TypeVar('TLanscapeObservation', bound='LandscapeObservation')
+
 
 @static_dataclass
 class LandscapeParams:
     world_size : Tuple[int, int] = (1024, 1024)
     step_sizes : Tuple[float, ...] = (1.)
+    day_initial: int = 0.
     
     # terrain
     terrain_octaves : int = 12
@@ -34,13 +41,18 @@ class LandscapeParams:
     water_per_cell : float = 2.
     water_initial_fill_rate : float = 0.01
     water_flow_rate : float = 0.01
-    rain_moisture_threshold : float = 0.1
     air_moisture_diffusion : float = 1./3.
+
+    # Rain
+    rain_moisture_up_threshold : float = SOMETHING
+    rain_moisture_down_threshold: float = 0.1
+    rain_amount: float = SOMETHING
     
     # air
     wind_std : float = 0.1
     wind_reversion : float = 0.001
     air_initial_temperature : float = 0.
+    air_initial_smell: float = 0.
 
     # light
     light_initial_strength: float = SOMETHING
@@ -49,6 +61,7 @@ class LandscapeParams:
     # temperature
     water_effect: float  = SOMETHING
     rain_effect: float = SOMETHING
+    evaporation_effect: float = SOMETHING
     
     # climate
     steps_per_day : 240     # 24*10
@@ -68,25 +81,30 @@ class LandscapeState:
     air_temperature : jnp.array
     air_moisture : jnp.array
     air_light: jnp.array
+    air_smell: jnp.array
+    rain_status: jnp.array
+    day: int
     #ground_chemicals : jnp.array
     #water_chemicals : jnp.array
     #air_chemicals : jnp.array
 
 class LandscapeAction:
+    pass
     #step_size : float
     #locations : jnp.array
     #ground_chemical_update : jnp.array
     #water_chemical_update : jnp.array
     #air_chemical_update : jnp.array
 
-LandscapeObservation = LandscapeState # V: Do we need observation here, or we put this in the tera_arium?
+class LandscapeObservation:
+    pass
 
 def landscape(
     params : TLandscapeParams = LandscapeParams(),
     dtype : Any = DEFAULT_FLOAT_TYPE,
 ):
     
-    init_wind_velocity, step_wind_velocity = ou_process(   # what will be the ou_process here?
+    init_wind_velocity, step_wind_velocity = ou_process(
         params.wind_std,
         params.wind_reversion,
         jnp.zeros((2,), dtype=dtype),
@@ -152,6 +170,9 @@ def landscape(
             params.world_size, params.initial_air_temperature, dtype=dtype)
         air_moisture = jnp.zeros(params.world_size, dtype=dtype)
         air_light = jnp.zeros(params.world_size, dtype=dtype)
+        air_smell = jnp.zeros(params.world_size, dtype=dtype)
+        rain_status = jnp.zeros(params.world_size, dtype=dtype)
+        day = params.day_initial
         
         return LandscapeState(
             terrain,
@@ -160,14 +181,17 @@ def landscape(
             wind_velocity,
             air_temperature,
             air_moisture,
-            air_light
+            air_light,
+            air_smell,
+            rain_status,
+            day
         )
     
     step_functions = []
     for step_size in params.step_sizes:
         def step(
             key : chex.PRNGKey,
-            action : TLandscapeAction,    # Also, do we build action here or in the full tera_arium?
+            action : TLandscapeAction,
             state : TLandscapeState,
         ) -> Tuple[TLandscapeState, TLandscapeObservation] :
             
@@ -175,8 +199,18 @@ def landscape(
             water = state.water
             wind_velocity = state.wind_velocity
             air_moisture = state.air_moisture
+            air_smell = state.air_smell
+            air_temperature = state.air_temperature
+
+            rain_status = state.rain_status
+            day_length = params.steps_per_day
             
             # apply actions
+
+            # Day_status
+            day += 1
+            light_length = get_day_light_length(day)
+            day_status = get_day_status(day_length, light_length, day)
             
             # move air
             # - update the wind direction
@@ -185,45 +219,85 @@ def landscape(
             wind_velocity = step_wind_velocity(
                 wind_key, step_size=step_size)
             
-            # - diffuse and move the air moisture
+            # - diffuse and move the air smell
             diffusion_std = params.air_moisture_diffusion * (step_size**0.5)
-            air_moisture = gas_step(
-                air_moisture[...,None], diffusion_std, 1., wind_velocity, 1)
+            air_smell = gas_step(
+                air_smell[...,None], diffusion_std, 1., wind_velocity, 1)
             
             # move water
-            # - evaporate
-            #   TODO: incorporate temperature?
-            evaporation = jnp.minimum(
-                water, params.evaporation_rate * action.step_size)
-            water = water - evaporation
-            air_moisture = air_moisture + evaporation
+            water = flow_step_twodir(terrain, water, params.water_flow_rate)
+
+            # erode based on water flow
+            old_terrain = terrain
+            terrain, erosion = simulate_erosion_step(
+                old_terrain, 
+                water, 
+                erosion, 
+                params.water_flow_rate, 
+                params.erosion_endurance, 
+                params.erosion_ratio
+            )
+            erosion = reset_erosion_status(terrain, old_terrain, erosion)
             
-            # - rain
-            #   TODO: incorporate temperature?
-            rain = air_moisture >= params.rain_moisture_threshold
-            water = water + jnp.where(rain, water + air_moisture, water)
-            air_moisture = jnp.where(rain, 0, air_moisture)
+            # light change based on rotation of Sun
+            light_strength = get_day_light_strength(day)
+            light_intensity = light_step(
+                light_length, 
+                terrain, water, 
+                light_strength, 
+                light_length, 
+                day, 
+                params.night_effect
+            )
+
+            # Temperature changed based on light and rain
+            air_temperature = temperature_step(
+                light_length, 
+                day, 
+                water, 
+                air_temperature, 
+                rain_status,
+                light_intensity, 
+                air_moisture,
+                light_length, 
+                params.night_effect, 
+                params.water_effect, 
+                params.rain_effect, 
+                params.evaporation_effect
+            )
+
+            # Evaporate and rain based on temperature and air moisture
+            water, air_evaporation, rain_status = weather_step(
+                water, 
+                air_temperature, 
+                air_evaporation, 
+                rain_status, 
+                params.evaporation_rate, 
+                params.rain_moisture_up_threshold, 
+                params.rain_moisture_down_threshold, 
+                params.rain_amount
+            )
+        
+
+            # # move water
+            # # - evaporate
+            # #   TODO: incorporate temperature?
+            # evaporation = jnp.minimum(
+            #     water, params.evaporation_rate * action.step_size)
+            # water = water - evaporation
+            # air_moisture = air_moisture + evaporation
+            
+            # # - rain
+            # #   TODO: incorporate temperature?
+            # rain = air_moisture >= params.rain_moisture_threshold
+            # water = water + jnp.where(rain, water + air_moisture, water)
+            # air_moisture = jnp.where(rain, 0, air_moisture)
             
             # - flow
             #   TODO: iterate if water_flow_rate * step_size is too large
 
-            # Suggest way of doing
-            # Needs to figure out a way to deal with new_terrain and terrain
-            water = flow_step_twodir(terrain, water, params.water_flow_rate)
-            new_terrain, erosion = simulate_erosion_step(terrain, water, erosion, params.water_flow_rate, params.erosion_endurance, params.erosion_ratio)
-            erosion = reset_erosion_status(new_terrain, terrain, erosion)
-
-            terrain, water = water_erosion_step(
-                terrain, water, params.water_flow_rate * step_size)       
-
-            # - light
-            #    TODO: adjust the light based on the step point
-
-            # - air temperature
-            #    TODO: release and absorb the temperature accordingly
-
-            # - Season
-            #    TODO: shift the season so that the light_strength could adjust
+            # terrain, water = water_erosion_step(
+            #     terrain, water, params.water_flow_rate * step_size)       
             
         
         step_functions.append(step)

@@ -252,7 +252,7 @@ if __name__ == '__main__':
     evaporation_effect = 0.5
     light_length = 12
     light_strength = 1
-    day_light_length = 12
+    day_light_length = 120
     day_length = 240
 
     final_terrain, final_water, left_evaporation, final_rain_status, final_erosion, final_day_status, final_light_intensity, final_temperature = simulate_full_weather_day(
