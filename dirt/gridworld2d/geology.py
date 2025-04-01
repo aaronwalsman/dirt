@@ -1,10 +1,10 @@
 from typing import Optional, Tuple, Any
 
+import jax
 import jax.numpy as jnp
 import jax.random as jrng
 import chex
-from perlin_noise import perlin_noise
-from jax import vmap
+from dirt.gridworld2d.perlin_noise import perlin_noise
 
 from dirt.defaults import DEFAULT_FLOAT_TYPE
 
@@ -57,7 +57,7 @@ def fractal_noise(
         scaled_coords = coords * frequency
         return amplitude * perlin_noise(key, scaled_coords)
     
-    octave_noises = vmap(octave_noise, 
+    octave_noises = jax.vmap(octave_noise, 
                 in_axes=(0, 0, 0))(keys, frequencies, amplitudes)
 
     return jnp.sum(octave_noises, axis=0).reshape(world_size) * height_scale

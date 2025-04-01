@@ -27,7 +27,7 @@ TLandscapeObservation = TypeVar('TLanscapeObservation', bound='LandscapeObservat
 @static_dataclass
 class LandscapeParams:
     world_size : Tuple[int, int] = (1024, 1024)
-    step_sizes : Tuple[float, ...] = (1.)
+    step_sizes : Tuple[float, ...] = (1.,)
     day_initial: int = 0.
     
     # terrain
@@ -45,8 +45,8 @@ class LandscapeParams:
     air_moisture_diffusion : float = 1./3.
 
     # Rain
-    rain_moisture_up_threshold : float = SOMETHING
-    rain_moisture_down_threshold: float = 0.1
+    rain_moisture_up_threshold : float = 0.8
+    rain_moisture_down_threshold: float = 0.4
     rain_amount: float = 0.32
     
     # air
@@ -56,22 +56,22 @@ class LandscapeParams:
     air_initial_smell: float = 0.
 
     # light
-    light_initial_strength: float = SOMETHING
-    night_effect: float = SOMETHING
+    light_initial_strength: float = 0.5
+    night_effect: float = 0.25
 
     # temperature
-    water_effect: float  = SOMETHING
-    rain_effect: float = SOMETHING
-    evaporation_effect: float = SOMETHING
+    water_effect: float  = 0.25
+    rain_effect: float = 0.05
+    evaporation_effect: float = 0.05
     
     # climate
-    steps_per_day : 240     # 24*10
-    days_per_year : 360
+    steps_per_day : int = 240     # 24*10
+    days_per_year : int = 360
     evaporation_rate : float = 0.01
     
     # erosion
-    erosion_endurance : float = SOMETHING
-    erosion_ratio : float = SOMETHING
+    erosion_endurance : float = 0.05
+    erosion_ratio : float = 0.01
 
 @static_dataclass
 class LandscapeState:
@@ -155,6 +155,7 @@ def landscape(
             water_level += params.water_initial_fill_rate # Suppose Fix
             water = water_level - terrain
             water = jnp.where(water < 0., 0., water)
+            water = water.astype(jnp.bfloat16)
             return (water, water_level)
         
         water, water_level = jax.lax.while_loop(
@@ -168,7 +169,7 @@ def landscape(
         key, wind_key = jrng.split(key)
         wind_velocity = init_wind_velocity(wind_key)
         air_temperature = jnp.full(
-            params.world_size, params.initial_air_temperature, dtype=dtype)
+            params.world_size, params.air_initial_temperature, dtype=dtype)
         air_moisture = jnp.zeros(params.world_size, dtype=dtype)
         air_light = jnp.zeros(params.world_size, dtype=dtype)
         air_smell = jnp.zeros(params.world_size, dtype=dtype)
@@ -198,10 +199,12 @@ def landscape(
             
             terrain = state.terrain
             water = state.water
+            erosion = state.erosion
             wind_velocity = state.wind_velocity
             air_moisture = state.air_moisture
             air_smell = state.air_smell
             air_temperature = state.air_temperature
+            day = state.day
 
             rain_status = state.rain_status
             day_length = params.steps_per_day
@@ -218,7 +221,7 @@ def landscape(
             #   TODO: iterate if step_size is too large
             key, wind_key = jrng.split(key)
             wind_velocity = step_wind_velocity(
-                wind_key, step_size=step_size)
+                wind_key, wind_velocity, step_size=step_size)
             
             # - diffuse and move the air smell
             diffusion_std = params.air_moisture_diffusion * (step_size**0.5)
@@ -268,10 +271,10 @@ def landscape(
             )
 
             # Evaporate and rain based on temperature and air moisture
-            water, air_evaporation, rain_status = weather_step(
+            water, air_moisture, rain_status = weather_step(
                 water, 
                 air_temperature, 
-                air_evaporation, 
+                air_moisture, 
                 rain_status, 
                 params.evaporation_rate, 
                 params.rain_moisture_up_threshold, 
@@ -304,3 +307,22 @@ def landscape(
         step_functions.append(step)
     
     return init, *step_functions
+
+
+if __name__ == "__main__":
+    init, step_fn = landscape()
+    key = jax.random.PRNGKey(1234)
+    state = init(key)
+    action = LandscapeAction()
+    for i in range(5):
+        key, subkey = jax.random.split(key)
+        state, _ = step_fn(subkey, action, state)
+        
+        # Print some state variables to inspect
+        print(f"\n--- Step {i+1} ---")
+        print("Day:", state.day)
+        print("Wind velocity:", state.wind_velocity)
+        print("Air temperature (mean):", jnp.mean(state.air_temperature))
+        print("Water (mean):", jnp.mean(state.water))
+        print("Rain status (mean):", jnp.mean(state.rain_status))
+        print("Erosion (mean):", jnp.mean(state.erosion))

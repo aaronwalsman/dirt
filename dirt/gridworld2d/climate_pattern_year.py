@@ -131,10 +131,10 @@ if __name__ == '__main__':
     rain = 0.08
     erosion_endurance = 0.05
     erosion_ratio = 0.01
-    night_effect = 0.35 # Under this, the temperature system doesn't seem to explode
-    water_effect = 0.5
-    rain_effect = 0.1 
-    evaporation_effect = 0.5
+    night_effect = 0.25 # Under this, the temperature system doesn't seem to explode
+    water_effect = 0.25
+    rain_effect = 0.05
+    evaporation_effect = 0.05
 
     final_terrain, final_water, left_evaporation, final_rain_status, final_erosion, final_day_status, final_light_intensity, final_temperature = simulate_full_climate(
         terrain, water, temperature_initial, time, 
