@@ -70,16 +70,16 @@ def nomnom_linear_model(params=NomNomModelParams(), dtype=jnp.float32):
         params.view_distance +
         1   # energy
     )
+    out_dim = 2+3+2
     
-    #def encoder_forward(x):
-    #    food = (x.view == 1).reshape(-1).astype(dtype)
-    #    players = (x.view == 2).reshape(-1).astype(dtype)
-    #    out_of_bounds = (x.view == 3).reshape(-1).astype(dtype)
-    #    return jnp.concatenate(
-    #        (food, players, out_of_bounds, x.energy[...,None]), axis=-1)
-    #
-    #encoder = (lambda: None, encoder_forward)
-    encoder = nomnom_linear_observation_encoder(dtype=dtype)
+    def encoder_forward(x):
+        food = (x.view == 1).reshape(-1).astype(dtype)
+        players = (x.view == 2).reshape(-1).astype(dtype)
+        out_of_bounds = (x.view == 3).reshape(-1).astype(dtype)
+        return jnp.concatenate(
+            (food, players, out_of_bounds, x.energy.reshape(-1)), axis=-1)
+    
+    encoder = (lambda: None, encoder_forward)
     decoder = nomnom_action_decoder(in_dim, dtype=dtype)
     
     return layer_sequence((encoder, decoder))
