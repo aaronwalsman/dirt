@@ -21,7 +21,8 @@ from mechagogue.static_dataclass import static_dataclass
 TLandscapeParams = TypeVar('TLandscapeParams', bound='LandscapeParams')
 TLandscapeState = TypeVar('TLandscapeState', bound='LandscapeState')
 TLandscapeAction = TypeVar('TLandscapeAction', bound='LandscapeAction')
-TLandscapeObservation = TypeVar('TLanscapeObservation', bound='LandscapeObservation')
+TLandscapeObservation = TypeVar(
+    'TLanscapeObservation', bound='LandscapeObservation')
 
 
 @static_dataclass
