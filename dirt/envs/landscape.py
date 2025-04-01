@@ -8,6 +8,7 @@ from typing import Tuple, Optional, TypeVar, Any, Union
 
 from dirt.defaults import DEFAULT_FLOAT_TYPE
 from dirt.gridworld2d.gas import step as gas_step
+from dirt.distribution.ou import ou_process
 from dirt.gridworld2d.geology import fractal_noise
 from dirt.gridworld2d.erosion import simulate_erosion_step, reset_erosion_status
 from dirt.gridworld2d.water import flow_step, flow_step_twodir
@@ -46,7 +47,7 @@ class LandscapeParams:
     # Rain
     rain_moisture_up_threshold : float = SOMETHING
     rain_moisture_down_threshold: float = 0.1
-    rain_amount: float = SOMETHING
+    rain_amount: float = 0.32
     
     # air
     wind_std : float = 0.1

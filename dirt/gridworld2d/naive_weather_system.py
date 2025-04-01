@@ -1,6 +1,6 @@
-from geology import fractal_noise
-from water import flow_step_twodir
-from erosion import simulate_erosion_step, reset_erosion_status
+from dirt.gridworld2d.geology import fractal_noise
+from dirt.gridworld2d.water import flow_step_twodir
+from dirt.gridworld2d.erosion import simulate_erosion_step, reset_erosion_status
 import jax.random as jrng
 import jax.numpy as jnp
 import jax
