@@ -1,7 +1,7 @@
-from geology import fractal_noise
-from water import flow_step_twodir
-from erosion import simulate_erosion_step, reset_erosion_status
-from naive_weather_system import weather_step
+from dirt.gridworld2d.geology import fractal_noise
+from dirt.gridworld2d.water import flow_step_twodir
+from dirt.gridworld2d.erosion import simulate_erosion_step, reset_erosion_status
+from dirt.gridworld2d.naive_weather_system import weather_step
 import jax.random as jrng
 import jax.numpy as jnp
 import jax
@@ -252,7 +252,7 @@ if __name__ == '__main__':
     evaporation_effect = 0.5
     light_length = 12
     light_strength = 1
-    day_light_length = 12
+    day_light_length = 120
     day_length = 240
 
     final_terrain, final_water, left_evaporation, final_rain_status, final_erosion, final_day_status, final_light_intensity, final_temperature = simulate_full_weather_day(
