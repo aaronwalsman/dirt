@@ -56,8 +56,8 @@ class LandscapeParams:
     air_initial_smell: float = 0.
 
     # light
-    light_initial_strength: float = 0.5
-    night_effect: float = 0.25
+    light_initial_strength: float = 0.35
+    night_effect: float = 0.15
 
     # temperature
     water_effect: float  = 0.25
@@ -173,6 +173,7 @@ def landscape(
         air_moisture = jnp.zeros(params.world_size, dtype=dtype)
         air_light = jnp.zeros(params.world_size, dtype=dtype)
         air_smell = jnp.zeros(params.world_size, dtype=dtype)
+        air_smell = air_smell[...,None]
         rain_status = jnp.zeros(params.world_size, dtype=dtype)
         day = params.day_initial
         
@@ -226,10 +227,12 @@ def landscape(
             # - diffuse and move the air smell
             diffusion_std = params.air_moisture_diffusion * (step_size**0.5)
             air_smell = gas_step(
-                air_smell[...,None], diffusion_std, 1., wind_velocity, 1)
+                air_smell, diffusion_std, 1., wind_velocity, 1)
             
             # move water
-            water = flow_step_twodir(terrain, water, params.water_flow_rate)
+            water = flow_step(terrain, water, params.water_flow_rate)
+            # water = flow_step_twodir(terrain, water, params.water_flow_rate)
+
 
             # erode based on water flow
             old_terrain = terrain
@@ -281,6 +284,21 @@ def landscape(
                 params.rain_moisture_down_threshold, 
                 params.rain_amount
             )
+
+            new_state = LandscapeState(
+                terrain,
+                erosion,
+                water,
+                wind_velocity,
+                air_temperature,
+                air_moisture,
+                light_intensity,
+                air_smell,
+                rain_status,
+                day,
+            )
+
+            return new_state
         
 
             # # move water
@@ -314,15 +332,14 @@ if __name__ == "__main__":
     key = jax.random.PRNGKey(1234)
     state = init(key)
     action = LandscapeAction()
-    for i in range(5):
+    for i in range(500):
         key, subkey = jax.random.split(key)
-        state, _ = step_fn(subkey, action, state)
-        
-        # Print some state variables to inspect
-        print(f"\n--- Step {i+1} ---")
-        print("Day:", state.day)
-        print("Wind velocity:", state.wind_velocity)
-        print("Air temperature (mean):", jnp.mean(state.air_temperature))
-        print("Water (mean):", jnp.mean(state.water))
-        print("Rain status (mean):", jnp.mean(state.rain_status))
-        print("Erosion (mean):", jnp.mean(state.erosion))
+        state = step_fn(subkey, action, state)
+        if i % 20 == 0:
+            # inspect
+            print(f"\n--- Day {state.day} ---")
+            print("Wind velocity:", state.wind_velocity)
+            print("Air temperature (mean):", jnp.mean(state.air_temperature))
+            print("Water (sum):", jnp.sum(state.water + state.air_moisture))
+            print("Rain status (mean):", jnp.mean(state.rain_status))
+            print("Erosion (mean):", jnp.mean(state.erosion))

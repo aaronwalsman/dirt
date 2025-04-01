@@ -90,7 +90,7 @@ def step(
     new_grid = new_grid.at[y1, x0, :].add((gas_grid * ((wy1 * wx0)[..., None])).astype(gas_grid.dtype))
     new_grid = new_grid.at[y1, x1, :].add((gas_grid * ((wy1 * wx1)[..., None])).astype(gas_grid.dtype))
 
-    return gas_grid
+    return new_grid
 
 if __name__ == '__main__':
     gas_grid = jnp.zeros((5, 7, 3))
