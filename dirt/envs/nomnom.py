@@ -16,6 +16,7 @@ TNomNomParams = TypeVar('TNomNomParams', bound='NomNomParams')
 TNomNomState = TypeVar('TNomNomState', bound='NomNomState')
 TNomNomObservation = TypeVar('TNomNomObservation', bound='NomNomObservation')
 TNomNomAction = TypeVar('TNomNomAction', bound='NomNomAction')
+TNomNomTraits = TypeVar('TNomNomTraits', bound='NomNomTraits')
 
 @static_dataclass
 class NomNomParams:
@@ -23,7 +24,7 @@ class NomNomParams:
     Configuration parameters.  This should only contain values that will be
     fixed throughout training.
     '''
-    world_size : Tuple = (32,32)
+    world_size : Tuple[int, int] = (32,32)
     
     mean_initial_food : float = 32
     max_initial_food : int = 32
@@ -74,6 +75,10 @@ class NomNomAction:
     reproduce : jnp.ndarray
 
 @static_dataclass
+class NomNomTraits:
+    pass
+
+@static_dataclass
 class NomNomObservation:
     '''
     An observation in the Nom environment.
@@ -82,7 +87,7 @@ class NomNomObservation:
     energy : jnp.ndarray
 
 def nomnom(
-    params: TNomNomParams = NomNomParams,
+    params: TNomNomParams = NomNomParams(),
 ):
     '''
     This bundles the function above into reset and step functions.
@@ -178,6 +183,7 @@ def nomnom(
         key: chex.PRNGKey,
         state: TNomNomState,
         action: TNomNomAction,
+        traits: TNomNomTraits,
     ) -> TNomNomState :
         '''
         Transition function for the NomNom environment.  Samples a new state

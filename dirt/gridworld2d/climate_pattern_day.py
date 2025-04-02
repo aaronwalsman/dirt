@@ -14,25 +14,27 @@ Let's give some ambient lighting, likely from the moon!
 And this is going to be shifted by the season parameter, since in summer we have longer days
 The season shift will be accomplished in the climate_patter_year.py file
 
-One day is accomplished of 24 steps, matching the 24 hrs
+One day is accomplished of 240 steps, matching the 24 hrs * 10 steps per hour
 '''
 
 def get_day_status(
+    day_length: int,
     day_light_length: int,
     time: int
 ) -> int:
     '''
     Based on the length of day light, determine the status of the day
 
-    day_light_length: [0,24]
+    day_light_length: [0,240]
     
     1: Sun
     0: Moon
     '''
-    edge = time % 24
+    edge = time % day_length
     return jnp.where(edge <= day_light_length, 1, 0)
 
 def get_angle(
+    day_length: int,
     day_light_length: int,
     time: int
 ) -> float:
@@ -41,11 +43,11 @@ def get_angle(
 
     angle is the one with positive right axis
     '''
-    time %= 24
+    time %= day_length
     angle = jnp.where(
         time <= day_light_length,
         (time / day_light_length) * jnp.pi,
-        ((time - day_light_length) / (24 - day_light_length)) * jnp.pi
+        ((time - day_light_length) / (day_length - day_light_length)) * jnp.pi
     )
     return angle
     
@@ -71,6 +73,7 @@ def get_normalize(
     return (array - min_val) / (max_val - min_val + 1e-8)
 
 def light_step(
+    day_length: int,
     terrain: jnp.ndarray,
     water: jnp.ndarray,
     light_strength: float,
@@ -85,7 +88,7 @@ def light_step(
 
     Get the Idea from website: https://learnopengl.com/Lighting/Basic-Lighting
     '''
-    angle = get_angle(day_light_length, time)
+    angle = get_angle(day_length, day_light_length, time)
     light_direction = jnp.array([jnp.cos(angle), jnp.sin(angle), 0.0])
     final_terrain = terrain + water
     normals = terrain_gradient(final_terrain)
@@ -93,7 +96,7 @@ def light_step(
     dot_products = jnp.einsum('ijk,ijk->ij', normals, light_direction)
     dot_products_norm = get_normalize(dot_products)
     light_intensity = jnp.clip(dot_products_norm * light_strength, 0, 1)
-    return jnp.where(time % 24 <= day_light_length, light_intensity, night_effect * light_intensity)
+    return jnp.where(time % day_length <= day_light_length, light_intensity, night_effect * light_intensity)
 
 
 def absorb_temp(
@@ -140,6 +143,7 @@ def release_temp(
     return temperature - release_rate
 
 def temperature_step(
+    day_length: int,
     time: int,
     water: jnp.ndarray,
     temperature: jnp.ndarray,
@@ -155,10 +159,11 @@ def temperature_step(
     '''
     Simulate the per step light and temperature system
     '''
-    return jnp.where(time % 24 <= day_light_length, absorb_temp(light_intensity, water, temperature, rain_status, current_evaporation, water_effect, rain_effect, evaporation_effect), release_temp(light_intensity, water, temperature, rain_status, current_evaporation, night_effect, water_effect, rain_effect, evaporation_effect)
+    return jnp.where(time % day_length <= day_light_length, absorb_temp(light_intensity, water, temperature, rain_status, current_evaporation, water_effect, rain_effect, evaporation_effect), release_temp(light_intensity, water, temperature, rain_status, current_evaporation, night_effect, water_effect, rain_effect, evaporation_effect)
 )
 
 def simulate_full_weather_day(
+    day_length: int,
     terrain: jnp.ndarray,
     water: jnp.ndarray,
     temperature_initial: jnp.ndarray,
@@ -198,11 +203,11 @@ def simulate_full_weather_day(
         current_erosion = reset_erosion_status(new_terrain, terrain, current_erosion)
 
         # 3. light
-        new_day_status = get_day_status(light_length, current_time)
-        new_light_intensity = light_step(terrain, water, light_strength, light_length, current_time) #Porblem of getting None
+        new_day_status = get_day_status(day_length, light_length, current_time)
+        new_light_intensity = light_step(day_length, terrain, water, light_strength, light_length, current_time) #Porblem of getting None
 
         # 4. Temperature
-        new_temperature = temperature_step(current_time, water, current_temperature, rain_status, light_intensity, current_evaporation, day_light_length, night_effect, water_effect, rain_effect, evaporation_effect)
+        new_temperature = temperature_step(day_length, current_time, water, current_temperature, rain_status, light_intensity, current_evaporation, day_light_length, night_effect, water_effect, rain_effect, evaporation_effect)
         
         # 5. Humidity
         new_water, new_evaporation, rain_status = weather_step(
@@ -248,9 +253,10 @@ if __name__ == '__main__':
     light_length = 12
     light_strength = 1
     day_light_length = 12
+    day_length = 240
 
     final_terrain, final_water, left_evaporation, final_rain_status, final_erosion, final_day_status, final_light_intensity, final_temperature = simulate_full_weather_day(
-        terrain, water, temperature_initial, time, 
+        day_length, terrain, water, temperature_initial, time, 
         erosion_initial, rain_initial, evaporation_initial, day_status_initial, light_intensity_initial, day_light_length,
         evaporate_rate, air_up_limit, air_down_limit, rain,
         flow_rate, erosion_ratio, erosion_endurance, light_strength, light_length, night_effect, water_effect, rain_effect, evaporation_effect

@@ -13,7 +13,6 @@ import jax.random as jrng
 from mechagogue.pop.natural_selection import (
     natural_selection, NaturalSelectionParams)
 from mechagogue.breed.normal import normal_mutate
-from mechagogue.nn.mlp import mlp
 from mechagogue.static_dataclass import static_dataclass
 from mechagogue.serial import save_leaf_data, load_example_data
 
@@ -132,7 +131,6 @@ def train(key, params):
     while epoch < params.epochs:
         print(f'Epoch: {epoch}')
         key, epoch_key = jrng.split(key)
-        env_state = train_state.env_state
         
         train_state, reports = train_epoch(epoch_key, train_state)
         
