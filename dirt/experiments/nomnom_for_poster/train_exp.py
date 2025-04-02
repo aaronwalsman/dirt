@@ -218,7 +218,6 @@ if __name__ == '__main__':
             )
 
             # run
-            breakpoint()
             epoch_runner(
                 key,
                 params.runner_params,
