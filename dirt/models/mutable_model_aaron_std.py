@@ -57,6 +57,7 @@ def get_mutable_weight_mean_std(weight, in_channels, out_channels):
     weight_mean = weight_sum / (in_channels * out_channels)
     weight_var = (weight_mean[...,None,None] - weight)**2
     in_mask = jnp.arange(inc) < in_channels
+    # breakpoint()
     out_mask = jnp.arange(outc) < out_channels
     weight_var = weight_var * in_mask[:,None] * out_mask[None,:]
     weight_var_sum = weight_var.sum(axis=-1).sum(axis=-1)

@@ -193,12 +193,12 @@ def mutate_mutable_linear(
 
     # print(weight_var) # 49, 256
     weight_var = weight_var * in_mask * out_mask # [None,:,:]
-    #jax.debug.print("weight_var: {}", weight_var)
+    
     weight_var_sum = weight_var.sum(axis=-1).sum(axis=-1)
     weight_var_mean = weight_var_sum / (in_channels * out_channels)
     weight_std = jnp.sqrt(weight_var_mean)
-    # jax.debug.print("weight: {}", weight)
-    #jax.debug.print("weight_std: {}", weight_std)
+    
+    # jax.debug.print("weight_std: {}", weight_std)
     weight = weight / (weight_std + 1e-8) * kaiming_std(in_channels)
 
     # zero out unused channels
