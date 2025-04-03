@@ -181,24 +181,24 @@ def mutate_mutable_linear(
     # std = jnp.std(weight) 
 
     *b, inc, outc = linear_state[0].shape
-    import pdb; pdb.set_trace()
-    jax.debug.print("linear state: {}", linear_state[0])
+    #import pdb; pdb.set_trace()
+    #jax.debug.print("linear state: {}", linear_state[0])
     weight_sum = linear_state[0].sum(axis=-1).sum(axis=-1)
-    jax.debug.print("weight_sum: {}", weight_sum)
+    #jax.debug.print("weight_sum: {}", weight_sum)
     weight_mean = weight_sum / (in_channels * out_channels)
-    weight_var = weight_mean[...,None,None] - linear_state[0]
-    jax.debug.print("weight_mean: {}", weight_mean)
+    weight_var = (weight_mean[...,None,None] - linear_state[0])**2
+    #jax.debug.print("weight_mean: {}", weight_mean)
     in_mask = (jnp.arange(inc) < in_channels)[:, None] # 1, 256
     out_mask = (jnp.arange(outc) < out_channels)[None, :]
 
     # print(weight_var) # 49, 256
     weight_var = weight_var * in_mask * out_mask # [None,:,:]
-    jax.debug.print("weight_var: {}", weight_var)
+    #jax.debug.print("weight_var: {}", weight_var)
     weight_var_sum = weight_var.sum(axis=-1).sum(axis=-1)
     weight_var_mean = weight_var_sum / (in_channels * out_channels)
     weight_std = jnp.sqrt(weight_var_mean)
     # jax.debug.print("weight: {}", weight)
-    jax.debug.print("weight_std: {}", weight_std)
+    #jax.debug.print("weight_std: {}", weight_std)
     weight = weight / (weight_std + 1e-8) * kaiming_std(in_channels)
 
     # zero out unused channels
