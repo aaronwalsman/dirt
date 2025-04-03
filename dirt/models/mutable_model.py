@@ -1,3 +1,4 @@
+import jax
 import jax.numpy as jnp
 import jax.random as jrng
 
@@ -176,6 +177,30 @@ def mutate_mutable_linear(
     decay = (1 - (weight_mutation_rate**2)*in_channels/2)**0.5
     weight = weight * decay + weight_delta * weight_mutation_rate
     
+    # std = jnp.std(weight, axis=-1, keepdims=True) 
+    # std = jnp.std(weight) 
+
+    *b, inc, outc = linear_state[0].shape
+    import pdb; pdb.set_trace()
+    jax.debug.print("linear state: {}", linear_state[0])
+    weight_sum = linear_state[0].sum(axis=-1).sum(axis=-1)
+    jax.debug.print("weight_sum: {}", weight_sum)
+    weight_mean = weight_sum / (in_channels * out_channels)
+    weight_var = weight_mean[...,None,None] - linear_state[0]
+    jax.debug.print("weight_mean: {}", weight_mean)
+    in_mask = (jnp.arange(inc) < in_channels)[:, None] # 1, 256
+    out_mask = (jnp.arange(outc) < out_channels)[None, :]
+
+    # print(weight_var) # 49, 256
+    weight_var = weight_var * in_mask * out_mask # [None,:,:]
+    jax.debug.print("weight_var: {}", weight_var)
+    weight_var_sum = weight_var.sum(axis=-1).sum(axis=-1)
+    weight_var_mean = weight_var_sum / (in_channels * out_channels)
+    weight_std = jnp.sqrt(weight_var_mean)
+    # jax.debug.print("weight: {}", weight)
+    jax.debug.print("weight_std: {}", weight_std)
+    weight = weight / (weight_std + 1e-8) * kaiming_std(in_channels)
+
     # zero out unused channels
     max_channels_in = weight.shape[-2]
     max_channels_out = weight.shape[-1]
@@ -185,6 +210,7 @@ def mutate_mutable_linear(
     weight = weight * out_channel_mask
     
     # if the switch is off, zero out the entire weight matrix
+    
     weight = jnp.where(switch, weight, jnp.zeros_like(weight))
     
     # apply a random offset to the bias
@@ -373,7 +399,8 @@ def backbone_weight_info(model_state, shared_dynamic_channels):
         else:
             in_channels = dynamic_channel_state[i][0]
             out_channels = dynamic_channel_state[i+1][0]
-        *b,inc,outc = layer_state[0].shape
+
+        *b, inc, outc = layer_state[0].shape
         weight_sum = layer_state[0].sum(axis=-1).sum(axis=-1)
         weight_mean = weight_sum / (in_channels * out_channels)
         weight_var = weight_mean[...,None,None] - layer_state[0]
