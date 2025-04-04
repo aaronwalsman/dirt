@@ -6,7 +6,7 @@ import chex
 
 from typing import Tuple, Optional, TypeVar, Any, Union
 
-from dirt.defaults import DEFAULT_FLOAT_TYPE
+from dirt.defaults import DEFAULT_FLOAT_DTYPE
 from dirt.gridworld2d.gas import step as gas_step
 from dirt.distribution.ou import ou_process
 from dirt.gridworld2d.geology import fractal_noise
@@ -15,15 +15,12 @@ from dirt.gridworld2d.water import flow_step, flow_step_twodir
 from dirt.gridworld2d.naive_weather_system import weather_step
 from dirt.gridworld2d.climate_pattern_day import temperature_step, light_step, get_day_status
 from dirt.gridworld2d.climate_pattern_year import get_day_light_length, get_day_light_strength
+from dirt.consumable import Consumable
 
 from mechagogue.static_dataclass import static_dataclass
 
 TLandscapeParams = TypeVar('TLandscapeParams', bound='LandscapeParams')
 TLandscapeState = TypeVar('TLandscapeState', bound='LandscapeState')
-TLandscapeAction = TypeVar('TLandscapeAction', bound='LandscapeAction')
-TLandscapeObservation = TypeVar(
-    'TLanscapeObservation', bound='LandscapeObservation')
-
 
 @static_dataclass
 class LandscapeParams:
@@ -57,8 +54,8 @@ class LandscapeParams:
     air_initial_smell: float = 0.
 
     # light
-    light_initial_strength: float = 0.5
-    night_effect: float = 0.25
+    light_initial_strength: float = 0.35
+    night_effect: float = 0.15
 
     # temperature
     water_effect: float  = 0.25
@@ -86,24 +83,13 @@ class LandscapeState:
     air_smell: jnp.array
     rain_status: jnp.array
     day: int
-    #ground_chemicals : jnp.array
-    #water_chemicals : jnp.array
-    #air_chemicals : jnp.array
-
-class LandscapeAction:
-    pass
-    #step_size : float
-    #locations : jnp.array
-    #ground_chemical_update : jnp.array
-    #water_chemical_update : jnp.array
-    #air_chemical_update : jnp.array
-
-class LandscapeObservation:
-    pass
+    
+    energy : jnp.array
+    biomass : jnp.array
 
 def landscape(
     params : TLandscapeParams = LandscapeParams(),
-    dtype : Any = DEFAULT_FLOAT_TYPE,
+    dtype : Any = DEFAULT_FLOAT_DTYPE,
 ):
     
     init_wind_velocity, step_wind_velocity = ou_process(
@@ -174,8 +160,12 @@ def landscape(
         air_moisture = jnp.zeros(params.world_size, dtype=dtype)
         air_light = jnp.zeros(params.world_size, dtype=dtype)
         air_smell = jnp.zeros(params.world_size, dtype=dtype)
+        air_smell = air_smell[...,None]
         rain_status = jnp.zeros(params.world_size, dtype=dtype)
         day = params.day_initial
+        
+        energy = jnp.zeros(params.world_size, dtype=dtype)
+        biomass = jnp.zeros(params.world_size, dtype=dtype)
         
         return LandscapeState(
             terrain,
@@ -187,16 +177,32 @@ def landscape(
             air_light,
             air_smell,
             rain_status,
-            day
+            day,
+            energy,
+            biomass,
         )
+    
+    def get_consumable(state, locations):
+        y = locations[...,0]
+        x = locations[...,1]
+        water = state.water[y, x]
+        energy = state.energy[y, x]
+        biomass = state.biomass[y, x]
+        return Consumable(water, energy, biomass)
+    
+    def set_consumable(state, locations, consumable):
+        y, x = locations[...,0], locations[...,1]
+        water = state.water.at[y, x].set(consumable.water)
+        energy = state.energy.at[y, x].set(consumable.energy)
+        biomass = state.biomass.at[y, x].set(consumable.biomass)
+        return state.replace(water=water, energy=energy, biomass=biomass)
     
     step_functions = []
     for step_size in params.step_sizes:
         def step(
             key : chex.PRNGKey,
-            action : TLandscapeAction,
             state : TLandscapeState,
-        ) -> Tuple[TLandscapeState, TLandscapeObservation] :
+        ) -> TLandscapeState :
             
             terrain = state.terrain
             water = state.water
@@ -210,8 +216,6 @@ def landscape(
             rain_status = state.rain_status
             day_length = params.steps_per_day
             
-            # apply actions
-
             # Day_status
             day += 1
             light_length = get_day_light_length(day)
@@ -227,10 +231,12 @@ def landscape(
             # - diffuse and move the air smell
             diffusion_std = params.air_moisture_diffusion * (step_size**0.5)
             air_smell = gas_step(
-                air_smell[...,None], diffusion_std, 1., wind_velocity, 1)
+                air_smell, diffusion_std, 1., wind_velocity, 1)
             
             # move water
-            water = flow_step_twodir(terrain, water, params.water_flow_rate)
+            water = flow_step(terrain, water, params.water_flow_rate)
+            # water = flow_step_twodir(terrain, water, params.water_flow_rate)
+
 
             # erode based on water flow
             old_terrain = terrain
@@ -282,6 +288,21 @@ def landscape(
                 params.rain_moisture_down_threshold, 
                 params.rain_amount
             )
+
+            new_state = LandscapeState(
+                terrain,
+                erosion,
+                water,
+                wind_velocity,
+                air_temperature,
+                air_moisture,
+                light_intensity,
+                air_smell,
+                rain_status,
+                day,
+            )
+
+            return new_state
         
 
             # # move water
@@ -307,23 +328,21 @@ def landscape(
         
         step_functions.append(step)
     
-    return init, *step_functions
+    return init, get_consumable, set_consumable, *step_functions
 
 
 if __name__ == "__main__":
     init, step_fn = landscape()
     key = jax.random.PRNGKey(1234)
     state = init(key)
-    action = LandscapeAction()
-    for i in range(5):
+    for i in range(500):
         key, subkey = jax.random.split(key)
-        state, _ = step_fn(subkey, action, state)
-        
-        # Print some state variables to inspect
-        print(f"\n--- Step {i+1} ---")
-        print("Day:", state.day)
-        print("Wind velocity:", state.wind_velocity)
-        print("Air temperature (mean):", jnp.mean(state.air_temperature))
-        print("Water (mean):", jnp.mean(state.water))
-        print("Rain status (mean):", jnp.mean(state.rain_status))
-        print("Erosion (mean):", jnp.mean(state.erosion))
+        state = step_fn(subkey, state)
+        if i % 20 == 0:
+            # inspect
+            print(f"\n--- Day {state.day} ---")
+            print("Wind velocity:", state.wind_velocity)
+            print("Air temperature (mean):", jnp.mean(state.air_temperature))
+            print("Water (sum):", jnp.sum(state.water + state.air_moisture))
+            print("Rain status (mean):", jnp.mean(state.rain_status))
+            print("Erosion (mean):", jnp.mean(state.erosion))

@@ -381,7 +381,7 @@ class Viewer:
         self.renderer.set_ambient_color((0.5, 0.5, 0.5))
         self.renderer.set_background_color(
             #(106./255., 223/255., 255./255.),
-            (164./255., 236./255., 255./255.),
+            (188./255., 225./255., 242./255.),
         )
         
     def _init_callbacks(self):

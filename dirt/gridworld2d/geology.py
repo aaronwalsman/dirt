@@ -6,7 +6,7 @@ import jax.random as jrng
 import chex
 from dirt.gridworld2d.perlin_noise import perlin_noise
 
-from dirt.defaults import DEFAULT_FLOAT_TYPE
+from dirt.defaults import DEFAULT_FLOAT_DTYPE
 
 '''
 The total world size is set to be (x,y,h)
@@ -23,7 +23,7 @@ def fractal_noise(
     max_octaves : Optional[int] = None,
     grid_unit_scale : float = 0.005,
     height_scale : float = 50,
-    dtype : Any = DEFAULT_FLOAT_TYPE,
+    dtype : Any = DEFAULT_FLOAT_DTYPE,
 ) -> jnp.ndarray :
     '''
     Function to generate fractal noise with calling Perlin noise
