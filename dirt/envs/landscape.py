@@ -56,8 +56,8 @@ class LandscapeParams:
     air_initial_smell: float = 0.
 
     # light
-    light_initial_strength: float = 0.35
-    night_effect: float = 0.15
+    light_initial_strength: float = 1
+    night_effect: float = 0.35
 
     # temperature
     water_effect: float  = 0.25
@@ -85,6 +85,7 @@ class LandscapeState:
     air_smell: jnp.array
     rain_status: jnp.array
     day: int
+    day_status: int
     #ground_chemicals : jnp.array
     #water_chemicals : jnp.array
     #air_chemicals : jnp.array
@@ -176,6 +177,7 @@ def landscape(
         air_smell = air_smell[...,None]
         rain_status = jnp.zeros(params.world_size, dtype=dtype)
         day = params.day_initial
+        day_status = params.day_initial
         
         return LandscapeState(
             terrain,
@@ -187,7 +189,8 @@ def landscape(
             air_light,
             air_smell,
             rain_status,
-            day
+            day,
+            day_status
         )
     
     step_functions = []
@@ -214,7 +217,7 @@ def landscape(
 
             # Day_status
             day += 1
-            light_length = get_day_light_length(day)
+            light_length = jnp.round(get_day_light_length(day_length, day))
             day_status = get_day_status(day_length, light_length, day)
             
             # move air
@@ -247,19 +250,20 @@ def landscape(
             erosion = reset_erosion_status(terrain, old_terrain, erosion)
             
             # light change based on rotation of Sun
-            light_strength = get_day_light_strength(day)
+            light_strength = get_day_light_strength(params.light_initial_strength, day)
             light_intensity = light_step(
-                light_length, 
-                terrain, water, 
-                light_strength, 
-                light_length, 
-                day, 
-                params.night_effect
+                day_length,
+                terrain, 
+                water,
+                light_strength,
+                light_length,
+                day,
+                night_effect = params.night_effect
             )
 
             # Temperature changed based on light and rain
             air_temperature = temperature_step(
-                light_length, 
+                day_length, 
                 day, 
                 water, 
                 air_temperature, 
@@ -267,10 +271,10 @@ def landscape(
                 light_intensity, 
                 air_moisture,
                 light_length, 
-                params.night_effect, 
-                params.water_effect, 
-                params.rain_effect, 
-                params.evaporation_effect
+                night_effect = params.night_effect, 
+                water_effect=params.water_effect, 
+                rain_effect=params.rain_effect, 
+                evaporation_effect=params.evaporation_effect
             )
 
             # Evaporate and rain based on temperature and air moisture
@@ -296,6 +300,7 @@ def landscape(
                 air_smell,
                 rain_status,
                 day,
+                day_status
             )
 
             return new_state
@@ -332,12 +337,13 @@ if __name__ == "__main__":
     key = jax.random.PRNGKey(1234)
     state = init(key)
     action = LandscapeAction()
-    for i in range(500):
+    for i in range(300):
         key, subkey = jax.random.split(key)
         state = step_fn(subkey, action, state)
         if i % 20 == 0:
             # inspect
             print(f"\n--- Day {state.day} ---")
+            print("Day Status:", state.day_status)
             print("Wind velocity:", state.wind_velocity)
             print("Air temperature (mean):", jnp.mean(state.air_temperature))
             print("Air moisture (mean):", jnp.mean(state.air_moisture))

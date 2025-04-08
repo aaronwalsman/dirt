@@ -79,7 +79,7 @@ def light_step(
     light_strength: float,
     day_light_length: int,
     time: int,
-    night_effect = 0.1
+    night_effect
 ) -> jnp.ndarray:
     '''
     light_strength: determined by the distance between the terrain and the Sun
@@ -105,10 +105,11 @@ def absorb_temp(
     temperature: jnp.ndarray,
     rain_status: jnp.ndarray,
     current_evaporation: jnp.ndarray,
-    water_effect = 0.5,
-    rain_effect = 0.1, 
-    evaporation_effect = 0.5
+    water_effect,
+    rain_effect, 
+    evaporation_effect
 ) -> jnp.ndarray:
+    
     '''
     Absorb temperature in the daylight
 
@@ -204,7 +205,7 @@ def simulate_full_weather_day(
 
         # 3. light
         new_day_status = get_day_status(day_length, light_length, current_time)
-        new_light_intensity = light_step(day_length, terrain, water, light_strength, light_length, current_time) #Porblem of getting None
+        new_light_intensity = light_step(day_length, terrain, water, light_strength, light_length, current_time, night_effect) #Porblem of getting None
 
         # 4. Temperature
         new_temperature = temperature_step(day_length, current_time, water, current_temperature, rain_status, light_intensity, current_evaporation, day_light_length, night_effect, water_effect, rain_effect, evaporation_effect)
@@ -246,7 +247,7 @@ if __name__ == '__main__':
     rain = 0.08
     erosion_endurance = 0.05
     erosion_ratio = 0.01
-    night_effect = 0.17 # Under this, the temperature system doesn't seem to explode
+    night_effect = 0.8 # Under this, the temperature system doesn't seem to explode
     water_effect = 0.5
     rain_effect = 0.1 
     evaporation_effect = 0.5
