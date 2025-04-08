@@ -45,9 +45,9 @@ class LandscapeParams:
     air_moisture_diffusion : float = 1./3.
 
     # Rain
-    rain_moisture_up_threshold : float = 0.8
-    rain_moisture_down_threshold: float = 0.4
-    rain_amount: float = 0.32
+    rain_moisture_up_threshold : float = 0.1
+    rain_moisture_down_threshold: float = 0.2
+    rain_amount: float = 0.08
     
     # air
     wind_std : float = 0.1
@@ -340,6 +340,11 @@ if __name__ == "__main__":
             print(f"\n--- Day {state.day} ---")
             print("Wind velocity:", state.wind_velocity)
             print("Air temperature (mean):", jnp.mean(state.air_temperature))
+            print("Air moisture (mean):", jnp.mean(state.air_moisture))
             print("Water (sum):", jnp.sum(state.water + state.air_moisture))
             print("Rain status (mean):", jnp.mean(state.rain_status))
             print("Erosion (mean):", jnp.mean(state.erosion))
+
+# pull first
+# Can push to have the rain updated
+# check for temperature system, how to stabilize the degrees
