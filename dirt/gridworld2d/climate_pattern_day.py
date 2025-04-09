@@ -1,7 +1,7 @@
-from geology import fractal_noise
-from water import flow_step_twodir
-from erosion import simulate_erosion_step, reset_erosion_status
-from naive_weather_system import weather_step
+from dirt.gridworld2d.geology import fractal_noise
+from dirt.gridworld2d.water import flow_step_twodir
+from dirt.gridworld2d.erosion import simulate_erosion_step, reset_erosion_status
+from dirt.gridworld2d.naive_weather_system import weather_step
 import jax.random as jrng
 import jax.numpy as jnp
 import jax
@@ -79,7 +79,7 @@ def light_step(
     light_strength: float,
     day_light_length: int,
     time: int,
-    night_effect = 0.1
+    night_effect
 ) -> jnp.ndarray:
     '''
     light_strength: determined by the distance between the terrain and the Sun
@@ -105,10 +105,11 @@ def absorb_temp(
     temperature: jnp.ndarray,
     rain_status: jnp.ndarray,
     current_evaporation: jnp.ndarray,
-    water_effect = 0.5,
-    rain_effect = 0.1, 
-    evaporation_effect = 0.5
+    water_effect,
+    rain_effect, 
+    evaporation_effect
 ) -> jnp.ndarray:
+    
     '''
     Absorb temperature in the daylight
 
@@ -204,7 +205,7 @@ def simulate_full_weather_day(
 
         # 3. light
         new_day_status = get_day_status(day_length, light_length, current_time)
-        new_light_intensity = light_step(day_length, terrain, water, light_strength, light_length, current_time) #Porblem of getting None
+        new_light_intensity = light_step(day_length, terrain, water, light_strength, light_length, current_time, night_effect) #Porblem of getting None
 
         # 4. Temperature
         new_temperature = temperature_step(day_length, current_time, water, current_temperature, rain_status, light_intensity, current_evaporation, day_light_length, night_effect, water_effect, rain_effect, evaporation_effect)
@@ -246,13 +247,13 @@ if __name__ == '__main__':
     rain = 0.08
     erosion_endurance = 0.05
     erosion_ratio = 0.01
-    night_effect = 0.17 # Under this, the temperature system doesn't seem to explode
+    night_effect = 0.8 # Under this, the temperature system doesn't seem to explode
     water_effect = 0.5
     rain_effect = 0.1 
     evaporation_effect = 0.5
     light_length = 12
     light_strength = 1
-    day_light_length = 12
+    day_light_length = 120
     day_length = 240
 
     final_terrain, final_water, left_evaporation, final_rain_status, final_erosion, final_day_status, final_light_intensity, final_temperature = simulate_full_weather_day(

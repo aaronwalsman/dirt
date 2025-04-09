@@ -1,8 +1,8 @@
-from geology import fractal_noise
-from water import flow_step_twodir
-from erosion import simulate_erosion_step, reset_erosion_status
-from naive_weather_system import weather_step
-from climate_pattern_day import temperature_step, light_step, get_day_status
+from dirt.gridworld2d.geology import fractal_noise
+from dirt.gridworld2d.water import flow_step_twodir
+from dirt.gridworld2d.erosion import simulate_erosion_step, reset_erosion_status
+from dirt.gridworld2d.naive_weather_system import weather_step
+from dirt.gridworld2d.climate_pattern_day import temperature_step, light_step, get_day_status
 import jax.random as jrng
 import jax.numpy as jnp
 import jax
@@ -22,15 +22,17 @@ One round roughly consists of 360 days
 '''
 
 def get_day_light_length(
+    day_length: int,
     time: int
 ) -> float:
     '''
     Modeled as a triangular function, where the average day_light_length would be 12
     With summer to be 14 and winter to be 10
     '''
-    return 12 + 2 * jnp.sin(time * jnp.pi / 180)
+    return day_length + day_length / 6 * jnp.sin(time * jnp.pi / 180)
 
 def get_day_light_strength(
+    light_initial_strength: int,
     time: int
 ) -> float:
     '''
@@ -38,7 +40,7 @@ def get_day_light_strength(
     We also model this into a triangular function, where the average day_light_strength would be 1
     With summer to be 1.2 and winter to be 0.8
     '''
-    return 1 + 0.2 * jnp.sin(time * jnp.pi / 180)
+    return light_initial_strength + light_initial_strength / 5 * jnp.sin(time * jnp.pi / 180)
 
 def simulate_full_climate(
     terrain: jnp.ndarray,
@@ -60,7 +62,9 @@ def simulate_full_climate(
     night_effect: float, 
     water_effect: float, 
     rain_effect: float, 
-    evaporation_effect: float
+    evaporation_effect: float,
+    day_length: int,
+    light_initial_strength: int
 ) -> jnp.ndarray:
     '''
     Simulate the light and temperature change in one full weather day
@@ -86,13 +90,13 @@ def simulate_full_climate(
         current_erosion = reset_erosion_status(new_terrain, terrain, current_erosion)
 
         # 3. light
-        light_strength = get_day_light_strength(current_time)
-        light_length = get_day_light_length(current_time)
-        new_day_status = get_day_status(light_length, current_time)
-        new_light_intensity = light_step(terrain, water, light_strength, light_length, current_time, night_effect) #Porblem of getting None
+        light_strength = get_day_light_strength(light_initial_strength, current_time)
+        light_length = get_day_light_length(day_length, current_time)
+        new_day_status = get_day_status(time, light_length, current_time)
+        new_light_intensity = light_step(light_length, terrain, water, light_strength, light_length, current_time, night_effect) #Porblem of getting None
 
         # 4. Temperature
-        new_temperature = temperature_step(current_time, water, current_temperature, rain_status, light_intensity, current_evaporation, light_length, night_effect, water_effect, rain_effect, evaporation_effect)
+        new_temperature = temperature_step(light_length, current_time, water, current_temperature, rain_status, light_intensity, current_evaporation, light_length, night_effect, water_effect, rain_effect, evaporation_effect)
         
         # 5. Humidity
         new_water, new_evaporation, rain_status = weather_step(
@@ -131,16 +135,19 @@ if __name__ == '__main__':
     rain = 0.08
     erosion_endurance = 0.05
     erosion_ratio = 0.01
-    night_effect = 0.35 # Under this, the temperature system doesn't seem to explode
-    water_effect = 0.5
-    rain_effect = 0.1 
-    evaporation_effect = 0.5
+    night_effect = 0.25 # Under this, the temperature system doesn't seem to explode
+    water_effect = 0.25
+    rain_effect = 0.05
+    evaporation_effect = 0.05
+    day_length = 240
+    light_initial_strength = 1
 
     final_terrain, final_water, left_evaporation, final_rain_status, final_erosion, final_day_status, final_light_intensity, final_temperature = simulate_full_climate(
         terrain, water, temperature_initial, time, 
         erosion_initial, rain_initial, evaporation_initial, day_status_initial, light_intensity_initial,  
         evaporate_rate, air_up_limit, air_down_limit, rain,
-        flow_rate, erosion_ratio, erosion_endurance, night_effect, water_effect, rain_effect, evaporation_effect
+        flow_rate, erosion_ratio, erosion_endurance, night_effect, water_effect, rain_effect, evaporation_effect,
+        day_length, light_initial_strength
     )
     total_water = final_water + left_evaporation
     print(terrain.sum()) # -349.00833

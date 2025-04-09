@@ -1,4 +1,4 @@
-from geology import fractal_noise
+from dirt.gridworld2d.geology import fractal_noise
 import jax.random as jrng
 import jax.numpy as jnp
 import jax
