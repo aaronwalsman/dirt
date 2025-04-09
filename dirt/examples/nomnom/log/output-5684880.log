@@ -1,0 +1,8 @@
+Epoch: 0
+Traceback (most recent call last):
+  File "/n/holylfs06/LABS/sham_lab/Users/chloe00/dirt/dirt/examples/nomnom/train_nomnom.py", line 207, in <module>
+    train(key, params)
+  File "/n/holylfs06/LABS/sham_lab/Users/chloe00/dirt/dirt/examples/nomnom/train_nomnom.py", line 150, in train
+    epoch_key, train_state, active_players, logging_info)
+                            ^^^^^^^^^^^^^^
+UnboundLocalError: cannot access local variable 'active_players' where it is not associated with a value

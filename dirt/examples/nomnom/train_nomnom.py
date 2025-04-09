@@ -41,8 +41,7 @@ class NomNomTrainParams:
     )
     epochs : int = 100
     steps_per_epoch : int = 1000
-    #output_directory : str = '/n/holylfs06/LABS/kempner_fellow_awalsman/Lab/Development'
-    output_directory : str = '.'
+    output_directory : str = '/n/holylfs06/LABS/kempner_fellow_awalsman/Lab/chloe00/linear_model'
     load_from_file : Optional[str] = None
 
 @static_dataclass
@@ -190,8 +189,8 @@ if __name__ == '__main__':
     params = NomNomTrainParams(
         env_params=env_params,
         train_params=train_params,
-        epochs=32,
-        steps_per_epoch=256,
+        epochs=830,
+        steps_per_epoch=2048,
     )
     
     # update these defaults with commandline arguments
@@ -200,4 +199,6 @@ if __name__ == '__main__':
     args = parser.parse_args()
     params = params.update_from_commandline(args)
     
+    start = time.time()
     train(key, params)
+    print(time.time() - start)

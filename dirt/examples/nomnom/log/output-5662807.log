@@ -1,0 +1,9 @@
+Traceback (most recent call last):
+  File "/n/holylfs06/LABS/sham_lab/Users/chloe00/dirt/dirt/examples/nomnom/train_nomnom.py", line 203, in <module>
+    train(key, params)
+  File "/n/holylfs06/LABS/sham_lab/Users/chloe00/dirt/dirt/examples/nomnom/train_nomnom.py", line 123, in train
+    save_leaf_data(
+  File "/n/holylfs06/LABS/sham_lab/Users/chloe00/mechagogue/mechagogue/serial.py", line 60, in save_leaf_data
+    with open(destination, 'wb') as f:
+         ^^^^^^^^^^^^^^^^^^^^^^^
+PermissionError: [Errno 13] Permission denied: '/n/holylfs06/LABS/kempner_fellow_awalsman/Lab/Development/train_params.state'

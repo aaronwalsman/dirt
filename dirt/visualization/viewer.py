@@ -43,7 +43,7 @@ class Viewer:
         window_height=512,
         step_0 = 0,
         start_step=0,
-        terrain_texture_size=(512,512),
+        terrain_texture_multiple=1,
         get_active_players=default_get_active_players,
         get_player_x=default_get_player_x,
         get_player_r=default_get_player_r,
@@ -85,7 +85,7 @@ class Viewer:
         )
         self._init_context_and_window(window_width, window_height)
         self._init_splendor_render()
-        self._init_terrain(terrain_texture_size)
+        self._init_terrain(terrain_texture_multiple)
         self._init_players()
         self._init_camera_and_lights()
         self._init_callbacks()
@@ -134,11 +134,11 @@ class Viewer:
             [ 0, 0, 0, 1],
         ])
     
-    def _init_terrain(self, texture_size):
-        self.terrain_texture_size=texture_size
+    def _init_terrain(self, texture_multiple):
         self.terrain_map = self.get_terrain_map(self.params, self.report)
         h, w = self.terrain_map.shape
         self.world_size = (h,w)
+        self.terrain_texture_size = h * texture_multiple, w * texture_multiple
         
         vertices, normals, uvs, faces = make_height_map_mesh(self.terrain_map)
         self.renderer.load_mesh(
@@ -154,13 +154,18 @@ class Viewer:
         
         self.renderer.load_texture(
             name='terrain_texture',
-            texture_data=np.full((texture_size + (3,)), 127, dtype=np.uint8),
+            texture_data=np.full(
+                (self.terrain_texture_size + (3,)),
+                127,
+                dtype=np.uint8,
+            ),
         )
         
         self.renderer.load_material(
             name='terrain_material',
             #flat_color=(0.5,0.5,0.5),
             texture_name='terrain_texture',
+            rough=1.,
         )
         
         self.renderer.add_instance(
@@ -283,6 +288,8 @@ class Viewer:
             self.renderer.load_material(
                 name=material_name,
                 flat_color=(0,0,0),
+                rough=1.,
+                metal=0.,
             )
         
             player_name = f'player_{player_id}'
@@ -341,7 +348,7 @@ class Viewer:
         s = np.sin(np.radians(-45.))
         d = max(self.world_size)
         camera_pose = np.array([
-            [1, 0, 0, 0],
+            [1, 0, 0, -0.5],
             [0, c,-s, d],
             [0, s, c, d],
             [0, 0, 0, 1],
@@ -351,6 +358,7 @@ class Viewer:
         
         self.camera_control = InteractiveCameraGLFW(self.window, self.renderer)
         
+        '''
         self.renderer.load_cubemap(
             'grey_cube_dif',
             cubemap_asset='grey_cube_dif',
@@ -366,8 +374,15 @@ class Viewer:
             render_background=False,
         )
         self.renderer.set_active_image_light('background')
+        '''
+        self.renderer.add_direction_light(
+            'sun', (0,-1,0), (2,2,2))
         
-        self.renderer.set_ambient_color((0.2, 0.2, 0.2))
+        self.renderer.set_ambient_color((0.5, 0.5, 0.5))
+        self.renderer.set_background_color(
+            #(106./255., 223/255., 255./255.),
+            (164./255., 236./255., 255./255.),
+        )
         
     def _init_callbacks(self):
         self._shift_down = False

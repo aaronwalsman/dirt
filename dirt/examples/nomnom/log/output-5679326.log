@@ -1,0 +1,5 @@
+Traceback (most recent call last):
+  File "/n/holylfs06/LABS/sham_lab/Users/chloe00/dirt/dirt/examples/nomnom/train_nomnom.py", line 205, in <module>
+    params = params.update_from_commandline(args)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'NomNomTrainParams' object has no attribute 'update_from_commandline'
