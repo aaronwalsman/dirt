@@ -13,10 +13,10 @@ Outside of the day!
 We won't make a clear cut between the four seasons to match the real life better,
 but make season an interpretation for the temperature change, modeled by:
 
-T = Light Strength(LS) + Light Time(LT) (+ \epsilon)
+T = Light Strength(LS) + Light Time(LT) (+ epsilon)
 
 where the LS and LT are determined by the Earth's orbital revolution, and LT is also determined by the rain status of the region
-\epsilon is the perturbation to capture some unexplained weather phenomena
+epsilon is the perturbation to capture some unexplained weather phenomena
 
 One round roughly consists of 360 days
 '''
@@ -29,7 +29,7 @@ def get_day_light_length(
     Modeled as a triangular function, where the average day_light_length would be 12
     With summer to be 14 and winter to be 10
     '''
-    return day_length + day_length / 6 * jnp.sin(time * jnp.pi / 180)
+    return day_length / 2 + day_length / 6 * jnp.sin(time * jnp.pi / 180)
 
 def get_day_light_strength(
     light_initial_strength: int,

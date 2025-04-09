@@ -109,15 +109,14 @@ def absorb_temp(
     rain_effect, 
     evaporation_effect
 ) -> jnp.ndarray:
-    
     '''
     Absorb temperature in the daylight
 
     Here we assume that the difference in terrain height won't affect the light intensity so much
 
-    water_effetct: larger value means weaker effects, [0, \infty]
+    water_effetct: larger value means weaker effects, >0
     rain_effect: larger value means weaker effects, [0, 1]
-    evaporation_effect : larger value means weaker effects, [0, \infty]
+    evaporation_effect : larger value means weaker effects, >0
     '''
     water_norm = get_normalize(water)
     current_evaporation_norm = get_normalize(current_evaporation)
@@ -247,7 +246,7 @@ if __name__ == '__main__':
     rain = 0.08
     erosion_endurance = 0.05
     erosion_ratio = 0.01
-    night_effect = 0.8 # Under this, the temperature system doesn't seem to explode
+    night_effect = 0.5 # Under this, the temperature system doesn't seem to explode
     water_effect = 0.5
     rain_effect = 0.1 
     evaporation_effect = 0.5
@@ -268,6 +267,7 @@ if __name__ == '__main__':
     print(water.sum()) # 32768.0
     print(total_water.sum()) # 32767.992
     print(final_terrain == terrain) # Erosion happening with this paramter
+    print(jnp.mean(final_temperature))
 
     import matplotlib.pyplot as plt
     plt.figure(figsize=(18, 6))

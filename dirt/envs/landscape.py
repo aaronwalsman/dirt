@@ -56,12 +56,12 @@ class LandscapeParams:
     air_initial_smell: float = 0.
 
     # light
-    light_initial_strength: float = 1
-    night_effect: float = 0.35
+    light_initial_strength: float = 0.5
+    night_effect: float = 0.23
 
     # temperature
     water_effect: float  = 0.25
-    rain_effect: float = 0.05
+    rain_effect: float = 0.1
     evaporation_effect: float = 0.05
     
     # climate
@@ -258,11 +258,11 @@ def landscape(
                 light_strength,
                 light_length,
                 day,
-                night_effect = params.night_effect
+                params.night_effect
             )
 
             # Temperature changed based on light and rain
-            air_temperature = temperature_step(
+            new_air_temperature = temperature_step(
                 day_length, 
                 day, 
                 water, 
@@ -271,16 +271,16 @@ def landscape(
                 light_intensity, 
                 air_moisture,
                 light_length, 
-                night_effect = params.night_effect, 
-                water_effect=params.water_effect, 
-                rain_effect=params.rain_effect, 
-                evaporation_effect=params.evaporation_effect
+                params.night_effect, 
+                params.water_effect, 
+                params.rain_effect, 
+                params.evaporation_effect
             )
 
             # Evaporate and rain based on temperature and air moisture
             water, air_moisture, rain_status = weather_step(
                 water, 
-                air_temperature, 
+                new_air_temperature, 
                 air_moisture, 
                 rain_status, 
                 params.evaporation_rate, 
@@ -294,7 +294,7 @@ def landscape(
                 erosion,
                 water,
                 wind_velocity,
-                air_temperature,
+                new_air_temperature,
                 air_moisture,
                 light_intensity,
                 air_smell,
@@ -337,12 +337,12 @@ if __name__ == "__main__":
     key = jax.random.PRNGKey(1234)
     state = init(key)
     action = LandscapeAction()
-    for i in range(300):
+    for i in range(2000):
         key, subkey = jax.random.split(key)
         state = step_fn(subkey, action, state)
         if i % 20 == 0:
             # inspect
-            print(f"\n--- Day {state.day} ---")
+            print(f"\n--- Step {state.day} ---")
             print("Day Status:", state.day_status)
             print("Wind velocity:", state.wind_velocity)
             print("Air temperature (mean):", jnp.mean(state.air_temperature))
