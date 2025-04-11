@@ -17,29 +17,35 @@ from mechagogue.breed.normal import normal_mutate
 
 from mechagogue.tree import tree_getitem
 
+from dirt.constants import DEFAULT_FLOAT_DTYPE
 from dirt.envs.tera_arium import (
-    TeraAriumParams, TeraAriumAction, TeraAriumTraits, tera_arium)
+    TeraAriumParams,
+    TeraAriumAction,
+    TeraAriumTraits,
+    render_tera_arium,
+    tera_arium,
+)
 from dirt.visualization.viewer import Viewer
 
 @commandline_interface
 @static_dataclass
 class TrainParams:
     seed : int = 1234
-    initial_players : int = 32
-    max_players : int = 256
+    initial_players : int = 1024
+    max_players : int = 2048
     output_directory : str = '.'
     load_state : str = ''
     visualize : bool = False
     vis_width : int = 1024
     vis_height : int = 1024
     env_params : Any = TeraAriumParams(
-        world_size=(32,32),
+        world_size=(256,256),
     )
     train_params : Any = NaturalSelectionParams(
         max_population=max_players,
     )
     runner_params : Any = EpochRunnerParams(
-        epochs=100,
+        epochs=4,
         steps_per_epoch=1000,
         save_state=True,
         save_reports=True,
@@ -47,16 +53,33 @@ class TrainParams:
 
 @static_dataclass
 class TrainReport:
-    terrain : jnp.ndarray
-    water : jnp.ndarray
-
+    terrain : jnp.ndarray = False
+    water : jnp.ndarray = False
+    energy : jnp.ndarray = False
+    biomass : jnp.ndarray = False
+    light : jnp.ndarray = False
+    
+    players : jnp.ndarray = False
+    player_x : jnp.ndarray = False
+    player_r : jnp.ndarray = False
+    
 def make_reporter(params):
     def make_report(
         state, players, parents, children, actions, traits, adaptations
     ):
+        
+        #jax.debug.print('x {x}', x=state.env_state.bugs.x[:8])
+        
         return TrainReport(
             terrain=state.env_state.landscape.terrain,
             water=state.env_state.landscape.water,
+            energy=state.env_state.landscape.energy,
+            biomass=state.env_state.landscape.biomass,
+            light=state.env_state.landscape.air_light,
+            players=players,
+            player_x=state.env_state.bugs.x,
+            player_r=state.env_state.bugs.r,
+            
         )
     
     return make_report
@@ -78,12 +101,20 @@ def terrain_texture(report, texture_size):
     ry = th//h
     rx = tw//w
    
-    #texture = food_grid.astype(jnp.uint8) * 128 + 127
-    texture = jnp.full((h, w), 127, dtype=jnp.uint8)
-    texture = jnp.repeat(texture, ry, axis=0)
-    texture = jnp.repeat(texture, rx, axis=1)
-    texture = jnp.repeat(texture[:,:,None], 3, axis=2)
-    return np.array(texture)
+    #texture = jnp.full((h, w), 127, dtype=jnp.uint8)
+    #texture = jnp.repeat(texture, ry, axis=0)
+    #texture = jnp.repeat(texture, rx, axis=1)
+    #texture = jnp.repeat(texture[:,:,None], 3, axis=2)
+    texture = render_tera_arium(
+        report.water,
+        report.energy,
+        report.biomass,
+        jnp.zeros((0,2), dtype=jnp.int32),
+        jnp.zeros((0,3), dtype=jnp.int32),
+        report.light,
+    )
+    print('MAX LIGHT:', jnp.max(report.light))
+    return np.array((texture * 255).astype(jnp.uint8))
 
 def get_player_energy(params, report):
     return 1. #report.player_energy / params.env_params.max_energy
@@ -111,7 +142,9 @@ if __name__ == '__main__':
             report_paths,
             window_width=params.vis_width,
             window_height=params.vis_height,
-            get_player_energy=get_player_energy,
+            get_player_energy=None,
+            get_terrain_map=lambda report : report.terrain + report.water,
+            #get_water_map=lambda report : report.water,
             get_terrain_texture=terrain_texture,
         )
         viewer.begin()
@@ -137,6 +170,11 @@ if __name__ == '__main__':
         model_traits = lambda state : TeraAriumTraits(
             body_size = jnp.ones(state.shape[0]),
             brain_size = jnp.ones(state.shape[0]),
+            base_color = jnp.full(
+                (state.shape[0], 3),
+                jnp.array([1.,0.,0.], dtype=DEFAULT_FLOAT_DTYPE),
+                dtype=DEFAULT_FLOAT_DTYPE
+            ),
             photosynthesis = jnp.ones(state.shape[0]),
         )
         def model(key):

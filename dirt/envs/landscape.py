@@ -6,21 +6,30 @@ import chex
 
 from typing import Tuple, Optional, TypeVar, Any, Union
 
-from dirt.defaults import DEFAULT_FLOAT_DTYPE
+from dirt.constants import (
+    DEFAULT_FLOAT_DTYPE,
+    ROCK_COLOR,
+    WATER_COLOR,
+    ENERGY_TINT,
+    BIOMASS_TINT,
+)
 from dirt.gridworld2d.gas import step as gas_step
 from dirt.distribution.ou import ou_process
 from dirt.gridworld2d.geology import fractal_noise
 from dirt.gridworld2d.erosion import simulate_erosion_step, reset_erosion_status
 from dirt.gridworld2d.water import flow_step, flow_step_twodir
 from dirt.gridworld2d.naive_weather_system import weather_step
-from dirt.gridworld2d.climate_pattern_day import temperature_step, light_step, get_day_status
-from dirt.gridworld2d.climate_pattern_year import get_day_light_length, get_day_light_strength
+from dirt.gridworld2d.climate_pattern_day import (
+    temperature_step, light_step, get_day_status)
+from dirt.gridworld2d.climate_pattern_year import (
+    get_day_light_length, get_day_light_strength)
 from dirt.consumable import Consumable
 
 from mechagogue.static_dataclass import static_dataclass
 
 TLandscapeParams = TypeVar('TLandscapeParams', bound='LandscapeParams')
 TLandscapeState = TypeVar('TLandscapeState', bound='LandscapeState')
+TLandscapeObservation = TypeVar('TLandscapeObservation', bound='LandscapeObservation')
 
 @static_dataclass
 class LandscapeParams:
@@ -33,7 +42,7 @@ class LandscapeParams:
     terrain_max_octaves : Optional[int] = None
     terrain_lacunarity : float = 2.
     terrain_persistence : float = 0.5
-    terrain_unit_scale : float = 0.05
+    terrain_unit_scale : float = 0.005
     terrain_max_height : float = 50.
     
     # water
@@ -42,7 +51,7 @@ class LandscapeParams:
     water_flow_rate : float = 0.01
     air_moisture_diffusion : float = 1./3.
 
-    # Rain
+    # rain
     rain_moisture_up_threshold : float = 0.8
     rain_moisture_down_threshold: float = 0.4
     rain_amount: float = 0.32
@@ -87,15 +96,38 @@ class LandscapeState:
     energy : jnp.array
     biomass : jnp.array
 
+'''
+def render_landscape(state):
+    
+    h, w = state.water.shape
+    
+    # start with a baseline rock color of 50% gray
+    rgb = jnp.full((h,w,3), ROCK_COLOR, dtype=float_dtype)
+    
+    # overlay the water as blue
+    rgb = jnp.where(state.water > 0.05, WATER_COLOR, rgb)
+    
+    # apply the energy tint
+    clipped_energy = jnp.clip(state.energy, min=0., max=1.)
+    rgb = rgb + clipped_energy * energy_tint
+    
+    # apply the biomass tint
+    clipped_biomass = jnp.clip(state.biomas, min=0., max=1.)
+    rgb = rgb + clipped_biomass * BIOMASS_TINT
+    
+    return rgb * state.air_light
+'''
+
 def landscape(
     params : TLandscapeParams = LandscapeParams(),
-    dtype : Any = DEFAULT_FLOAT_DTYPE,
+    float_dtype : Any = DEFAULT_FLOAT_DTYPE,
 ):
     
     init_wind_velocity, step_wind_velocity = ou_process(
         params.wind_std,
         params.wind_reversion,
-        jnp.zeros((2,), dtype=dtype),
+        jnp.zeros((2,), dtype=float_dtype),
+        dtype=float_dtype,
     )
     
     def init(
@@ -114,16 +146,16 @@ def landscape(
             params.terrain_max_octaves,
             params.terrain_unit_scale,
             params.terrain_max_height,
-            dtype=dtype,
+            dtype=float_dtype,
         )
         
         # erosion
         # - initialize erosion to be zero everywhere
-        erosion = jnp.zeros(params.world_size, dtype=dtype)
+        erosion = jnp.zeros(params.world_size, dtype=float_dtype)
         
         # water
         # - start with zero water everywhere
-        water = jnp.zeros(params.world_size, dtype=dtype)
+        water = jnp.zeros(params.world_size, dtype=float_dtype)
         
         # - compute the total water we want distributed over the entire grid
         total_water = (
@@ -142,7 +174,7 @@ def landscape(
             water_level += params.water_initial_fill_rate # Suppose Fix
             water = water_level - terrain
             water = jnp.where(water < 0., 0., water)
-            water = water.astype(jnp.bfloat16)
+            water = water.astype(float_dtype)
             return (water, water_level)
         
         water, water_level = jax.lax.while_loop(
@@ -156,16 +188,19 @@ def landscape(
         key, wind_key = jrng.split(key)
         wind_velocity = init_wind_velocity(wind_key)
         air_temperature = jnp.full(
-            params.world_size, params.air_initial_temperature, dtype=dtype)
-        air_moisture = jnp.zeros(params.world_size, dtype=dtype)
-        air_light = jnp.zeros(params.world_size, dtype=dtype)
-        air_smell = jnp.zeros(params.world_size, dtype=dtype)
+            params.world_size,
+            params.air_initial_temperature,
+            dtype=float_dtype,
+        )
+        air_moisture = jnp.zeros(params.world_size, dtype=float_dtype)
+        air_light = jnp.zeros(params.world_size, dtype=float_dtype)
+        air_smell = jnp.zeros(params.world_size, dtype=float_dtype)
         air_smell = air_smell[...,None]
-        rain_status = jnp.zeros(params.world_size, dtype=dtype)
+        rain_status = jnp.zeros(params.world_size, dtype=float_dtype)
         day = params.day_initial
         
-        energy = jnp.zeros(params.world_size, dtype=dtype)
-        biomass = jnp.zeros(params.world_size, dtype=dtype)
+        energy = jnp.zeros(params.world_size, dtype=float_dtype)
+        biomass = jnp.zeros(params.world_size, dtype=float_dtype)
         
         return LandscapeState(
             terrain,
@@ -196,6 +231,84 @@ def landscape(
         energy = state.energy.at[y, x].set(consumable.energy)
         biomass = state.biomass.at[y, x].set(consumable.biomass)
         return state.replace(water=water, energy=energy, biomass=biomass)
+    
+    '''
+    def _render_first_person_rgb(
+        state,
+        x,
+        r,
+        view_width,
+        view_distance,
+        view_back_distance=0,
+        subsample=1,
+    ):
+        rgb_grid = render_rgb(state)
+        return first_person_view(
+            x,
+            r,
+            rgb_grid,
+            view_width,
+            view_distance,
+            view_back_distance=view_back_distance,
+            subsample=subsample,
+        )
+    
+    def _render_first_person_height(
+        state,
+        x,
+        r,
+        view_width,
+        view_distance,
+        view_back_distance=0,
+        subsample=1,
+    ):
+        total_height = state.terrain + state.water
+        baseline_height = total_height[x[...,0], x[...,1]]
+        first_person_height = first_person_view(
+            x,
+            r,
+            total_height,
+            view_width,
+            view_distance,
+            view_back_distance=view_back_distance,
+            subsample=subsample,
+        )
+        relative_height = first_person_height - baseline_height[:,None,None]
+        return relative_height
+    
+    def observe(
+        state,
+        x,
+        r,
+        view_width,
+        view_distance,
+        view_back_distance=0,
+        subsample=1,
+    ):
+        rgb = _render_first_person_rgb(
+            state,
+            x,
+            r,
+            view_width,
+            view_distance,
+            view_back_distance=view_back_distance,
+            subsample=subsample,
+        )
+        height = _render_first_person_height(
+            state,
+            x,
+            r,
+            view_width,
+            view_distance,
+            view_back_distance=view_back_distance,
+            subsample=subsample,
+        )
+        ground_water = state.water[x[...,0], x[...,1]]
+        ground_energy = state.energy[x[...,0], x[...,1]]
+        ground_biomass = state.energy[x[...,0], x[...,1]]
+        return LandscapeObservation(
+            rgb, height, ground_water, ground_energy, ground_biomass)
+    '''
     
     step_functions = []
     for step_size in params.step_sizes:
@@ -230,13 +343,14 @@ def landscape(
             
             # - diffuse and move the air smell
             diffusion_std = params.air_moisture_diffusion * (step_size**0.5)
-            air_smell = gas_step(
-                air_smell, diffusion_std, 1., wind_velocity, 1)
+            
+            # TODO: Concretization problem... need to configure the
+            # kernel and not have it dynamically shaped
+            #air_smell = gas_step(
+            #    air_smell, diffusion_std, 1., wind_velocity, 1)
             
             # move water
             water = flow_step(terrain, water, params.water_flow_rate)
-            # water = flow_step_twodir(terrain, water, params.water_flow_rate)
-
 
             # erode based on water flow
             old_terrain = terrain
@@ -260,8 +374,8 @@ def landscape(
                 day, 
                 params.night_effect
             )
-
-            # Temperature changed based on light and rain
+            
+            # temperature changed based on light and rain
             air_temperature = temperature_step(
                 light_length, 
                 day, 
@@ -277,7 +391,7 @@ def landscape(
                 params.evaporation_effect
             )
 
-            # Evaporate and rain based on temperature and air moisture
+            # evaporate and rain based on temperature and air moisture
             water, air_moisture, rain_status = weather_step(
                 water, 
                 air_temperature, 
@@ -289,42 +403,20 @@ def landscape(
                 params.rain_amount
             )
 
-            new_state = LandscapeState(
-                terrain,
-                erosion,
-                water,
-                wind_velocity,
-                air_temperature,
-                air_moisture,
-                light_intensity,
-                air_smell,
-                rain_status,
-                day,
+            next_state = state.replace(
+                terrain=terrain,
+                erosion=erosion,
+                water=water,
+                wind_velocity=wind_velocity,
+                air_temperature=air_temperature,
+                air_moisture=air_moisture,
+                air_light=light_intensity,
+                air_smell=air_smell,
+                rain_status=rain_status,
+                day=day,
             )
-
-            return new_state
-        
-
-            # # move water
-            # # - evaporate
-            # #   TODO: incorporate temperature?
-            # evaporation = jnp.minimum(
-            #     water, params.evaporation_rate * action.step_size)
-            # water = water - evaporation
-            # air_moisture = air_moisture + evaporation
             
-            # # - rain
-            # #   TODO: incorporate temperature?
-            # rain = air_moisture >= params.rain_moisture_threshold
-            # water = water + jnp.where(rain, water + air_moisture, water)
-            # air_moisture = jnp.where(rain, 0, air_moisture)
-            
-            # - flow
-            #   TODO: iterate if water_flow_rate * step_size is too large
-
-            # terrain, water = water_erosion_step(
-            #     terrain, water, params.water_flow_rate * step_size)       
-            
+            return next_state
         
         step_functions.append(step)
     

@@ -1,5 +1,6 @@
 from typing import TypeVar, Tuple, Any
 
+import jax
 import jax.numpy as jnp
 import jax.random as jrng
 
@@ -8,7 +9,8 @@ import chex
 from mechagogue.static_dataclass import static_dataclass
 from mechagogue.player_list import birthday_player_list, player_family_tree
 
-from dirt.defaults import DEFAULT_FLOAT_DTYPE
+from dirt.constants import (
+    DEFAULT_FLOAT_DTYPE, DEFAULT_BUG_COLOR, PHOTOSYNTHESIS_COLOR)
 import dirt.gridworld2d.dynamics as dynamics
 import dirt.gridworld2d.spawn as spawn
 from dirt.consumable import Consumable
@@ -35,6 +37,8 @@ class BugTraits:
     body_size : jnp.ndarray
     brain_size : jnp.ndarray
     
+    base_color : jnp.ndarray
+       
     photosynthesis : jnp.ndarray
     
     #speed : jnp.ndarray
@@ -58,46 +62,13 @@ class BugState:
     
     # resources
     health : jnp.ndarray
-    consumed : Consumable
+    stomach : Consumable
+    
+    # color
+    color : jnp.ndarray
     
     # tracking
     family_tree : Any
-
-'''
-resources:
-health:
-    expended = somebody_bit_me
-    gained = trade energy
-
-energy is expended every step:
-    expended = ambient + movement + healing + birth
-    gained = eaten + photosynthesized
-
-biomass is retained forever:
-    expended = birth
-    gained = eaten
-
-water evaporates every step:
-    expended = ambient + movement + healing + birth
-    gained = eaten
-
-traits:
-photosynthesis:
-    gain small ammount of energy from light
-    but requires more biomass
-size:
-    requires more biomass
-    but better armor and biting and photosynthesis gets you more
-speed:
-    able to move faster
-    but requires more biomass and more energy per step
-armor:
-    resistant to biting
-    but requires more biomass and makes you slower
-teeth:
-    better biting
-    but requires more biomass
-'''
 
 def bugs(
     params : TBugParams = BugParams(),
@@ -124,27 +95,31 @@ def bugs(
             active=active_players,
         )
         
-        player_grid = jnp.zeros(params.world_size, dtype=jnp.int32)
-        player_grid = player_grid.at[x[...,0], x[...,1]].set(
+        object_grid = jnp.full(params.world_size, -1, dtype=jnp.int32)
+        object_grid = object_grid.at[x[...,0], x[...,1]].set(
             jnp.arange(params.max_players))
         
-        age = jnp.zeros((params.max_players,), dtype=float_dtype)
+        age = jnp.zeros((params.max_players,), dtype=jnp.int32)
         
         health = active_players.astype(float_dtype)
         energy = active_players.astype(float_dtype)
         biomass = active_players.astype(float_dtype)
         water = active_players.astype(float_dtype)
-        consumed = Consumable(energy, biomass, water)
+        stomach = Consumable(energy, biomass, water)
+        
+        n = active_players.shape[0]
+        color = jnp.full((n, 3), DEFAULT_BUG_COLOR)
         
         return BugState(
             x,
             r,
-            player_grid,
+            object_grid,
             age,
             
             health,
+            stomach,
             
-            consumed,
+            color,
             
             family_tree,
         )
@@ -153,6 +128,7 @@ def bugs(
         state : TBugState,
         action : TBugAction,
     ):
+        
         active_bugs = active_family_tree(state.family_tree)
         x, r, _, object_grid = dynamics.forward_rotate_step(
             state.x,
@@ -208,44 +184,31 @@ def bugs(
         uphill = jnp.where(dy > 0., dy, 0.)
         energy_offset -= uphill * volume * params.base_climb_metabolism
         
-        resources = next_state.consumed
+        next_stomach = next_state.stomach
         
         # update the energy
-        next_energy = resources.energy + energy_offset
+        next_energy = next_stomach.energy + energy_offset
         next_energy_clipped = jnp.where(next_energy < 0., next_energy, 0.)
         
         # damage due to running out of energy
         health_offset = jnp.where(next_energy < 0., next_energy, 0.)
         next_health = next_state.health + health_offset
         
-        resources = resources.replace(energy=next_energy_clipped)
+        next_stomach = next_stomach.replace(energy=next_energy_clipped)
+        
+        # color
+        color = (
+            traits.base_color * (1. - traits.photosynthesis[:,None]) + 
+            PHOTOSYNTHESIS_COLOR * (traits.photosynthesis[:,None])
+        )
         
         next_state = next_state.replace(
-            consumed=resources,
+            stomach=next_stomach,
             health=next_health,
+            color=color,
         )
         
         return next_state
-    
-    '''
-    def transition(
-        key : chex.PRNGKey,
-        state : TBugState,
-        action : TBugAction,
-        traits : TBugTraits,
-    ):
-        # update the traits
-        state = state.update(traits=traits)
-        
-        # get active players
-        
-        # move
-        
-        # age
-        state = state.update(age=(state.age + active_players) * active_players)
-        
-        # eat
-    '''
         
     def active_players(
         state : TBugState,

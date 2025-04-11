@@ -9,6 +9,7 @@ def local_view(
     r : jnp.ndarray,
     observation_grid : jnp.ndarray,
     view_shape : Tuple[Tuple[int, int], Tuple[int, int]],
+    subsample : int = 1,
     out_of_bounds : int | float | jnp.ndarray = 0,
 ) -> jnp.ndarray :
     '''
@@ -17,18 +18,19 @@ def local_view(
     x : the position of each view window
     r : the orientation of each view window
     observation_grid : the larger grid from which the views should be extracted
-    view_shape : ((min0, min1), (max0, max1)) two corners of a bounding box
+    view_shape : ((min_0, min_1), (max_0, max_1)) two corners of a bounding box
         describing the region to be extracted
+    subsample : downscale the sampled data
     out_of_bounds : the value that should be inserted in any view that falls
         outside the viewing area
     '''
     # construct the local rows and columns
-    (min0, min1), (max0, max1) = view_shape
-    sign0 = [1,-1][max0-min0 < 0]
-    sign1 = [1,-1][max1-min1 < 0]
+    (min_0, min_1), (max_0, max_1) = view_shape
+    step_size_0 = [subsample,-subsample][max_0-min_0 < 0]
+    step_size_1 = [subsample,-subsample][max_1-min_1 < 0]
     rc = jnp.stack(jnp.meshgrid(
-        jnp.arange(min0, max0, sign0),
-        jnp.arange(min1, max1, sign1),
+        jnp.arange(min_0, max_0, step_size_0),
+        jnp.arange(min_1, max_1, step_size_1),
         indexing='ij',
     ), axis=-1)
     
@@ -55,6 +57,7 @@ def first_person_view(
     view_width : int,
     view_distance : int,
     view_back_distance : int = 0,
+    subsample : int = 1,
     out_of_bounds : int | float | jnp.ndarray = 0,
 ) -> jnp.ndarray :
     '''
@@ -74,7 +77,13 @@ def first_person_view(
     w = (view_width-1)//2
     view_shape = ((-view_back_distance,-w), (view_distance,w+1))
     return local_view(
-        x, r, observation_grid, view_shape, out_of_bounds=out_of_bounds)
+        x,
+        r,
+        observation_grid,
+        view_shape,
+        subsample=subsample,
+        out_of_bounds=out_of_bounds,
+    )
 
 if __name__ == '__main__':
     observation_grid = jnp.arange(5*5).reshape(5,5)

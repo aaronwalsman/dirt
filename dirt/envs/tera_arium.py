@@ -10,8 +10,15 @@ from mechagogue.static_dataclass import static_dataclass
 
 from mechagogue.dp.population_game import population_game
 
+from dirt.constants import (
+    ROCK_COLOR,
+    WATER_COLOR,
+    ENERGY_TINT,
+    BIOMASS_TINT,
+)
 from dirt.envs.landscape import (
     TLandscapeParams,
+    TLandscapeState,
     LandscapeParams,
     LandscapeState,
     landscape,
@@ -26,8 +33,6 @@ from dirt.envs.bug import (
     BugState,
     bugs,
 )
-
-FLOAT_DTYPE = jnp.bfloat16
 
 TTeraAriumParams = TypeVar('TTeraAriumParams', bound='TeraAriumParams')
 TTeraAriumState = TypeVar('TTeraAriumState', bound='TeraAriumState')
@@ -47,7 +52,7 @@ class TeraAriumParams:
 @static_dataclass
 class TeraAriumState:
     
-    landscape : LandscapeState
+    landscape : TLandscapeState
     #height_grid : jnp.array
     #water_grid : jnp.array
     #ground_chemical_grid : jnp.array
@@ -61,11 +66,55 @@ class TeraAriumState:
     #player_chemicals : jnp.ndarray
 
 @static_dataclass
+class TeraAriumObservation:
+    rgb : jnp.ndarray
+    height : jnp.ndarray
+    
+    ground_water : jnp.ndarray
+    ground_energy : jnp.ndarray
+    ground_biomass : jnp.ndarray
+
+@static_dataclass
 class TeraAriumTraits:
     pass
 
 TeraAriumAction = BugAction
 TeraAriumTraits = BugTraits
+
+def render_tera_arium(
+    water,
+    energy,
+    biomass,
+    bug_x,
+    bug_color,
+    light,
+):
+    h, w = water.shape
+
+    # start with a baseline rock color of 50% gray
+    rgb = jnp.full((h,w,3), ROCK_COLOR, dtype=water.dtype)
+
+    # overlay the water as blue
+    rgb = jnp.where(water[..., None] > 0.05, WATER_COLOR, rgb)
+
+    # apply the energy tint
+    clipped_energy = jnp.clip(energy, min=0., max=1.)
+    rgb = rgb + clipped_energy[..., None] * ENERGY_TINT
+
+    # apply the biomass tint
+    clipped_biomass = jnp.clip(biomass, min=0., max=1.)
+    rgb = rgb + clipped_biomass[..., None] * BIOMASS_TINT
+    
+    # overlay the bug colors
+    rgb = rgb.at[bug_x[...,0], bug_x[...,1]].set(bug_color)
+    
+    # apply lighting
+    rgb = rgb * light[..., None]
+    
+    # clip between 0 and 1
+    rgb = jnp.clip(rgb, min=0., max=1.)
+    
+    return rgb
 
 def tera_arium(params : TTeraAriumParams = TeraAriumParams()):
     
@@ -87,7 +136,7 @@ def tera_arium(params : TTeraAriumParams = TeraAriumParams()):
         init_landscape,
         get_landscape_consumable,
         set_landscape_consumable,
-        step_landscape
+        step_landscape,
     ) = landscape(params.landscape)
     #bug_params = params.bugs.replace(
     #    initial_players=params.initial_players,
@@ -176,17 +225,13 @@ def tera_arium(params : TTeraAriumParams = TeraAriumParams()):
         #family_tree, child_locations = step_family_tree(
         #    state.family_tree, deaths, parents)
         
-        # climate
-        pass
+        # landscape
+        key, landscape_key = jrng.split(key)
+        next_landscape_state = step_landscape(
+            landscape_key, next_state.landscape)
+        next_state = next_state.replace(landscape=next_landscape_state)
         
-        # hydrology
-        pass
-        
-        # geology
-        pass
-        
-        # seasons
-        pass
+        next_state = next_state.replace(bugs=next_bug_state)
         
         return next_state
     

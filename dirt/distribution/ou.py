@@ -6,10 +6,13 @@ import chex
 
 from mechagogue.static_dataclass import static_dataclass
 
+from dirt.constants import DEFAULT_FLOAT_DTYPE
+
 def ou_process(
     sigma : jnp.ndarray,
     theta : jnp.ndarray,
     mu : jnp.ndarray,
+    dtype : DEFAULT_FLOAT_DTYPE
 ):
     channels, = mu.shape
     unit_sigma = (2 * theta * sigma**2)**0.5
@@ -17,7 +20,7 @@ def ou_process(
     def init(
         key : chex.PRNGKey,
     ):
-        x = mu + jrng.normal(key, (channels,)) * sigma
+        x = mu + jrng.normal(key, (channels,), dtype=dtype) * sigma
         return x
     
     def step(
@@ -29,7 +32,7 @@ def ou_process(
         step_sigma = unit_sigma * (step_size**0.5)
         
         step_reversion = step_theta * (mu - x)
-        step_noise = jrng.normal(key, (channels,)) * step_sigma
+        step_noise = jrng.normal(key, (channels,), dtype=dtype) * step_sigma
         x = x + step_reversion + step_noise
         
         return x
