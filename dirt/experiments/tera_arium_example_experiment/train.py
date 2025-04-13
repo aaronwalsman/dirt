@@ -1,5 +1,5 @@
 import os
-from typing import Any, Optional
+from typing import Any, Optional, Tuple
 
 import numpy as np
 
@@ -33,6 +33,7 @@ class TrainParams:
     seed : int = 1234
     initial_players : int = 1024
     max_players : int = 2048
+    world_size : Tuple = (256, 256)
     output_directory : str = '.'
     load_state : str = ''
     visualize : bool = False
@@ -63,6 +64,8 @@ class TrainReport:
     player_x : jnp.ndarray = False
     player_r : jnp.ndarray = False
     
+    sun_direction : jnp.ndarray = False
+    
 def make_reporter(params):
     def make_report(
         state, players, parents, children, actions, traits, adaptations
@@ -79,7 +82,7 @@ def make_reporter(params):
             players=players,
             player_x=state.env_state.bugs.x,
             player_r=state.env_state.bugs.r,
-            
+            sun_direction=state.env_state.landscape.sundial.sun_direction,
         )
     
     return make_report
@@ -101,6 +104,8 @@ def terrain_texture(report, texture_size):
     ry = th//h
     rx = tw//w
    
+    print('Sun direction:', report.sun_direction)
+    
     #texture = jnp.full((h, w), 127, dtype=jnp.uint8)
     #texture = jnp.repeat(texture, ry, axis=0)
     #texture = jnp.repeat(texture, rx, axis=1)
@@ -122,7 +127,7 @@ def get_player_energy(params, report):
 if __name__ == '__main__':
 
     # get the parameters from the commandline
-    params = TrainParams().from_commandline()
+    params = TrainParams().from_commandline(skip_overrides=True)
     params = params.override_descendants()
     
     if params.visualize:
@@ -146,6 +151,7 @@ if __name__ == '__main__':
             get_terrain_map=lambda report : report.terrain + report.water,
             #get_water_map=lambda report : report.water,
             get_terrain_texture=terrain_texture,
+            get_sun_direction=lambda report : report.sun_direction,
         )
         viewer.begin()
     

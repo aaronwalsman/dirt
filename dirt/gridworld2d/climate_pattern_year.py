@@ -2,7 +2,11 @@ from dirt.gridworld2d.geology import fractal_noise
 from dirt.gridworld2d.water import flow_step_twodir
 from dirt.gridworld2d.erosion import simulate_erosion_step, reset_erosion_status
 from dirt.gridworld2d.naive_weather_system import weather_step
-from dirt.gridworld2d.climate_pattern_day import temperature_step, light_step, get_day_status
+from dirt.gridworld2d.climate_pattern_day import (
+    temperature_step,
+    light_step,
+    #get_day_status,
+)
 import jax.random as jrng
 import jax.numpy as jnp
 import jax
@@ -21,24 +25,24 @@ where the LS and LT are determined by the Earth's orbital revolution, and LT is 
 One round roughly consists of 360 days
 '''
 
-def get_day_light_length(
-    time: int
-) -> float:
-    '''
-    Modeled as a triangular function, where the average day_light_length would be 12
-    With summer to be 14 and winter to be 10
-    '''
-    return 12 + 2 * jnp.sin(time * jnp.pi / 180)
-
-def get_day_light_strength(
-    time: int
-) -> float:
-    '''
-    Similar to the day light length
-    We also model this into a triangular function, where the average day_light_strength would be 1
-    With summer to be 1.2 and winter to be 0.8
-    '''
-    return 1 + 0.2 * jnp.sin(time * jnp.pi / 180)
+#def get_day_light_length(
+#    time: int
+#) -> float:
+#    '''
+#    Modeled as a triangular function, where the average day_light_length would be 12
+#    With summer to be 14 and winter to be 10
+#    '''
+#    return 12 + 2 * jnp.sin(time * jnp.pi / 180)
+#
+#def get_day_light_strength(
+#    time: int
+#) -> float:
+#    '''
+#    Similar to the day light length
+#    We also model this into a triangular function, where the average day_light_strength would be 1
+#    With summer to be 1.2 and winter to be 0.8
+#    '''
+#    return 1 + 0.2 * jnp.sin(time * jnp.pi / 180)
 
 def simulate_full_climate(
     terrain: jnp.ndarray,

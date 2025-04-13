@@ -53,6 +53,7 @@ class Viewer:
         get_terrain_texture=None,
         get_water_map=None,
         get_player_color=default_get_player_color,
+        get_sun_direction=None,
     ):
         
         self.get_active_players = ignore_unused_args(
@@ -77,6 +78,8 @@ class Viewer:
                 get_water_map, ('params', 'report'))
         self.get_player_color = ignore_unused_args(
             get_player_color, ('player_id', 'params', 'report'))
+        self.get_sun_direction = ignore_unused_args(
+            get_sun_direction, ('params', 'report'))
         
         self._init_params_and_reports(
             example_params,
@@ -88,7 +91,7 @@ class Viewer:
         )
         self._init_context_and_window(window_width, window_height)
         self._init_splendor_render()
-        self._init_terrain(terrain_texture_multiple)
+        self._init_landscape(terrain_texture_multiple)
         self._init_players()
         self._init_camera_and_lights()
         self._init_callbacks()
@@ -137,7 +140,7 @@ class Viewer:
             [ 0, 0, 0, 1],
         ])
     
-    def _init_terrain(self, texture_multiple):
+    def _init_landscape(self, texture_multiple):
         self.terrain_map = self.get_terrain_map(self.params, self.report)
         h, w = self.terrain_map.shape
         self.world_size = (h,w)
@@ -210,6 +213,46 @@ class Viewer:
                 material_name='water_material',
                 transform=self.upright,
             )
+        
+        if self.get_sun_direction is not None:
+            max_size = max(self.world_size)
+            self.renderer.load_mesh(
+                name='sun_mesh',
+                mesh_primitive={
+                    'shape' : 'sphere',
+                    'radius' : max_size * 0.05,
+                },
+                color_mode='flat_color',
+            )
+            self.renderer.load_material(
+                name='sun_material',
+                flat_color=(1,1,1),
+                rough=1.,
+            )
+            self.renderer.add_instance(
+                name='sun',
+                mesh_name='sun_mesh',
+                material_name='sun_material',
+                transform = self.upright,
+            )
+            self._update_sun_position()
+    
+    def _update_sun_position(self):
+        if self.get_sun_direction is not None:
+            sun_direction = self.get_sun_direction(self.params, self.report)
+            max_size = max(self.world_size)
+            sun_transform = np.eye(4)
+            sun_transform[:3,3] = sun_direction * max_size * 1
+            #unclear_offset = jnp.array([
+            #    [ 0, 1, 0, 0],
+            #    [ 1, 0, 0, 0],
+            #    [ 0, 0, 1, 0],
+            #    [ 0, 0, 0, 1],
+            #])
+            sun_transform = sun_transform
+            
+            
+            self.renderer.set_instance_transform('sun', sun_transform)
     
     def _init_players(self):
         active_players = self.get_active_players(self.params, self.report)
@@ -389,6 +432,12 @@ class Viewer:
             [0, s, c, d],
             [0, 0, 0, 1],
         ])
+        camera_pose = np.array([
+            [ 0, 0,-1, 0],
+            [ 0, 1, 0, 0],
+            [ 1, 0, 0, 0],
+            [ 0, 0, 0, 1],
+        ]) @ camera_pose
         
         self.renderer.set_view_matrix(np.linalg.inv(camera_pose))
         
@@ -455,7 +504,7 @@ class Viewer:
         
         #print(self.report)
         
-        self._update_terrain()
+        self._update_landscape()
         #self._update_water()
         self._update_players()
     
@@ -526,7 +575,8 @@ class Viewer:
                     self.renderer.hide_instance(energy_background_name)
                     self.renderer.hide_instance(energy_name)
     
-    def _update_terrain(self):
+    def _update_landscape(self):
+        self._update_sun_position()
         if self.get_terrain_texture is not None:
             texture = self.get_terrain_texture(
                 self.params, self.report, self.terrain_texture_size)

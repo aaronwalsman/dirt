@@ -17,39 +17,39 @@ The season shift will be accomplished in the climate_patter_year.py file
 One day is accomplished of 240 steps, matching the 24 hrs * 10 steps per hour
 '''
 
-def get_day_status(
-    day_length: int,
-    day_light_length: int,
-    time: int
-) -> int:
-    '''
-    Based on the length of day light, determine the status of the day
-
-    day_light_length: [0,240]
-    
-    1: Sun
-    0: Moon
-    '''
-    edge = time % day_length
-    return jnp.where(edge <= day_light_length, 1, 0)
-
-def get_angle(
-    day_length: int,
-    day_light_length: int,
-    time: int
-) -> float:
-    '''
-    Based on the status of the day and the time now, determine the angle of the light
-
-    angle is the one with positive right axis
-    '''
-    time %= day_length
-    angle = jnp.where(
-        time <= day_light_length,
-        (time / day_light_length) * jnp.pi,
-        ((time - day_light_length) / (day_length - day_light_length)) * jnp.pi
-    )
-    return angle
+#def get_day_status(
+#    day_length: int,
+#    day_light_length: int,
+#    time: int
+#) -> int:
+#    '''
+#    Based on the length of day light, determine the status of the day
+#
+#    day_light_length: [0,240]
+#    
+#    1: Sun
+#    0: Moon
+#    '''
+#    edge = time % day_length
+#    return jnp.where(edge <= day_light_length, 1, 0)
+#
+#def get_angle(
+#    day_length: int,
+#    day_light_length: int,
+#    time: int
+#) -> float:
+#    '''
+#    Based on the status of the day and the time now, determine the angle of the light
+#
+#    angle is the one with positive right axis
+#    '''
+#    time %= day_length
+#    angle = jnp.where(
+#        time <= day_light_length,
+#        (time / day_light_length) * jnp.pi,
+#        ((time - day_light_length) / (day_length - day_light_length)) * jnp.pi
+#    )
+#    return angle
     
 def terrain_gradient(
     terrain: jnp.ndarray
@@ -73,12 +73,13 @@ def get_normalize(
     return (array - min_val) / (max_val - min_val + 1e-8)
 
 def light_step(
-    day_length: int,
+    #day_length: int,
     terrain: jnp.ndarray,
     water: jnp.ndarray,
     light_strength: float,
-    day_light_length: int,
-    time: int,
+    #day_light_length: int,
+    #time: int,
+    light_direction,
     night_effect = 0.1
 ) -> jnp.ndarray:
     '''
@@ -88,15 +89,16 @@ def light_step(
 
     Get the Idea from website: https://learnopengl.com/Lighting/Basic-Lighting
     '''
-    angle = get_angle(day_length, day_light_length, time)
-    light_direction = jnp.array([jnp.cos(angle), jnp.sin(angle), 0.0])
+    #angle = get_angle(day_length, day_light_length, time)
+    #light_direction = jnp.array([jnp.cos(angle), jnp.sin(angle), 0.0])
     final_terrain = terrain + water
     normals = terrain_gradient(final_terrain)
     light_direction = light_direction.reshape(1, 1, 3)
     dot_products = jnp.einsum('ijk,ijk->ij', normals, light_direction)
-    dot_products_norm = get_normalize(dot_products)
-    light_intensity = jnp.clip(dot_products_norm * light_strength, 0, 1)
-    return jnp.where(time % day_length <= day_light_length, light_intensity, night_effect * light_intensity)
+    #dot_products_norm = get_normalize(dot_products)
+    light_intensity = jnp.clip(dot_products * light_strength, night_effect, 1)
+    #return jnp.where(time % day_length <= day_light_length, light_intensity, night_effect * light_intensity)
+    return light_intensity
 
 
 def absorb_temp(

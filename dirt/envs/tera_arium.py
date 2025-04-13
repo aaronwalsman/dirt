@@ -17,8 +17,6 @@ from dirt.constants import (
     BIOMASS_TINT,
 )
 from dirt.envs.landscape import (
-    TLandscapeParams,
-    TLandscapeState,
     LandscapeParams,
     LandscapeState,
     landscape,
@@ -46,13 +44,13 @@ class TeraAriumParams:
     initial_players : int = 1024
     max_players : int = 16384
     
-    landscape : TLandscapeParams = LandscapeParams()
+    landscape : LandscapeParams = LandscapeParams()
     bugs : TBugParams = BugParams()
 
 @static_dataclass
 class TeraAriumState:
     
-    landscape : TLandscapeState
+    landscape : LandscapeState
     #height_grid : jnp.array
     #water_grid : jnp.array
     #ground_chemical_grid : jnp.array
@@ -132,6 +130,7 @@ def tera_arium(params : TTeraAriumParams = TeraAriumParams()):
     #landscape_params = params.landscape.replace(
     #    world_size=params.world_size,
     #)
+    
     (
         init_landscape,
         get_landscape_consumable,
@@ -186,7 +185,8 @@ def tera_arium(params : TTeraAriumParams = TeraAriumParams()):
         # bugs
         bug_state = next_state.bugs
         
-        deaths = jnp.zeros(params.max_players, dtype=jnp.bool)
+        max_players = state.bugs.family_tree.parents.shape[0]
+        deaths = jnp.zeros(max_players, dtype=jnp.bool)
         
         # - eat
         #   do this before anything else happens so that the food an agent

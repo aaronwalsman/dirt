@@ -20,16 +20,18 @@ from dirt.gridworld2d.erosion import simulate_erosion_step, reset_erosion_status
 from dirt.gridworld2d.water import flow_step, flow_step_twodir
 from dirt.gridworld2d.naive_weather_system import weather_step
 from dirt.gridworld2d.climate_pattern_day import (
-    temperature_step, light_step, get_day_status)
-from dirt.gridworld2d.climate_pattern_year import (
-    get_day_light_length, get_day_light_strength)
+    temperature_step,
+    light_step,
+    #get_day_status,
+)
+#from dirt.gridworld2d.climate_pattern_year import (
+#    get_day_light_length,
+#    get_day_light_strength,
+#)
 from dirt.consumable import Consumable
+from dirt.sundial import SundialParams, SundialState, sundial
 
 from mechagogue.static_dataclass import static_dataclass
-
-TLandscapeParams = TypeVar('TLandscapeParams', bound='LandscapeParams')
-TLandscapeState = TypeVar('TLandscapeState', bound='LandscapeState')
-TLandscapeObservation = TypeVar('TLandscapeObservation', bound='LandscapeObservation')
 
 @static_dataclass
 class LandscapeParams:
@@ -65,7 +67,9 @@ class LandscapeParams:
     # light
     light_initial_strength: float = 0.35
     night_effect: float = 0.15
-
+    
+    sundial : SundialParams = SundialParams()
+    
     # temperature
     water_effect: float  = 0.25
     rain_effect: float = 0.05
@@ -91,7 +95,8 @@ class LandscapeState:
     air_light: jnp.array
     air_smell: jnp.array
     rain_status: jnp.array
-    day: int
+    #day: int
+    sundial : SundialState
     
     energy : jnp.array
     biomass : jnp.array
@@ -119,7 +124,7 @@ def render_landscape(state):
 '''
 
 def landscape(
-    params : TLandscapeParams = LandscapeParams(),
+    params : LandscapeParams = LandscapeParams(),
     float_dtype : Any = DEFAULT_FLOAT_DTYPE,
 ):
     
@@ -130,9 +135,11 @@ def landscape(
         dtype=float_dtype,
     )
     
+    init_sundial, step_sundial = sundial(params.sundial, dtype=float_dtype)
+    
     def init(
         key : chex.PRNGKey,
-    ) -> TLandscapeState :
+    ) -> LandscapeState :
         
         # terrain
         # - use fractal_noise to generate an initial terrain grid
@@ -197,7 +204,8 @@ def landscape(
         air_smell = jnp.zeros(params.world_size, dtype=float_dtype)
         air_smell = air_smell[...,None]
         rain_status = jnp.zeros(params.world_size, dtype=float_dtype)
-        day = params.day_initial
+        #day = params.day_initial
+        sundial_state = init_sundial()
         
         energy = jnp.zeros(params.world_size, dtype=float_dtype)
         biomass = jnp.zeros(params.world_size, dtype=float_dtype)
@@ -212,7 +220,8 @@ def landscape(
             air_light,
             air_smell,
             rain_status,
-            day,
+            #day,
+            sundial_state,
             energy,
             biomass,
         )
@@ -314,8 +323,8 @@ def landscape(
     for step_size in params.step_sizes:
         def step(
             key : chex.PRNGKey,
-            state : TLandscapeState,
-        ) -> TLandscapeState :
+            state : LandscapeState,
+        ) -> LandscapeState :
             
             terrain = state.terrain
             water = state.water
@@ -324,15 +333,15 @@ def landscape(
             air_moisture = state.air_moisture
             air_smell = state.air_smell
             air_temperature = state.air_temperature
-            day = state.day
+            day = state.sundial.day
 
             rain_status = state.rain_status
             day_length = params.steps_per_day
             
             # Day_status
-            day += 1
-            light_length = get_day_light_length(day)
-            day_status = get_day_status(day_length, light_length, day)
+            #day += 1
+            #light_length = get_day_light_length(day)
+            #day_status = get_day_status(day_length, light_length, day)
             
             # move air
             # - update the wind direction
@@ -365,44 +374,46 @@ def landscape(
             erosion = reset_erosion_status(terrain, old_terrain, erosion)
             
             # light change based on rotation of Sun
-            light_strength = get_day_light_strength(day)
+            #light_strength = get_day_light_strength(day)
+            light_strength = 1.
             light_intensity = light_step(
-                light_length, 
+                #light_length, 
                 terrain, water, 
                 light_strength, 
-                light_length, 
-                day, 
+                #light_length, 
+                state.sundial.clipped_sun_direction, 
                 params.night_effect
             )
             
             # temperature changed based on light and rain
-            air_temperature = temperature_step(
-                light_length, 
-                day, 
-                water, 
-                air_temperature, 
-                rain_status,
-                light_intensity, 
-                air_moisture,
-                light_length, 
-                params.night_effect, 
-                params.water_effect, 
-                params.rain_effect, 
-                params.evaporation_effect
-            )
+            #air_temperature = temperature_step(
+            #    light_length, 
+            #    day, 
+            #    water, 
+            #    air_temperature, 
+            #    rain_status,
+            #    light_intensity, 
+            #    air_moisture,
+            #    light_length, 
+            #    params.night_effect, 
+            #    params.water_effect, 
+            #    params.rain_effect, 
+            #    params.evaporation_effect
+            #)
 
             # evaporate and rain based on temperature and air moisture
-            water, air_moisture, rain_status = weather_step(
-                water, 
-                air_temperature, 
-                air_moisture, 
-                rain_status, 
-                params.evaporation_rate, 
-                params.rain_moisture_up_threshold, 
-                params.rain_moisture_down_threshold, 
-                params.rain_amount
-            )
-
+            #water, air_moisture, rain_status = weather_step(
+            #    water, 
+            #    air_temperature, 
+            #    air_moisture, 
+            #    rain_status, 
+            #    params.evaporation_rate, 
+            #    params.rain_moisture_up_threshold, 
+            #    params.rain_moisture_down_threshold, 
+            #    params.rain_amount
+            #)
+            
+            next_sundial_state = step_sundial(state.sundial)
             next_state = state.replace(
                 terrain=terrain,
                 erosion=erosion,
@@ -413,7 +424,8 @@ def landscape(
                 air_light=light_intensity,
                 air_smell=air_smell,
                 rain_status=rain_status,
-                day=day,
+                #day=day,
+                sundial=next_sundial_state,
             )
             
             return next_state
