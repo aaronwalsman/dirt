@@ -19,7 +19,9 @@ from dirt.gridworld2d.geology import fractal_noise
 from dirt.gridworld2d.erosion import simulate_erosion_step, reset_erosion_status
 from dirt.gridworld2d.water import flow_step, flow_step_twodir
 from dirt.gridworld2d.naive_weather_system import weather_step
-from dirt.gridworld2d.climate_pattern_day import (
+# from dirt.gridworld2d.climate_pattern_day import (
+#     temperature_step, light_step, get_day_status)
+from dirt.gridworld2d.climate_pattern_day_cont import (
     temperature_step, light_step, get_day_status)
 from dirt.gridworld2d.climate_pattern_year import (
     get_day_light_length, get_day_light_strength)
@@ -367,7 +369,7 @@ def landscape(
             # light change based on rotation of Sun
             light_strength = get_day_light_strength(day)
             light_intensity = light_step(
-                light_length, 
+                day_length, 
                 terrain, water, 
                 light_strength, 
                 light_length, 
@@ -377,7 +379,7 @@ def landscape(
             
             # temperature changed based on light and rain
             air_temperature = temperature_step(
-                light_length, 
+                day_length, 
                 day, 
                 water, 
                 air_temperature, 
