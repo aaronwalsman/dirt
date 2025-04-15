@@ -78,8 +78,9 @@ class Viewer:
                 get_water_map, ('params', 'report'))
         self.get_player_color = ignore_unused_args(
             get_player_color, ('player_id', 'params', 'report'))
-        self.get_sun_direction = ignore_unused_args(
-            get_sun_direction, ('params', 'report'))
+        if get_sun_direction:
+            self.get_sun_direction = ignore_unused_args(
+                get_sun_direction, ('params', 'report'))
         
         self._init_params_and_reports(
             example_params,
@@ -147,6 +148,8 @@ class Viewer:
         self.terrain_texture_size = h * texture_multiple, w * texture_multiple
         
         vertices, normals, uvs, faces = make_height_map_mesh(self.terrain_map)
+        self.terrain_uvs = uvs
+        self.terrain_faces = faces
         self.renderer.load_mesh(
             name='terrain_mesh',
             mesh_data={
@@ -214,7 +217,7 @@ class Viewer:
                 transform=self.upright,
             )
         
-        if self.get_sun_direction is not None:
+        if hasattr(self, 'get_sun_direction'):
             max_size = max(self.world_size)
             self.renderer.load_mesh(
                 name='sun_mesh',
@@ -238,7 +241,7 @@ class Viewer:
             self._update_sun_position()
     
     def _update_sun_position(self):
-        if self.get_sun_direction is not None:
+        if hasattr(self, 'get_sun_direction'):
             sun_direction = self.get_sun_direction(self.params, self.report)
             max_size = max(self.world_size)
             sun_transform = np.eye(4)
@@ -583,6 +586,22 @@ class Viewer:
             self.renderer.load_texture(
                 'terrain_texture',
                 texture_data = texture,
+            )
+        
+        if self.get_terrain_map:
+            self.terrain_map = self.get_terrain_map(self.params, self.report)
+            (
+                terrain_vertices,
+                terrain_normals,
+            ) = make_height_map_vertices_and_normals(self.terrain_map)
+            self.renderer.load_mesh(
+                name='terrain_mesh',
+                mesh_data={
+                    'vertices' : terrain_vertices,
+                    'normals' : terrain_normals,
+                    'faces' : self.terrain_faces,
+                    'uvs' : self.terrain_uvs,
+                }
             )
         
         if self.get_water_map:
