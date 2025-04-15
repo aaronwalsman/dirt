@@ -17,39 +17,39 @@ The season shift will be accomplished in the climate_patter_year.py file
 One day is accomplished of 240 steps, matching the 24 hrs * 10 steps per hour
 '''
 
-#def get_day_status(
-#    day_length: int,
-#    day_light_length: int,
-#    time: int
-#) -> int:
-#    '''
-#    Based on the length of day light, determine the status of the day
-#
-#    day_light_length: [0,240]
-#    
-#    1: Sun
-#    0: Moon
-#    '''
-#    edge = time % day_length
-#    return jnp.where(edge <= day_light_length, 1, 0)
-#
-#def get_angle(
-#    day_length: int,
-#    day_light_length: int,
-#    time: int
-#) -> float:
-#    '''
-#    Based on the status of the day and the time now, determine the angle of the light
-#
-#    angle is the one with positive right axis
-#    '''
-#    time %= day_length
-#    angle = jnp.where(
-#        time <= day_light_length,
-#        (time / day_light_length) * jnp.pi,
-#        ((time - day_light_length) / (day_length - day_light_length)) * jnp.pi
-#    )
-#    return angle
+def get_day_status(
+    day_length: int,
+    day_light_length: int,
+    time: int
+) -> int:
+    '''
+    Based on the length of day light, determine the status of the day
+
+    day_light_length: [0,240]
+    
+    1: Sun
+    0: Moon
+    '''
+    edge = time % day_length
+    return jnp.where(edge <= day_light_length, 1, 0)
+
+def get_angle(
+    day_length: int,
+    day_light_length: int,
+    time: int
+) -> float:
+    '''
+    Based on the status of the day and the time now, determine the angle of the light
+
+    angle is the one with positive right axis
+    '''
+    time %= day_length
+    angle = jnp.where(
+        time <= day_light_length,
+        (time / day_light_length) * jnp.pi,
+        ((time - day_light_length) / (day_length - day_light_length)) * jnp.pi
+    )
+    return angle
     
 def terrain_gradient(
     terrain: jnp.ndarray
