@@ -148,9 +148,32 @@ def bugs(
         consumable : Consumable,
         action : TBugAction,
     ):
+        live_eaters = active_players(state) * action.eat
+        
         # figure out who eats what, and transfer into state
         # then return state and leftovers
-        return state, consumable
+        max_stomach_water = 1.
+        drunk_water = jnp.clip(
+            consumable.water * live_eaters,
+            max=max_stomach_water-state.stomach.water,
+        )
+        eaten_energy = consumable.energy * live_eaters
+        eaten_biomass = consumable.biomass * live_eaters
+        
+        next_stomach = state.stomach.replace(
+            water = state.stomach.water + drunk_water,
+            energy = state.stomach.energy + eaten_energy,
+            biomass = state.stomach.biomass + eaten_biomass,
+        )
+        next_state = state.replace(stomach=next_stomach)
+        
+        leftovers = consumable.replace(
+            water=consumable.water - drunk_water,
+            energy=consumable.energy - eaten_energy,
+            biomass=consumable.biomass - eaten_biomass,
+        )
+        
+        return next_state, leftovers
     
     def metabolism(
         state : TBugState,
@@ -202,13 +225,46 @@ def bugs(
             PHOTOSYNTHESIS_COLOR * (traits.photosynthesis[:,None])
         )
         
+        # deaths
+        # - figure out who died
+        deaths = next_health <= 0.
+        # - update the next state variables appropriately
+        next_health = next_health * ~deaths
+        
+        expelled = Consumable(
+            water=next_stomach.water * deaths,
+            energy=next_stomach.energy * deaths,
+            biomass=next_stomach.biomass * deaths,
+        )
+        expelled_locations = x1
+        
+        next_stomach = next_stomach.replace(
+            water=next_stomach.water * ~deaths,
+            energy=next_stomach.energy * ~deaths,
+            biomass=next_stomach.biomass * ~deaths,
+        )
+        x2 = jnp.where(
+            deaths[:,None],
+            jnp.array(params.world_size, dtype=jnp.int32),
+            x1,
+        )
+        
+        n = next_state.family_tree.parents.shape[0]
+        next_family_tree, children = step_family_tree(
+            next_state.family_tree,
+            deaths,
+            jnp.full((n, 1), -1, dtype=jnp.int32),
+        )
+        
         next_state = next_state.replace(
+            x=x2,
             stomach=next_stomach,
             health=next_health,
             color=color,
+            family_tree=next_family_tree,
         )
         
-        return next_state
+        return next_state, expelled, expelled_locations
         
     def active_players(
         state : TBugState,

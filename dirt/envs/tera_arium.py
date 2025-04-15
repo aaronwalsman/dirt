@@ -135,6 +135,7 @@ def tera_arium(params : TTeraAriumParams = TeraAriumParams()):
         init_landscape,
         get_landscape_consumable,
         set_landscape_consumable,
+        add_landscape_consumable,
         step_landscape,
     ) = landscape(params.landscape)
     #bug_params = params.bugs.replace(
@@ -192,16 +193,15 @@ def tera_arium(params : TTeraAriumParams = TeraAriumParams()):
         #   do this before anything else happens so that the food an agent
         #   observed in the last time step is still in the right location
         # -- pull consumables out of the environment
-        landscape_state = next_state.landscape
+        next_landscape_state = next_state.landscape
         landscape_consumable = get_landscape_consumable(
-            landscape_state, bug_state.x)
+            next_landscape_state, bug_state.x)
         # -- eat
         next_bug_state, leftovers = bugs_eat(
             bug_state, landscape_consumable, action)
         # -- put the leftovers back into the landscape
-        landscape_state = set_landscape_consumable(
-            landscape_state, bug_state.x, leftovers)
-        next_state = next_state.replace(landscape=landscape_state)
+        next_landscape_state = set_landscape_consumable(
+            next_landscape_state, bug_state.x, leftovers)
         
         # - fight
         pass
@@ -209,29 +209,27 @@ def tera_arium(params : TTeraAriumParams = TeraAriumParams()):
         # - move bugs
         next_bug_state = move_bugs(next_bug_state, action)
         
-        # - metabolize
-        next_bug_state = bug_metabolism(
+        # - metabolize and reproduce
+        next_bug_state, expelled, expelled_locations = bug_metabolism(
             bug_state,
             next_bug_state,
             traits,
-            landscape_state.terrain,
-            landscape_state.water,
+            next_landscape_state.terrain,
+            next_landscape_state.water,
         )
+        # -- put the expelled resources back into the landscape
+        next_landscape_state = add_landscape_consumable(
+            next_landscape_state, expelled_locations, expelled)
         
-        # - reproduce
-        pass
-        
-        # - step family tree
-        #family_tree, child_locations = step_family_tree(
-        #    state.family_tree, deaths, parents)
-        
-        # landscape
+        # natural landscape processes
         key, landscape_key = jrng.split(key)
         next_landscape_state = step_landscape(
-            landscape_key, next_state.landscape)
-        next_state = next_state.replace(landscape=next_landscape_state)
+            landscape_key, next_landscape_state)
         
-        next_state = next_state.replace(bugs=next_bug_state)
+        next_state = next_state.replace(
+            landscape=next_landscape_state,
+            bugs=next_bug_state
+        )
         
         return next_state
     
