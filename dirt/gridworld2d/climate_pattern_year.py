@@ -17,10 +17,10 @@ Outside of the day!
 We won't make a clear cut between the four seasons to match the real life better,
 but make season an interpretation for the temperature change, modeled by:
 
-T = Light Strength(LS) + Light Time(LT) (+ \epsilon)
+T = Light Strength(LS) + Light Time(LT) (+ epsilon)
 
 where the LS and LT are determined by the Earth's orbital revolution, and LT is also determined by the rain status of the region
-\epsilon is the perturbation to capture some unexplained weather phenomena
+epsilon is the perturbation to capture some unexplained weather phenomena
 
 One round roughly consists of 360 days
 '''
