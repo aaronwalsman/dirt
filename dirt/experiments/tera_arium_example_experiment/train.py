@@ -18,6 +18,9 @@ from mechagogue.breed.normal import normal_mutate
 from mechagogue.tree import tree_getitem
 
 from dirt.constants import DEFAULT_FLOAT_DTYPE
+from dirt.envs.landscape import (
+    LandscapeParams,
+)
 from dirt.envs.tera_arium import (
     TeraAriumParams,
     TeraAriumAction,
@@ -40,7 +43,12 @@ class TrainParams:
     vis_width : int = 1024
     vis_height : int = 1024
     env_params : Any = TeraAriumParams(
-        world_size=(256,256),
+        landscape = LandscapeParams(
+            initial_total_energy = 64**2,
+            mean_energy_sites = 64**2,
+            initial_total_biomass = 64**2,
+            mean_biomass_sites = 64**2,
+        )
     )
     train_params : Any = NaturalSelectionParams(
         max_population=max_players,
@@ -82,7 +90,7 @@ def make_reporter(params):
             players=players,
             player_x=state.env_state.bugs.x,
             player_r=state.env_state.bugs.r,
-            sun_direction=state.env_state.landscape.sundial.sun_direction,
+            #sun_direction=state.env_state.landscape.sundial.sun_direction,
         )
     
     return make_report
@@ -151,7 +159,7 @@ if __name__ == '__main__':
             get_terrain_map=lambda report : report.terrain + report.water,
             #get_water_map=lambda report : report.water,
             get_terrain_texture=terrain_texture,
-            get_sun_direction=lambda report : report.sun_direction,
+            #get_sun_direction=lambda report : report.sun_direction,
         )
         viewer.begin()
     
@@ -184,15 +192,16 @@ if __name__ == '__main__':
             photosynthesis = jnp.ones(state.shape[0]),
         )
         def model(key):
-            forward_key, rotate_key = jrng.split(key)
+            forward_key, rotate_key, eat_key = jrng.split(key, 3)
             forward = jrng.choice(forward_key, jnp.array([0,1]))
             rotate = jrng.choice(rotate_key, jnp.array([-1,0,1]))
+            eat = jrng.choice(eat_key, jnp.array([0,1]))
             return TeraAriumAction(
-                forward,
-                rotate,
-                0,
-                0,
-                0,
+                forward=forward,
+                rotate=rotate,
+                bite=0,
+                eat=1,
+                reproduce=0,
             ), None
         
         # build the trainer
