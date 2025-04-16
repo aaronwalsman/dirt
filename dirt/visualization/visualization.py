@@ -434,21 +434,5 @@ def visualize_erosion(key):
     )
 
 if __name__ == '__main__':
-    #z = jnp.zeros((2,2))
-    #z = z.at[0,0].set(0.)
-    #z = z.at[0,1].set(0.5)
-    #z = z.at[1,0].set(1.)
-    #z = z.at[1,1].set(0.25)
-    
-    '''
-    z = jnp.zeros((256, 256))
-    z = z.at[:,:].add(jnp.expand_dims(jnp.sin(jnp.arange(0,16,1/16.)), [0]))
-    z = z.at[:,:].add(jnp.expand_dims(jnp.sin(jnp.arange(0,16,1/16.)), [1]))
-    z = z * 5
-    vertices, faces = make_height_map_mesh(z)
-    make_obj(vertices, faces, './tmp.obj')
-    '''
-    
     key = jrng.key(1022)
     visualize_water_flow(key)
-    #visualize_erosion(key)

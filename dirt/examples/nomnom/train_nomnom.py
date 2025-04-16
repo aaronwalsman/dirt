@@ -14,17 +14,19 @@ from mechagogue.pop.natural_selection import (
     natural_selection, NaturalSelectionParams)
 from mechagogue.breed.normal import normal_mutate
 from mechagogue.static_dataclass import static_dataclass
+from mechagogue.commandline import commandline_interface
 from mechagogue.serial import save_leaf_data, load_example_data
 
 #from dirt.examples.nomnom.nomnom_env import nomnom, NomNomParams, NomNomAction
 from dirt.envs.nomnom import nomnom, NomNomParams, NomNomAction
-from dirt.examples.nomnom.nomnom_model import (
-    NomNomModelParams, nomnom_model, nomnom_linear_model)
+from dirt.models.nomnom import (
+    NomNomModelParams, nomnom_unconditional_or_linear_population)
 
 import wandb
 import matplotlib.pyplot as plt
 
 @static_dataclass
+@commandline_interface
 class NomNomTrainParams:
     max_players : int = 256
     env_params : Any = NomNomParams(
@@ -39,9 +41,9 @@ class NomNomTrainParams:
     train_params : Any = NaturalSelectionParams(
         max_population=max_players,
     )
-    epochs : int = 100
+    epochs : int = 4
     steps_per_epoch : int = 1000
-    output_directory : str = '/n/holylfs06/LABS/kempner_fellow_awalsman/Lab/chloe00/linear_model'
+    output_directory : str = '.'
     load_from_file : Optional[str] = None
 
 @static_dataclass
@@ -86,17 +88,19 @@ def train(key, params):
         view_distance=params.env_params.view_distance,
     )
     #init_model, model = nomnom_model(model_params)
-    init_model, model = nomnom_linear_model(model_params)
+    init_population, player_traits, model, mutate, adapt = (
+        nomnom_unconditional_or_linear_population(model_params, 3e-4))
     
-    # - build the training functions
-    reset_train, step_train = natural_selection(
+    # build the trainer
+    init_train, step_train = natural_selection(
         params.train_params,
         reset_env,
         step_env,
-        init_model,
+        init_population,
+        player_traits,
         model,
         mutate,
-        make_report
+        adapt,
     )
     
     # get the initial state of the training function
@@ -194,10 +198,10 @@ if __name__ == '__main__':
     )
     
     # update these defaults with commandline arguments
-    parser = argparse.ArgumentParser()
-    params.add_commandline_args(parser)
-    args = parser.parse_args()
-    params = params.update_from_commandline(args)
+    # parser = argparse.ArgumentParser()
+    # params.add_commandline_args(parser)
+    # args = parser.parse_args()
+    params = params.from_commandline()
     
     start = time.time()
     train(key, params)

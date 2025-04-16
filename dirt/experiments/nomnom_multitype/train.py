@@ -12,6 +12,7 @@ from mechagogue.pop.natural_selection import (
     NaturalSelectionParams, natural_selection)
 from mechagogue.epoch_runner import EpochRunnerParams, epoch_runner
 from mechagogue.serial import save_leaf_data
+from mechagogue.tree import tree_getitem
 
 from dirt.envs.nomnom import NomNomParams, NomNomAction, nomnom
 from dirt.models.nomnom import (
@@ -41,7 +42,7 @@ class TrainParams:
         max_population=max_players,
     )
     runner_params : Any = EpochRunnerParams(
-        epochs=100,
+        epochs=4,
         steps_per_epoch=1000,
         save_state=True,
         save_reports=True,
@@ -173,6 +174,9 @@ if __name__ == '__main__':
         #init_model, model = nomnom_unconditional_model(model_params)
         init_population, model, mutate = (
             nomnom_unconditional_or_linear_population(model_params, 3e-4))
+
+        breed = lambda state : tree_getitem(state, 0)
+        adapt = lambda state : state
         
         # build the trainer
         init_train, step_train = natural_selection(
@@ -182,6 +186,8 @@ if __name__ == '__main__':
             init_population,
             model,
             mutate,
+            breed,
+            adapt
         )
 
         # run

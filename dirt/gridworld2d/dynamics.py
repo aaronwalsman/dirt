@@ -82,6 +82,15 @@ def wrap_r(
     '''
     return r % 4
 
+def distance_r(r0, r1):
+    distance_matrix = jnp.array([
+        [0,1,2,1],
+        [1,0,1,2],
+        [2,1,0,1],
+        [1,2,1,0]
+    ])
+    return distance_matrix[r0, r1]
+
 def move_mass(
     x0 : jnp.ndarray,
     x1 : jnp.ndarray,

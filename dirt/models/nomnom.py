@@ -1,3 +1,4 @@
+import jax
 import jax.random as jrng
 import jax.numpy as jnp
 import jax.nn as jnn
@@ -10,8 +11,9 @@ from mechagogue.nn.mlp import mlp
 from mechagogue.nn.structured import parallel_dict_layer
 from mechagogue.nn.distributions import categorical_sampler_layer
 from mechagogue.nn.debug import print_activations_layer
+from mechagogue.breed.normal import normal_mutate
 
-from dirt.envs.nomnom import NomNomObservation, NomNomAction
+from dirt.envs.nomnom import NomNomObservation, NomNomAction, NomNomTraits
 
 # utilities
 relu = (lambda: None, jnn.relu)
@@ -26,7 +28,7 @@ def nomnom_linear_observation_encoder(dtype=jnp.float32):
     
     return lambda: None, model
 
-def nomnom_action_decoder(in_channels, dtype=jnp.float32):
+def nomnom_action_decoder(in_channels, use_bias=True, dtype=jnp.float32):
     return layer_sequence((
         (
             lambda: None,
@@ -34,19 +36,19 @@ def nomnom_action_decoder(in_channels, dtype=jnp.float32):
         ),
         parallel_dict_layer({
             'forward' : layer_sequence((
-                linear_layer(in_channels, 2, use_bias=True, dtype=dtype),
+                linear_layer(in_channels, 2, use_bias=use_bias, dtype=dtype),
                 categorical_sampler_layer(),
             )),
             'rotate' : layer_sequence((
-                linear_layer(in_channels, 3, use_bias=True, dtype=dtype),
+                linear_layer(in_channels, 3, use_bias=use_bias, dtype=dtype),
                 categorical_sampler_layer(choices=jnp.array([-1,0,1])),
             )),
             'reproduce' : layer_sequence((
-                linear_layer(in_channels, 2, use_bias=True, dtype=dtype),
+                linear_layer(in_channels, 2, use_bias=use_bias, dtype=dtype),
                 categorical_sampler_layer(),
             )),
         }),
-        (lambda: None, lambda x : NomNomAction(**x)),
+        (lambda: None, lambda x : (NomNomAction(**x), None)),
     ))
 
 # params
@@ -70,23 +72,23 @@ def nomnom_linear_model(params=NomNomModelParams(), dtype=jnp.float32):
         params.view_distance +
         1   # energy
     )
-    out_dim = 2+3+2
     
-    def encoder_forward(x):
-        food = (x.view == 1).reshape(-1).astype(dtype)
-        players = (x.view == 2).reshape(-1).astype(dtype)
-        out_of_bounds = (x.view == 3).reshape(-1).astype(dtype)
-        return jnp.concatenate(
-            (food, players, out_of_bounds, x.energy.reshape(-1)), axis=-1)
-    
-    encoder = (lambda: None, encoder_forward)
+    encoder = nomnom_linear_observation_encoder(dtype=dtype)
     decoder = nomnom_action_decoder(in_dim, dtype=dtype)
     
     return layer_sequence((encoder, decoder))
 
+def init_uniform_population_params(init_model_params):
+    init_model_params = ignore_unused_args(init_model_params, ('key',))
+    init_model_params = jax.vmap(init_model_params)
+    def init(key, population_size, max_population_size):
+        init_keys = jrng.split(key, max_population_size)
+        return init_model_params(init_keys)
+
 def nomnom_unconditional_or_linear_population(
     params=NomNomModelParams(),
-    dtype=jnp.bfloat16
+    learning_rate=3e-4,
+    dtype=jnp.bfloat16,
 ):
     in_dim = (
         (params.num_input_classes-1) *
@@ -96,19 +98,62 @@ def nomnom_unconditional_or_linear_population(
     )
     linear_encoder = nomnom_linear_observation_encoder(dtype=dtype)
     linear_decoder = nomnom_action_decoder(in_dim, dtype=dtype)
-    init_linear_model, linear_model = layer_sequence((encoder, decoder))
+    init_linear_model, linear_model = layer_sequence(
+        (linear_encoder, linear_decoder))
+    init_linear_model = jax.vmap(init_linear_model)
     
     unconditional_encoder = (
         lambda : None, lambda x : jnp.ones((1,), dtype=dtype))
-    unconditional_decoder = nomnom_action_decoder(1, dtype=dtype)
+    unconditional_decoder = nomnom_action_decoder(
+        1, use_bias=False, dtype=dtype)
     init_unconditional_model, unconditional_model = layer_sequence(
         (unconditional_encoder, unconditional_decoder))
+    init_unconditional_model = jax.vmap(init_unconditional_model)
+    
+    mutator = normal_mutate(learning_rate)
     
     def init(key, population_size, max_population_size):
-        linear_key, unconditional_key = jrng.split(key)
-        linear_params = init_linear_params(linear_key)
-        unconditional_params = init_unconditional_params(unconditional_key)
+        init_keys = jrng.split(key, 2*max_population_size)
+        linear_keys = init_keys[:max_population_size]
+        unconditional_keys = init_keys[max_population_size:]
+        linear_state = init_linear_model(linear_keys)
+        unconditional_state = init_unconditional_model(unconditional_keys)
         
+        # 50/50
+        model_type = jnp.arange(max_population_size) < (population_size//2)
+        model_type = model_type.astype(jnp.int32)
+        # all unconditional
+        #model_type = jnp.zeros(max_population_size, dtype=jnp.int32)
+        # all linear
+        #model_type = jnp.ones(max_population_size, dtype=jnp.int32)
+        
+        return (model_type, unconditional_state, linear_state)
+    
+    def player_traits(model_state):
+        return NomNomTraits()
+    
+    def model(key, x, state):
+        model_type, unconditional_state, linear_state = state
+        unconditional_key, linear_key = jrng.split(key)
+        unconditional_action = unconditional_model(
+            unconditional_key, x, unconditional_state)
+        linear_action = linear_model(
+            linear_key, x, linear_state)
+        
+        def select_leaf(a, b):
+            return jnp.where(model_type, a, b)
+        return jax.tree.map(select_leaf, linear_action, unconditional_action)
+    
+    def adapt(state):
+        return state
+    
+    def mutate(key, state):
+        model_type, unconditional_state, linear_state = state
+        unconditional_state, linear_state = mutator(
+            key, (unconditional_state, linear_state))
+        return (model_type[0], unconditional_state, linear_state)
+    
+    return init, player_traits, model, mutate, adapt
 
 def nomnom_model(parms=NomNomModelParams()):
     

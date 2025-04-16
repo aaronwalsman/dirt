@@ -17,9 +17,8 @@ import jax.numpy as jnp
 #   |   \|   \|   \|
 #   o----o----o----o
 
-def make_height_map_mesh(height_map):
+def make_height_map_vertices_and_normals(height_map):
     h, w = height_map.shape
-    
     bh = h + 2
     bw = w + 2
     
@@ -30,20 +29,12 @@ def make_height_map_mesh(height_map):
     
     normals = jnp.zeros((bh, bw, 3), dtype=jnp.float32)
     # va (2, 0, dx)
-    #lo_x_i = jnp.clip(jnp.arange(bw)-1, min=0)
-    #lo_x = height_map[:,lo_x_i]
-    #hi_x_i = jnp.arange(bw)+1
-    #hi_x = height_map[:,hi_x_i]
     lo_x_i = jnp.arange(0,w)
     lo_x = height_map[:,lo_x_i]
     hi_x_i = jnp.arange(2,bw)
     hi_x = height_map[:,hi_x_i]
     dx = (hi_x - lo_x)/2.
     # vb (0, 2, dy)
-    #lo_y_i = jnp.clip(jnp.arange(bh)-1, min=0)
-    #lo_y = height_map[lo_y_i]
-    #hi_y_i = jnp.arange(bh)+1
-    #hi_y = height_map[hi_y_i]
     lo_y_i = jnp.arange(0,h)
     lo_y = height_map[lo_y_i]
     hi_y_i = jnp.arange(2,bh)
@@ -55,6 +46,30 @@ def make_height_map_mesh(height_map):
     normals = normals.at[:,:,2].set(1)
     normals = normals / jnp.linalg.norm(normals, axis=-1, keepdims=True)
     normals = normals.reshape(-1,3)
+    
+    # border correction (do this after normal computation)
+    vertices = vertices.at[ 0,:, 1].add(0.5)
+    vertices = vertices.at[-1,:, 1].add(-0.5)
+    vertices = vertices.at[:, 0, 0].add(0.5)
+    vertices = vertices.at[:,-1, 0].add(-0.5)
+    
+    vertices = vertices.at[ 0, 1:w+1, 2].set(vertices[ 1, 1:w+1, 2])
+    vertices = vertices.at[-1, 1:w+1, 2].set(vertices[-2, 1:w+1, 2])
+    vertices = vertices.at[ 1:h+1, 0, 2].set(vertices[ 1:h+1, 1, 2])
+    vertices = vertices.at[ 1:h+1,-1, 2].set(vertices[ 1:h+1,-2, 2])
+    vertices = vertices.at[[0,0,-1,-1],[0,-1,-1,0], 2].set(
+        vertices[[1,1,-2,-2],[1,-2,-2,1], 2])
+    
+    vertices = vertices.reshape(-1,3)
+    
+    return vertices, normals
+
+def make_height_map_mesh(height_map):
+    h, w = height_map.shape
+    bh = h + 2
+    bw = w + 2
+    
+    vertices, normals = make_height_map_vertices_and_normals(height_map)
     
     # | |   |   |   | | #
     uvs = jnp.zeros((bh, bw, 2), dtype=jnp.float32)
@@ -77,20 +92,5 @@ def make_height_map_mesh(height_map):
     
     faces = faces.at[:,:,:,:].add(jnp.arange(0, bh-1)[:,None,None] * bw)
     faces = faces.reshape(-1,3)
-    
-    # border correction (do this after normal computation)
-    vertices = vertices.at[ 0,:, 1].add(0.5)
-    vertices = vertices.at[-1,:, 1].add(-0.5)
-    vertices = vertices.at[:, 0, 0].add(0.5)
-    vertices = vertices.at[:,-1, 0].add(-0.5)
-    
-    vertices = vertices.at[ 0, 1:w+1, 2].set(vertices[ 1, 1:w+1, 2])
-    vertices = vertices.at[-1, 1:w+1, 2].set(vertices[-2, 1:w+1, 2])
-    vertices = vertices.at[ 1:h+1, 0, 2].set(vertices[ 1:h+1, 1, 2])
-    vertices = vertices.at[ 1:h+1,-1, 2].set(vertices[ 1:h+1,-2, 2])
-    vertices = vertices.at[[0,0,-1,-1],[0,-1,-1,0], 2].set(
-        vertices[[1,1,-2,-2],[1,-2,-2,1], 2])
-    
-    vertices = vertices.reshape(-1,3)
     
     return vertices, normals, uvs, faces

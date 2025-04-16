@@ -1,7 +1,7 @@
 import jax.random as jrng
 import jax.numpy as jnp
 import jax.nn as jnn
-import jax.tree_map as tree_map
+from jax.tree_util import tree_map
 
 from mechagogue.static_dataclass import static_dataclass
 from mechagogue.nn.linear import (
