@@ -20,6 +20,7 @@ def step(
     kernel = kernel[:, None]
     kernel = kernel[..., None, None]
     kernel = jnp.tile(kernel, (1, 1, 1, C))
+    kernel = kernel.astype(gas_grid.dtype)
 
     # Reshape input for conv operations (needs 4D: NHWC format)
     #x = gas_grid.reshape(1, *gas_grid.shape, 1)
@@ -84,12 +85,12 @@ def step(
 
     new_grid = jnp.zeros_like(gas_grid)
 
-    new_grid = new_grid.at[y0, x0, :].add(gas_grid * ((wy0 * wx0)[..., None]))
-    new_grid = new_grid.at[y0, x1, :].add(gas_grid * ((wy0 * wx1)[..., None]))
-    new_grid = new_grid.at[y1, x0, :].add(gas_grid * ((wy1 * wx0)[..., None]))
-    new_grid = new_grid.at[y1, x1, :].add(gas_grid * ((wy1 * wx1)[..., None]))
+    new_grid = new_grid.at[y0, x0, :].add((gas_grid * ((wy0 * wx0)[..., None])).astype(gas_grid.dtype))
+    new_grid = new_grid.at[y0, x1, :].add((gas_grid * ((wy0 * wx1)[..., None])).astype(gas_grid.dtype))
+    new_grid = new_grid.at[y1, x0, :].add((gas_grid * ((wy1 * wx0)[..., None])).astype(gas_grid.dtype))
+    new_grid = new_grid.at[y1, x1, :].add((gas_grid * ((wy1 * wx1)[..., None])).astype(gas_grid.dtype))
 
-    return gas_grid
+    return new_grid
 
 if __name__ == '__main__':
     gas_grid = jnp.zeros((5, 7, 3))

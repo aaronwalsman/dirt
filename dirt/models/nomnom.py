@@ -144,8 +144,8 @@ def nomnom_unconditional_or_linear_population(
             return jnp.where(model_type, a, b)
         return jax.tree.map(select_leaf, linear_action, unconditional_action)
     
-    def adapt(model_state):
-        return model_state
+    def adapt(state):
+        return state
     
     def mutate(key, state):
         model_type, unconditional_state, linear_state = state

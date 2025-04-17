@@ -1,5 +1,5 @@
-from geology import fractal_noise
-from water import calculate_flow_twodir, flow_step_twodir
+from dirt.gridworld2d.geology import fractal_noise
+from dirt.gridworld2d.water import calculate_flow_twodir, flow_step_twodir
 import jax.random as jrng
 import jax.numpy as jnp
 import jax

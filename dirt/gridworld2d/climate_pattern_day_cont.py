@@ -43,12 +43,9 @@ def get_angle(
 
     angle is the one with positive right axis
     '''
-    time %= day_length
-    angle = jnp.where(
-        time <= day_light_length,
-        (time / day_light_length) * jnp.pi,
-        ((time - day_light_length) / (day_length - day_light_length)) * jnp.pi
-    )
+    t = (time % day_length)
+    frac = t / day_length
+    angle = 2 * jnp.pi * frac
     return angle
     
 def terrain_gradient(
@@ -73,13 +70,12 @@ def get_normalize(
     return (array - min_val) / (max_val - min_val + 1e-8)
 
 def light_step(
-    #day_length: int,
+    day_length: int,
     terrain: jnp.ndarray,
     water: jnp.ndarray,
     light_strength: float,
-    #day_light_length: int,
-    #time: int,
-    light_direction,
+    day_light_length: int,
+    time: int,
     night_effect = 0.1
 ) -> jnp.ndarray:
     '''
@@ -89,15 +85,15 @@ def light_step(
 
     Get the Idea from website: https://learnopengl.com/Lighting/Basic-Lighting
     '''
-    #angle = get_angle(day_length, day_light_length, time)
-    #light_direction = jnp.array([jnp.cos(angle), jnp.sin(angle), 0.0])
+    angle = get_angle(day_length, day_light_length, time)
+    light_direction = jnp.array([jnp.cos(angle), jnp.sin(angle), 0.0])
     final_terrain = terrain + water
     normals = terrain_gradient(final_terrain)
     light_direction = light_direction.reshape(1, 1, 3)
     dot_products = jnp.einsum('ijk,ijk->ij', normals, light_direction)
-    #dot_products_norm = get_normalize(dot_products)
-    light_intensity = jnp.clip(dot_products * light_strength, night_effect, 1)
-    #return jnp.where(time % day_length <= day_light_length, light_intensity, night_effect * light_intensity)
+    dot_products_norm = get_normalize(dot_products)
+    light_strength = jnp.sin(time / 240 * jnp.pi) + 1
+    light_intensity = jnp.clip(dot_products_norm * light_strength, 0, 1)
     return light_intensity
 
 
@@ -116,9 +112,9 @@ def absorb_temp(
 
     Here we assume that the difference in terrain height won't affect the light intensity so much
 
-    water_effetct: larger value means weaker effects, [0, \infty]
+    water_effetct: larger value means weaker effects, [0, infty]
     rain_effect: larger value means weaker effects, [0, 1]
-    evaporation_effect : larger value means weaker effects, [0, \infty]
+    evaporation_effect : larger value means weaker effects, [0, infty]
     '''
     water_norm = get_normalize(water)
     current_evaporation_norm = get_normalize(current_evaporation)

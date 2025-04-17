@@ -1,8 +1,12 @@
-from geology import fractal_noise
-from water import flow_step_twodir
-from erosion import simulate_erosion_step, reset_erosion_status
-from naive_weather_system import weather_step
-from climate_pattern_day import temperature_step, light_step, get_day_status
+from dirt.gridworld2d.geology import fractal_noise
+from dirt.gridworld2d.water import flow_step_twodir
+from dirt.gridworld2d.erosion import simulate_erosion_step, reset_erosion_status
+from dirt.gridworld2d.naive_weather_system import weather_step
+from dirt.gridworld2d.climate_pattern_day import (
+    temperature_step,
+    light_step,
+    get_day_status,
+)
 import jax.random as jrng
 import jax.numpy as jnp
 import jax
@@ -13,10 +17,10 @@ Outside of the day!
 We won't make a clear cut between the four seasons to match the real life better,
 but make season an interpretation for the temperature change, modeled by:
 
-T = Light Strength(LS) + Light Time(LT) (+ \epsilon)
+T = Light Strength(LS) + Light Time(LT) (+ epsilon)
 
 where the LS and LT are determined by the Earth's orbital revolution, and LT is also determined by the rain status of the region
-\epsilon is the perturbation to capture some unexplained weather phenomena
+epsilon is the perturbation to capture some unexplained weather phenomena
 
 One round roughly consists of 360 days
 '''
@@ -88,11 +92,11 @@ def simulate_full_climate(
         # 3. light
         light_strength = get_day_light_strength(current_time)
         light_length = get_day_light_length(current_time)
-        new_day_status = get_day_status(light_length, current_time)
-        new_light_intensity = light_step(terrain, water, light_strength, light_length, current_time, night_effect) #Porblem of getting None
+        new_day_status = get_day_status(time, light_length, current_time)
+        new_light_intensity = light_step(light_length, terrain, water, light_strength, light_length, current_time, night_effect) #Porblem of getting None
 
         # 4. Temperature
-        new_temperature = temperature_step(current_time, water, current_temperature, rain_status, light_intensity, current_evaporation, light_length, night_effect, water_effect, rain_effect, evaporation_effect)
+        new_temperature = temperature_step(light_length, current_time, water, current_temperature, rain_status, light_intensity, current_evaporation, light_length, night_effect, water_effect, rain_effect, evaporation_effect)
         
         # 5. Humidity
         new_water, new_evaporation, rain_status = weather_step(
@@ -131,10 +135,10 @@ if __name__ == '__main__':
     rain = 0.08
     erosion_endurance = 0.05
     erosion_ratio = 0.01
-    night_effect = 0.35 # Under this, the temperature system doesn't seem to explode
-    water_effect = 0.5
-    rain_effect = 0.1 
-    evaporation_effect = 0.5
+    night_effect = 0.25 # Under this, the temperature system doesn't seem to explode
+    water_effect = 0.25
+    rain_effect = 0.05
+    evaporation_effect = 0.05
 
     final_terrain, final_water, left_evaporation, final_rain_status, final_erosion, final_day_status, final_light_intensity, final_temperature = simulate_full_climate(
         terrain, water, temperature_initial, time, 

@@ -1,4 +1,4 @@
-from geology import fractal_noise
+from dirt.gridworld2d.geology import fractal_noise
 import jax.random as jrng
 import jax.numpy as jnp
 import jax
@@ -53,15 +53,15 @@ def flow_step(
     total_height = terrain + water
 
     flow_up = calculate_flow(total_height, water, 0, flow_rate)
-    water = water - flow_up + jnp.pad(flow_up, ((1, 0), (0, 0)))[1:, :]
+    water = water - flow_up + jnp.pad(flow_up, ((0, 1), (0, 0)))[1:, :]
     flow_down = calculate_flow(total_height, water, 1, flow_rate)
-    water = water - flow_down + jnp.pad(flow_down, ((0, 1), (0, 0)))[:-1, :]
+    water = water - flow_down + jnp.pad(flow_down, ((1, 0), (0, 0)))[:-1, :]
     flow_left = calculate_flow(total_height, water, 2, flow_rate)
     water = water - flow_left + jnp.pad(flow_left, ((0, 0), (0, 1)))[:, 1:]
     flow_right = calculate_flow(total_height, water, 3, flow_rate)
-    new_water = water - flow_right + jnp.pad(flow_right, ((0, 0), (1, 0)))[:, :-1]
+    water = water - flow_right + jnp.pad(flow_right, ((0, 0), (1, 0)))[:, :-1]
 
-    return new_water
+    return water
 
 def calculate_flow_twodir(
     total_height: jnp.ndarray, 
