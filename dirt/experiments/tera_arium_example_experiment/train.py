@@ -36,7 +36,7 @@ class TrainParams:
     seed : int = 1234
     initial_players : int = 1024
     max_players : int = 2048
-    world_size : Tuple = (256, 256)
+    world_size : Tuple[int,int] = (256, 256)
     output_directory : str = '.'
     load_state : str = ''
     visualize : bool = False
