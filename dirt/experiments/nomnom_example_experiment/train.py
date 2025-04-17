@@ -3,6 +3,7 @@ from typing import Any, Optional
 
 import numpy as np
 
+import jax
 import jax.numpy as jnp
 import jax.random as jrng
 
@@ -56,7 +57,9 @@ class TrainReport:
     player_energy : jnp.array = False
     food_grid : jnp.array = False
 
-def make_report(state, players, parents, children, actions):
+def make_report(
+    state, players, parents, children, actions, traits, adaptations
+):
     return TrainReport(
         actions,
         players,
@@ -137,10 +140,23 @@ if __name__ == '__main__':
             view_distance=params.env_params.view_distance,
         )
         init_model, model = nomnom_linear_model(model_params)
-
+        def init_population(key, population_size, max_population_size):
+            keys = jrng.split(key, max_population_size)
+            return jax.vmap(init_model)(keys)
+            
+        adapt = lambda state : state
+        
         # build the trainer
         init_train, step_train = natural_selection(
-            params.train_params, reset_env, step_env, init_model, model, mutate)
+            params.train_params,
+            reset_env,
+            step_env,
+            init_population,
+            lambda : None,
+            model,
+            mutate,
+            adapt,
+        )
         
         # run
         epoch_runner(
