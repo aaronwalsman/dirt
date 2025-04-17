@@ -15,22 +15,37 @@ import dirt.gridworld2d.dynamics as dynamics
 import dirt.gridworld2d.spawn as spawn
 from dirt.consumable import Consumable
 
-TBugParams = TypeVar('TBugParams', bound='BugParams')
-TBugState = TypeVar('TBugState', bound='BugState')
-TBugAction = TypeVar('TBugAction', bound='BugAction')
-TBugTraits = TypeVar('TBugTrait', bound='BugTraits')
-TBugObservation = TypeVar('TBugObservation', bound='BugObservation')
-
 @static_dataclass
 class BugParams:
     world_size : Tuple[int,int] = (1024,1024)
     initial_players : int = 1024
     max_players : int = 16384
     
+    starting_health : float = 0.5
+    starting_energy : float = 1.
+    starting_water : float = 0.1
+    starting_biomass : float = 1.
+    
+    max_stomach_water : float = 1.
+    max_water_gulp : float = 0.1
+    max_stomach_biomass : float = 2.
+    max_biomass_gulp : float = 0.1
+    
+    healing_rate : float = 0.1
+    zero_water_damage : float = 0.1
+    
+    birth_energy : float = 0.25
+    birth_damage : float = 0.25
+    birth_water : float = 0.25
+    
     base_size_metabolism : float = 0.01
     base_brain_metabolism : float = 0.01
     base_move_metabolism : float = 0.01
     base_climb_metabolism : float = 0.01
+    
+    senescence : float = 0.0 #0.001
+    
+    photosynthesis_energy_gain : float = 0.005
 
 @static_dataclass
 class BugTraits:
@@ -71,7 +86,7 @@ class BugState:
     family_tree : Any
 
 def bugs(
-    params : TBugParams = BugParams(),
+    params : BugParams = BugParams(),
     float_dtype : Any = DEFAULT_FLOAT_DTYPE
 ):
     
@@ -82,7 +97,7 @@ def bugs(
     
     def init_state(
         key : chex.PRNGKey,
-    ) -> TBugState :
+    ) -> BugState :
         
         family_tree = init_family_tree(params.initial_players)
         active_players = active_family_tree(family_tree)
@@ -101,10 +116,10 @@ def bugs(
         
         age = jnp.zeros((params.max_players,), dtype=jnp.int32)
         
-        health = active_players.astype(float_dtype)
-        energy = active_players.astype(float_dtype)
-        biomass = active_players.astype(float_dtype)
-        water = active_players.astype(float_dtype)
+        health = active_players.astype(float_dtype) * params.starting_health
+        energy = active_players.astype(float_dtype) * params.starting_energy
+        biomass = active_players.astype(float_dtype) * params.starting_health
+        water = active_players.astype(float_dtype) * params.starting_water
         stomach = Consumable(energy, biomass, water)
         
         n = active_players.shape[0]
@@ -125,8 +140,8 @@ def bugs(
         )
     
     def move(
-        state : TBugState,
-        action : TBugAction,
+        state : BugState,
+        action : BugAction,
     ):
         
         active_bugs = active_family_tree(state.family_tree)
@@ -144,21 +159,32 @@ def bugs(
         return state
     
     def eat(
-        state : TBugState,
+        state : BugState,
         consumable : Consumable,
-        action : TBugAction,
+        action : BugAction,
     ):
         live_eaters = active_players(state) * action.eat
         
         # figure out who eats what, and transfer into state
         # then return state and leftovers
-        max_stomach_water = 1.
+        max_water = jnp.clip(
+            params.max_stomach_water - state.stomach.water,
+            max=params.max_water_gulp,
+        )
         drunk_water = jnp.clip(
             consumable.water * live_eaters,
-            max=max_stomach_water-state.stomach.water,
+            max=max_water,
         )
+        
         eaten_energy = consumable.energy * live_eaters
-        eaten_biomass = consumable.biomass * live_eaters
+        max_biomass = jnp.clip(
+            params.max_stomach_biomass - state.stomach.biomass,
+            max=params.max_biomass_gulp,
+        )
+        eaten_biomass = jnp.clip(
+            consumable.biomass * live_eaters,
+            max=max_biomass,
+        )
         
         next_stomach = state.stomach.replace(
             water = state.stomach.water + drunk_water,
@@ -176,23 +202,39 @@ def bugs(
         return next_state, leftovers
     
     def metabolism(
-        state : TBugState,
-        next_state : TBugState,
-        traits : TBugTraits,
+        state : BugState,
+        action : BugAction,
+        next_state : BugState,
+        traits : BugTraits,
         terrain : jnp.ndarray,
         water : jnp.ndarray,
+        light : jnp.ndarray,
     ):
-        energy_offset = jnp.zeros(params.max_players, dtype=float_dtype)
         
+        next_stomach = next_state.stomach
         volume = traits.body_size**3
+        alive = active_players(next_state)
         
-        # size tax
+        # compute energy expenditure
+        energy_offset = jnp.zeros(params.max_players, dtype=float_dtype)
+        water_offset = jnp.zeros(params.max_players, dtype=float_dtype)
+        biomass_offset = jnp.zeros(params.max_players, dtype=float_dtype)
+        health_offset = jnp.zeros(params.max_players, dtype=float_dtype)
+        
+        # - healing
+        #   add health if less than 1 at the expense of energy
+        heal_ammount = jnp.clip(
+            (1. - next_state.health), min=0, max=params.healing_rate)
+        health_offset += heal_ammount
+        energy_offset -= heal_ammount
+        
+        # - size energy tax
         energy_offset -= params.base_size_metabolism * volume
         
-        # brain tax
+        # - brain energy tax
         energy_offset -= params.base_brain_metabolism * traits.brain_size
         
-        # movement
+        # - movement energy tax
         x0 = state.x
         r0 = state.r
         x1 = next_state.x
@@ -201,23 +243,88 @@ def bugs(
         dr = dynamics.distance_r(r1, r0)
         energy_offset -= params.base_move_metabolism * volume * (dx + dr)
         
-        # climbing
+        # - climbing energy tax
         height = terrain + water
         dy = height[x1[...,0], x1[...,1]] - height[x0[...,0], x0[...,1]]
         uphill = jnp.where(dy > 0., dy, 0.)
         energy_offset -= uphill * volume * params.base_climb_metabolism
         
-        next_stomach = next_state.stomach
+        # - photosynthesis
+        energy_offset += (
+            traits.photosynthesis *
+            params.photosynthesis_energy_gain *
+            light[x0[...,0], x0[...,1]]
+        )
         
-        # update the energy
+        # - compute the updated energy
+        #   (do no more energy changes after this point)
         next_energy = next_stomach.energy + energy_offset
-        next_energy_clipped = jnp.where(next_energy < 0., next_energy, 0.)
+        next_energy_clipped = jnp.where(next_energy < 0., 0., next_energy)
         
-        # damage due to running out of energy
-        health_offset = jnp.where(next_energy < 0., next_energy, 0.)
+        # - compute the updated water
+        #   (no no more water changes after this point)
+        next_water = next_stomach.water + water_offset
+        next_water_clipped = jnp.where(next_water < 0., 0., next_water)
+        
+        # - damage due to using more energy than is available
+        health_offset += jnp.where(next_energy < 0., next_energy, 0.)
+        
+        # - damage due to using more water than is available
+        health_offset += jnp.where(next_water < 0., next_water, 0.)
+        
+        # - damage due to having zero water
+        health_offset += jnp.where(
+            next_water <= 0., -params.zero_water_damage, 0)
+        
+        # reproduce
+        # - compute which agents are able to reproduce
+        has_enough_energy_to_reproduce = (
+            next_stomach.energy >= params.starting_energy + params.birth_energy)
+        has_enough_biomass_to_reproduce = (
+            next_stomach.biomass >= params.starting_biomass * 2)
+        has_enough_water_to_reproduce = (
+            next_stomach.water >= params.starting_water + params.birth_water)
+            
+        reproduce = (
+            alive &
+            action.reproduce &
+            has_enough_energy_to_reproduce &
+            has_enough_biomass_to_reproduce &
+            has_enough_water_to_reproduce 
+        )
+        
+        # - compute the reproduce positions and rotations
+        reproduce, child_x, child_r = spawn.spawn_from_parents(
+            reproduce,
+            x1,
+            r1,
+            object_grid=next_state.object_grid,
+        )
+        n = reproduce.shape[0]
+        parent_locations, = jnp.nonzero(reproduce, size=n, fill_value=n)
+        parent_locations = parent_locations[..., None]
+        child_x = child_x[parent_locations[...,0]]
+        child_r = child_r[parent_locations[...,0]]
+        
+        # compute the birth costs 
+        energy_offset -= params.birth_energy * reproduce
+        water_offset -= params.birth_water * reproduce
+        health_offset -= params.birth_damage * reproduce
+        
+        # compute the resources donated to the child
+        energy_offset -= params.starting_energy * reproduce
+        water_offset -= params.starting_water * reproduce
+        biomass_offset -= params.starting_biomass * reproduce
+        
+        # - update the energy in the stomach and the health
+        next_stomach = next_stomach.replace(
+            energy=next_energy_clipped,
+            water=next_water_clipped,
+        )
         next_health = next_state.health + health_offset
         
-        next_stomach = next_stomach.replace(energy=next_energy_clipped)
+        # senescence
+        next_health = next_health * (1. - params.senescence)**next_state.age
         
         # color
         color = (
@@ -229,7 +336,10 @@ def bugs(
         # - figure out who died
         deaths = next_health <= 0.
         # - update the next state variables appropriately
-        next_health = next_health * ~deaths
+        next_health *= ~deaths
+        
+        next_object_grid = next_state.object_grid.at[x1[...,0], x1[...,1]].set(
+            jnp.where(deaths, -1, jnp.arange(deaths.shape[0])))
         
         expelled = Consumable(
             water=next_stomach.water * deaths,
@@ -253,26 +363,45 @@ def bugs(
         next_family_tree, children = step_family_tree(
             next_state.family_tree,
             deaths,
-            jnp.full((n, 1), -1, dtype=jnp.int32),
+            parent_locations,
         )
+        next_alive = active_family_tree(next_family_tree)
+        next_age = (next_state.age + 1)*next_alive
+        
+        # update the children's age, water, energy, biomass, and health
+        next_age.at[children].set(0)
+        next_stomach = next_stomach.replace(
+            energy=next_stomach.energy.at[children].set(params.starting_energy),
+            biomass=next_stomach.biomass.at[children].set(params.starting_biomass),
+            water=next_stomach.water.at[children].set(params.starting_water),
+        )
+        next_health = next_health.at[children].set(params.starting_health)
+        x2 = x2.at[children].set(child_x)
+        r1 = r1.at[children].set(child_r)
+        
+        next_object_grid = (
+            next_object_grid.at[child_x[...,0], child_x[...,1]].set(children))
         
         next_state = next_state.replace(
             x=x2,
+            r=r1,
             stomach=next_stomach,
             health=next_health,
             color=color,
             family_tree=next_family_tree,
+            age=next_age,
+            object_grid = next_object_grid,
         )
         
         return next_state, expelled, expelled_locations
         
     def active_players(
-        state : TBugState,
+        state : BugState,
     ):
         return active_family_tree(state.family_tree)
     
     def family_info(
-        next_state : TBugState,
+        next_state : BugState,
     ):
         birthdays = next_state.family_tree.player_list.players[...,0]
         current_time = next_state.family_tree.player_list.current_time

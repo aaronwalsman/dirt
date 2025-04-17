@@ -22,9 +22,6 @@ from dirt.envs.landscape import (
     landscape,
 )
 from dirt.envs.bug import (
-    TBugParams,
-    TBugAction,
-    TBugTraits,
     BugParams,
     BugAction,
     BugTraits,
@@ -45,7 +42,7 @@ class TeraAriumParams:
     max_players : int = 16384
     
     landscape : LandscapeParams = LandscapeParams()
-    bugs : TBugParams = BugParams()
+    bugs : BugParams = BugParams()
 
 @static_dataclass
 class TeraAriumState:
@@ -177,8 +174,8 @@ def tera_arium(params : TTeraAriumParams = TeraAriumParams()):
     def transition(
         key : chex.PRNGKey,
         state : TTeraAriumState,
-        action : TBugAction,
-        traits : TBugTraits,
+        action : BugAction,
+        traits : BugTraits,
     ) -> TTeraAriumState :
         
         next_state = state
@@ -212,10 +209,12 @@ def tera_arium(params : TTeraAriumParams = TeraAriumParams()):
         # - metabolize and reproduce
         next_bug_state, expelled, expelled_locations = bug_metabolism(
             bug_state,
+            action,
             next_bug_state,
             traits,
             next_landscape_state.terrain,
             next_landscape_state.water,
+            next_landscape_state.air_light,
         )
         # -- put the expelled resources back into the landscape
         next_landscape_state = add_landscape_consumable(

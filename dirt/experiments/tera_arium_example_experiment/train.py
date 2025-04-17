@@ -44,10 +44,10 @@ class TrainParams:
     vis_height : int = 1024
     env_params : Any = TeraAriumParams(
         landscape = LandscapeParams(
-            initial_total_energy = 64**2,
-            mean_energy_sites = 64**2,
-            initial_total_biomass = 64**2,
-            mean_biomass_sites = 64**2,
+            initial_total_energy = 128**2,
+            mean_energy_sites = 128**2,
+            initial_total_biomass = 128**2,
+            mean_biomass_sites = 128**2,
         )
     )
     train_params : Any = NaturalSelectionParams(
@@ -201,7 +201,7 @@ if __name__ == '__main__':
                 rotate=rotate,
                 bite=0,
                 eat=1,
-                reproduce=0,
+                reproduce=1,
             ), None
         
         # build the trainer
