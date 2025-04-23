@@ -134,8 +134,14 @@ def collide(
     occupancy_grid : The occupancy grid before the motion.
     '''
     collision_grid = occupancy_grid + move_mass(x0, x1, occupancy_grid)
-    collided = (collision_grid[x1[:,0], x1[:,1]] > 1)[...,None]
-    x2 = jnp.where(collided, x0, x1)
+    
+    # subtract one from all places where no motion occurred
+    # (do not count collisions with self)
+    no_motion = jnp.all(x0==x1, axis=-1).astype(jnp.int32)
+    collision_grid = collision_grid.at[x0[:,0], x0[:,1]].add(-no_motion)
+    
+    collided = (collision_grid[x1[:,0], x1[:,1]] > 1)
+    x2 = jnp.where(collided[...,None], x0, x1)
     occupancy_grid = move_mass(x0, x2, occupancy_grid)
     return x2, collided, occupancy_grid
 
