@@ -21,8 +21,10 @@ from dirt.gridworld2d.water import flow_step, flow_step_twodir
 from dirt.gridworld2d.naive_weather_system import weather_step
 # from dirt.gridworld2d.climate_pattern_day import (
 #     temperature_step, light_step, get_day_status)
-from dirt.gridworld2d.climate_pattern_day_cont import (
+from dirt.gridworld2d.climate_pattern_day_scale import (
     temperature_step, light_step, get_day_status)
+# from dirt.gridworld2d.climate_pattern_day_cont import (
+#     temperature_step, light_step, get_day_status)
 from dirt.gridworld2d.climate_pattern_year import (
     get_day_light_length, get_day_light_strength)
 from dirt.consumable import Consumable
@@ -61,12 +63,12 @@ class LandscapeParams:
     # air
     wind_std : float = 0.1
     wind_reversion : float = 0.001
-    air_initial_temperature : float = 0.
+    air_initial_temperature : float = 20
     air_initial_smell: float = 0.
 
     # light
     light_initial_strength: float = 0.35
-    night_effect: float = 0.15
+    night_effect: float = 0.10
 
     # temperature
     water_effect: float  = 0.25
@@ -390,7 +392,8 @@ def landscape(
                 params.night_effect, 
                 params.water_effect, 
                 params.rain_effect, 
-                params.evaporation_effect
+                params.evaporation_effect,
+                params.air_initial_temperature
             )
 
             # evaporate and rain based on temperature and air moisture
@@ -426,7 +429,7 @@ def landscape(
 
 
 if __name__ == "__main__":
-    init, step_fn = landscape()
+    init, _, _, step_fn = landscape()
     key = jax.random.PRNGKey(1234)
     state = init(key)
     for i in range(500):
