@@ -1,10 +1,83 @@
 import jax
 import jax.numpy as jnp
 
-def step(
+from dirt.constants import DEFAULT_FLOAT_DTYPE
+
+def gas(
+    diffusion_std,
+    diffusion_mix,
+    boundary='clip',
+    clip_fill=0.,
+    float_dtype=DEFAULT_FLOAT_DTYPE,
+):
+    
+    kernel_radius = jnp.ceil(3 * diffusion_std).astype(int)
+    x = jnp.arange(-kernel_radius, kernel_radius + 1)
+    kernel = jnp.exp(-x**2 / (2 * diffusion_std**2))
+    kernel = kernel / kernel.sum()
+    kernel = kernel[:, None]
+    kernel = kernel[..., None, None]
+    kernel = kernel.astype(float_dtype)
+    
+    def diffuse_step(grid):
+        if len(grid.shape) == 2:
+            grid = grid[:,:,None]
+            remove_last_channel = True
+        else:
+            remove_last_channel = False
+        assert len(grid.shape) == 3
+        h,w,c = grid.shape
+        diffused_grid = grid[None,:,:,:]
+        
+        channel_kernel = jnp.tile(kernel, (1, 1, 1, c))
+        diffused_grid = jax.lax.conv_general_dilated(
+            diffused_grid,
+            channel_kernel,
+            window_strides=(1,1),
+            padding='SAME',
+            dimension_numbers=('NHWC', 'HWIO', 'NHWC'),
+            feature_group_count=c,
+        )
+        diffused_grid = jax.lax.conv_general_dilated(
+            diffused_grid,
+            channel_kernel.transpose((1,0,2,3)),
+            window_strides=(1,1),
+            padding='SAME',
+            dimension_numbers=('NHWC', 'HWIO', 'NHWC'),
+            feature_group_count=c,
+        )
+        diffused_grid = diffused_grid[0,:,:,:]
+        
+        grid = grid * (1 - diffusion_mix) + diffused_grid * diffusion_mix
+        
+        if remove_last_channel:
+            grid = grid[...,0]
+        
+        return grid
+
+    def wind_step(grid, wind):
+        grid = jnp.roll(grid, shift=wind, axis=(0,1))
+        if boundary == 'clip':
+            h,w = grid.shape[:2]
+            wind_y, wind_x = wind
+            grid = grid.at[0:wind_y].set(clip_fill)
+            grid = grid.at[h+wind_y:h].set(clip_fill)
+            grid = grid.at[:,0:wind_x].set(clip_fill)
+            grid = grid.at[:,w+wind_x:w].set(clip_fill)
+        
+        return grid
+    
+    def step(grid, wind):
+        grid = wind_step(grid, wind)
+        grid = diffuse_step(grid)
+        return grid
+    
+    return step
+
+def step_old(
     gas_grid: jnp.ndarray,
     sigma: float,
-    gas_diffusion: float,
+    mix: float,
     wind: jnp.ndarray,
     C: int
 ) -> jnp.ndarray:
@@ -46,10 +119,7 @@ def step(
     )
     diffused_gas_grid = diffused_gas_grid[0,:,:,:]
     
-    gas_grid = (
-        gas_grid * (1 - gas_diffusion) +
-        diffused_gas_grid * gas_diffusion
-    )
+    gas_grid = gas_grid * (1 - mix) + diffused_gas_grid * mix
 
     # apply wind with bilinear interpolation
     wind_y, wind_x = wind

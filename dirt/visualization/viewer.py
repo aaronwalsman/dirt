@@ -71,7 +71,9 @@ class Viewer:
         self.get_terrain_texture = get_terrain_texture
         if self.get_terrain_texture:
             self.get_terrain_texture = ignore_unused_args(
-                self.get_terrain_texture, ('params', 'report', 'texture_size'))
+                self.get_terrain_texture,
+                ('params', 'report', 'texture_size', 'display_mode'),
+            )
         self.get_water_map = get_water_map
         if self.get_water_map:
             self.get_water_map = ignore_unused_args(
@@ -96,6 +98,8 @@ class Viewer:
         self._init_players()
         self._init_camera_and_lights()
         self._init_callbacks()
+        
+        self.display_mode = 1
         
         self.step_size = 1
         self.change_step(start_step)
@@ -582,7 +586,11 @@ class Viewer:
         self._update_sun_position()
         if self.get_terrain_texture is not None:
             texture = self.get_terrain_texture(
-                self.params, self.report, self.terrain_texture_size)
+                self.params,
+                self.report,
+                self.terrain_texture_size,
+                self.display_mode,
+            )
             self.renderer.load_texture(
                 'terrain_texture',
                 texture_data = texture,
@@ -672,6 +680,11 @@ class Viewer:
         self.renderer.color_render(flip_y=False)
     
     def key_callback(self, window, key, scancode, action, mods):
+        # 0-9 sets various display modes
+        if action == glfw.PRESS and key >= 48 and key < 58:
+            self.display_mode = (key - 48)
+            print(f'display mode: {self.display_mode}')
+            self.change_step(self.current_step)
         if action == glfw.PRESS and key == 45:
             self.step_size = max(1, self.step_size-1)
             print(f'step size: {self.step_size}')

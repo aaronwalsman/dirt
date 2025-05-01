@@ -34,9 +34,9 @@ from dirt.visualization.viewer import Viewer
 @static_dataclass
 class TrainParams:
     seed : int = 1234
-    initial_players : int = 1024
+    initial_players : int = 2048
     max_players : int = 2048
-    world_size : Tuple[int,int] = (256, 256)
+    world_size : Tuple[int,int] = (512, 512)
     output_directory : str = '.'
     load_state : str = ''
     visualize : bool = False
@@ -48,6 +48,9 @@ class TrainParams:
             mean_energy_sites = 128**2,
             initial_total_biomass = 128**2,
             mean_biomass_sites = 128**2,
+            terrain_octaves = 12,
+            terrain_unit_scale = 0.0025,
+            terrain_max_height = 100.,
         )
     )
     train_params : Any = NaturalSelectionParams(
