@@ -23,8 +23,11 @@ def nomnom_linear_observation_encoder(dtype=jnp.float32):
         food = (x.view == 1).reshape(-1).astype(dtype)
         players = (x.view == 2).reshape(-1).astype(dtype)
         out_of_bounds = (x.view == 3).reshape(-1).astype(dtype)
+        # return jnp.concatenate(
+        #     (food, players, out_of_bounds, x.energy[...,None]), axis=-1)
         return jnp.concatenate(
-            (food, players, out_of_bounds, x.energy[...,None]), axis=-1)
+                    (food, players, out_of_bounds, x.energy.reshape(-1)), axis=-1)
+
     
     return lambda: None, model
 

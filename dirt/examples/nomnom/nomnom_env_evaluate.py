@@ -8,8 +8,8 @@ from mechagogue.player_list import birthday_player_list, player_family_tree
 from mechagogue.pop.natural_selection import NaturalSelectionState
 
 from dirt.gridworld2d import dynamics, observations, spawn
-from dirt.examples.nomnom.nomnom_env import nomnom, NomNomParams, NomNomState, NomNomAction, NomNomObservation
-from dirt.examples.nomnom.nomnom_model import nomnom_model, NomNomModelParams
+from dirt.envs.nomnom import nomnom, NomNomParams, NomNomState, NomNomAction, NomNomObservation
+from dirt.models.nomnom import nomnom_model, NomNomModelParams
 
 # Reuse the existing NomNomParams but create a new instance with customized values.
 custom_5x5_params_fixed_food = NomNomParams(

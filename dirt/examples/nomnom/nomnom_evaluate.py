@@ -15,13 +15,13 @@ from mechagogue.static_dataclass import static_dataclass
 from mechagogue.player_list import birthday_player_list, player_family_tree
 
 from mechagogue.tree import tree_getitem
-from mechagogue.serial import load_example_data
+from mechagogue.serial import load_example_data, save_leaf_data
 
-from dirt.models.nomnom_model import nomnom_linear_model, nomnom_unconditional_model
-from dirt.examples.nomnom.train_nomnom import NomNomTrainParams, NomNomModelParams, NomNomParams, make_report
+from dirt.examples.nomnom.nomnom_model import nomnom_linear_model, nomnom_model
+from dirt.examples.nomnom.train_nomnom import NomNomTrainParams, NomNomModelParams, NomNomParams, NomNomReport, make_report
 from dirt.examples.nomnom.nomnom_env_evaluate import nomnom_no_reproduce, place_food_in_middle, place_food_at_edge, place_food_randomly
 
-def simulate_player_single_agent(n_steps, single_player_params, food_num, key):
+def simulate_player_single_agent(n_steps, single_player_params, food_num, key, save_report_path=None):
     """
     Runs a single-agent simulation in a 5*5 no-reproduce environment using
     one player's parameters.
@@ -61,6 +61,17 @@ def simulate_player_single_agent(n_steps, single_player_params, food_num, key):
     # final_food = jnp.sum(state.food_grid)
     # all_food_eaten = float(initial_food - final_food)
     all_food_eaten = (initial_food - final_food).astype(jnp.float32)
+
+    if save_report_path is not None:
+        report = NomNomReport(
+            actions=model(final_key, obs, single_player_params),
+            players=jnp.array([True]),  # or more precise player mask if needed
+            player_x=final_state.player_x,
+            player_r=final_state.player_r,
+            player_energy=final_state.player_energy,
+            food_grid=final_state.food_grid,
+        )
+        save_leaf_data(report, save_report_path)
     return all_food_eaten
 
 def evaluate_state_file(
@@ -151,8 +162,20 @@ def evaluate_state_file(
     keys_for_agents = jrng.split(key, n_agents * trials_per_agent)
     keys_for_agents = keys_for_agents.reshape(n_agents, trials_per_agent)
 
-    food_eaten_arr = simulate_agents_and_trials(steps_per_trial, food_num, batch_params, keys_for_agents)
-    all_food_eaten = food_eaten_arr.reshape(-1)
+    all_food_eaten = []
+    for agent_idx, i in enumerate(active_indices):
+        single_player_params = tree_getitem(model_state, i)
+        for trial_idx in range(trials_per_agent):
+            key, sim_key = jrng.split(key)
+            report_path = os.path.join(
+                os.path.dirname(state_path),
+                f"report_eval_epoch{epoch:04}_agent{i:03}_trial{trial_idx:02}.state"
+            )
+            food_eaten = simulate_player_single_agent(
+                steps_per_trial, single_player_params, food_num, sim_key, save_report_path=report_path
+            )
+            all_food_eaten.append(food_eaten)
+
 
     if len(all_food_eaten) == 0:
         return (epoch, 0.0, 0.0)
