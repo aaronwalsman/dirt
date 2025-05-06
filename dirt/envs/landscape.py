@@ -43,13 +43,15 @@ class LandscapeParams:
     terrain_persistence : float = 0.5
     terrain_unit_scale : float = 0.005
     terrain_max_height : float = 50.
+    max_effective_altitude : float = 100.
     
     # water
     water_per_cell : float = 2.
     water_initial_fill_rate : float = 0.01
     water_flow_rate : float = 0.1
     air_moisture_diffusion : float = 1./3.
-
+    min_effective_water : float = 0.05
+    
     # rain
     # moved to weather
     #rain_moisture_up_threshold : float = 0.8
@@ -63,10 +65,12 @@ class LandscapeParams:
     #wind_bias : Tuple[float, float] | jnp.ndarray = (0.,0.)
     #air_initial_temperature : float = 0.
     air_initial_smell: float = 0.
-
+    
     # light
     light_initial_strength: float = 0.35
     night_effect: float = 0.15
+    cloud_shade: float = 0.25
+    rain_shade: float = 0.25
     
     # temperature
     water_effect: float  = 0.25
@@ -102,8 +106,8 @@ class LandscapeState:
     moisture : jnp.array
     rain: jnp.array
     wind : jnp.array
-    air_light: jnp.array
-    air_smell: jnp.array
+    light: jnp.array
+    smell: jnp.array
     day: int
     
     energy : jnp.array
@@ -188,9 +192,9 @@ def landscape(
         #    params.air_initial_temperature,
         #    dtype=float_dtype,
         #)
-        air_light = jnp.zeros(params.world_size, dtype=float_dtype)
-        air_smell = jnp.zeros(params.world_size, dtype=float_dtype)
-        air_smell = air_smell[...,None]
+        light = jnp.zeros(params.world_size, dtype=float_dtype)
+        smell = jnp.zeros(params.world_size, dtype=float_dtype)
+        smell = smell[...,None]
         
         # weather
         key, weather_key = jrng.split(key)
@@ -228,8 +232,8 @@ def landscape(
             moisture,
             rain,
             wind,
-            air_light,
-            air_smell,
+            light,
+            smell,
             day,
             energy,
             biomass,
@@ -250,7 +254,7 @@ def landscape(
         biomass = state.biomass.at[y, x].set(consumable.biomass)
         return state.replace(water=water, energy=energy, biomass=biomass)
     
-    def add_consmable(state, locations, consumable):
+    def add_consumable(state, locations, consumable):
         y, x = locations[...,0], locations[...,1]
         water = state.water.at[y, x].add(consumable.water)
         energy = state.energy.at[y, x].add(consumable.energy)
@@ -264,12 +268,14 @@ def landscape(
             state : LandscapeState,
         ) -> LandscapeState :
             
+            #return state
+            
             terrain = state.terrain
             water = state.water
             erosion = state.erosion
             wind = state.wind
             moisture = state.moisture
-            air_smell = state.air_smell
+            smell = state.smell
             temperature = state.temperature
             day = state.day
 
@@ -294,8 +300,8 @@ def landscape(
             
             # TODO: Concretization problem... need to configure the
             # kernel and not have it dynamically shaped
-            #air_smell = gas_step(
-            #    air_smell, diffusion_std, 1., wind, 1)
+            #smell = gas_step(
+            #    smell, diffusion_std, 1., wind, 1)
             
             # move water
             water = flow_step(terrain, water, params.water_flow_rate)
@@ -312,16 +318,25 @@ def landscape(
             )
             erosion = reset_erosion_status(terrain, old_terrain, erosion)
             
+            altitude = terrain + water
+            normalized_altitude = jnp.clip(
+                altitude/params.max_effective_altitude, 0., 1.)
+            
             # light change based on rotation of Sun
             light_strength = get_day_light_strength(day)
             light = light_step(
                 day_length,
-                terrain, water, 
+                altitude, 
                 light_strength,
                 light_length,
                 day,
                 params.night_effect
             )
+            
+            # reduce light based on shade from clouds and rain
+            clouds = moisture / params.weather.moisture_start_raining
+            shade = 1. - (clouds*params.cloud_shade + rain*params.rain_shade)
+            light = light * shade
             
             # temperature changed based on light and rain
             #temperature = temperature_step(
@@ -359,7 +374,7 @@ def landscape(
                 moisture,
                 rain,
                 wind,
-                terrain,
+                normalized_altitude,
                 light,
             )
             
@@ -371,8 +386,8 @@ def landscape(
                 moisture=moisture,
                 rain=rain,
                 wind=wind,
-                air_light=light,
-                air_smell=air_smell,
+                light=light,
+                smell=smell,
                 day=day,
             )
             

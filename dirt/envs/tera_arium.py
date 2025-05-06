@@ -41,6 +41,8 @@ class TeraAriumParams:
     initial_players : int = 1024
     max_players : int = 16384
     
+    min_effective_water : float = 0.05
+    
     landscape : LandscapeParams = LandscapeParams()
     bugs : BugParams = BugParams()
 
@@ -76,40 +78,43 @@ class TeraAriumTraits:
 TeraAriumAction = BugAction
 TeraAriumTraits = BugTraits
 
-def render_tera_arium(
-    water,
-    energy,
-    biomass,
-    bug_x,
-    bug_color,
-    light,
-):
-    h, w = water.shape
+def tera_arium_renderer(params):
+    def render(
+        water,
+        energy,
+        biomass,
+        bug_x,
+        bug_color,
+        light,
+    ):
+        h, w = water.shape
 
-    # start with a baseline rock color of 50% gray
-    rgb = jnp.full((h,w,3), ROCK_COLOR, dtype=water.dtype)
+        # start with a baseline rock color of 50% gray
+        rgb = jnp.full((h,w,3), ROCK_COLOR, dtype=water.dtype)
 
-    # overlay the water as blue
-    rgb = jnp.where(water[..., None] > 0.05, WATER_COLOR, rgb)
+        # overlay the water as blue
+        rgb = jnp.where(water[..., None] > 0.05, WATER_COLOR, rgb)
 
-    # apply the energy tint
-    clipped_energy = jnp.clip(energy, min=0., max=1.)
-    rgb = rgb + clipped_energy[..., None] * ENERGY_TINT
+        # apply the energy tint
+        clipped_energy = jnp.clip(energy, min=0., max=1.)
+        rgb = rgb + clipped_energy[..., None] * ENERGY_TINT
 
-    # apply the biomass tint
-    clipped_biomass = jnp.clip(biomass, min=0., max=1.)
-    rgb = rgb + clipped_biomass[..., None] * BIOMASS_TINT
+        # apply the biomass tint
+        clipped_biomass = jnp.clip(biomass, min=0., max=1.)
+        rgb = rgb + clipped_biomass[..., None] * BIOMASS_TINT
+        
+        # overlay the bug colors
+        rgb = rgb.at[bug_x[...,0], bug_x[...,1]].set(bug_color)
+        
+        # apply lighting
+        rgb = rgb * light[..., None]
+        
+        # clip between 0 and 1
+        rgb = jnp.clip(rgb, min=0., max=1.)
+        
+        return rgb
     
-    # overlay the bug colors
-    rgb = rgb.at[bug_x[...,0], bug_x[...,1]].set(bug_color)
-    
-    # apply lighting
-    rgb = rgb * light[..., None]
-    
-    # clip between 0 and 1
-    rgb = jnp.clip(rgb, min=0., max=1.)
-    
-    return rgb
+    return render
 
 def tera_arium(params : TTeraAriumParams = TeraAriumParams()):
     
@@ -214,7 +219,7 @@ def tera_arium(params : TTeraAriumParams = TeraAriumParams()):
             traits,
             next_landscape_state.terrain,
             next_landscape_state.water,
-            next_landscape_state.air_light,
+            next_landscape_state.light,
         )
         # -- put the expelled resources back into the landscape
         next_landscape_state = add_landscape_consumable(

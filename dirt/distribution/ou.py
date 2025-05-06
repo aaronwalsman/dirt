@@ -20,7 +20,8 @@ def ou_process(
     def init(
         key : chex.PRNGKey,
     ):
-        x = mu + jrng.normal(key, (channels,), dtype=dtype) * sigma
+        std = sigma / jnp.sqrt(2 * theta)
+        x = mu + jrng.normal(key, (channels,), dtype=dtype) * std #sigma
         return x
     
     def step(

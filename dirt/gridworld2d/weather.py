@@ -18,39 +18,51 @@ Why not add the weather system?
 Here is a naive version, only adding the evaporation and rain drops
 '''
 
-# temperature units:
-# 0: -50C
-# 1: 25C
-
 @static_dataclass
 class WeatherParams:
     # general
     world_size: Tuple[int,int] = (32, 32)
+    max_effective_altitude = 100.
+    min_effective_water = 0.05
     
     # temperature
     min_temperature: float = -1.
     initial_temperature: float = 1.
-    ground_heat_absorption: float = 0.01
-    water_heat_absorption: float = 0.005
-    moisture_heat_exchange_factor: float = 0.5
-    elevation_: 
+    
+    # notes on temperature:
+    # DIRT temperatures are approximately 1 unit = 20c
+    # The defaults here mean that:
+    #  - the highest mountain peak with no sunlight will stabilize at -40c
+    #  - the highest mountain peak with full sunlight will stabilize at 20c
+    #  - sea level with no sunlight will stabilize at -20c
+    #  - sea level with full sunlight will stabilize at 40c
+    #  - sea level over water will stabilize at 30c
+    sea_level_temperature_baseline: float = -1.
+    mountain_temperature_baseline: float = -2.
+    ground_heat_absorption: float = 3.
+    water_heat_absorption: float = 2.
+    ground_thermal_mass: float = 0.9995
+    water_thermal_mass: float = 0.9999
+    temperature_std: float = 1.
+    temperature_mix: float = 1.
     
     # moisture
     initial_moisture: float = 0.
     evaporation_rate: float = 0.01
     min_evaporation_temp: float = 0.1
     max_evaporation_temp: float = 2.
-    moisture_std: float = 1
+    moisture_std: float = 1.
     moisture_mix: float = 1.
     
     # rain
-    rain_per_step: float = 0.32
-    moisture_start_raining: float = 1.0
-    moisture_stop_raining: float = 0.
+    rain_per_step: float = 0.01
+    moisture_start_raining: float = 0.2
+    moisture_stop_raining: float = 0.05
+    rain_altitude_scale: float = 0.25
     
     # wind
-    wind_std: float = 1.
-    wind_reversion: float = 0.001
+    wind_std: float = 3
+    wind_reversion: float = 0.1
     wind_bias: Tuple[float,float] | jnp.ndarray = (0.,0.)
 
 def weather(
@@ -62,14 +74,32 @@ def weather(
     evaporation_temp_range = (
         params.max_evaporation_temp - params.min_evaporation_temp)
     
-    init_wind, step_wind = ou_process(
-        params.wind_std,
+    init_wind, step_wind_ou = ou_process(
+        params.wind_std * jnp.sqrt(2*params.wind_reversion),
         params.wind_reversion,
         jnp.array(params.wind_bias, dtype=float_dtype),
         dtype=float_dtype,
     )
+    def step_wind(key, wind, step_size = 1.):
+        ou_key, round_key = jrng.split(key)
+        wind = step_wind_ou(ou_key, wind, step_size=step_size)
+        wind_floor = jnp.floor(wind)
+        wind_ceil = jnp.ceil(wind)
+        p_ceil = wind - wind_floor
+        round_direction = jrng.uniform(round_key, wind.shape)
+        discrete_wind = jnp.where(
+            round_direction < p_ceil, wind_ceil, wind_floor)
+        return wind, discrete_wind
     
-    moisture_diffusion_step = gas(
+    temperature_diffusion_step = gas(
+        params.temperature_std,
+        params.temperature_mix,
+        boundary='wrap',
+        include_wind=False,
+        float_dtype=float_dtype,
+    )
+    
+    moisture_step = gas(
         params.moisture_std,
         params.moisture_mix,
         boundary='wrap',
@@ -77,14 +107,43 @@ def weather(
     )
     
     def temperature_step(
+        key,
         water,
         temperature,
-        moisture,
-        rain,
-        altitude,
+        normalized_altitude,
         light,
     ):
+        # diffuse the temperature
+        next_temperature = temperature_diffusion_step(key, temperature)
         
+        # compute the normalized altitude and standing water
+        #normalized_altitude = altitude/params.max_effective_altitude
+        standing_water = water > params.min_effective_water
+        
+        # compute the temperature blend
+        temperature_alpha = jnp.where(
+            standing_water,
+            params.water_thermal_mass,
+            params.ground_thermal_mass,
+        )
+        
+        # compute the target_temperature
+        temperature_baseline = (
+            normalized_altitude * params.mountain_temperature_baseline +
+            (1. - normalized_altitude) * params.sea_level_temperature_baseline
+        )
+        heat_absorption = jnp.where(
+            standing_water,
+            params.water_heat_absorption,
+            params.ground_heat_absorption,
+        )
+        target_temperature = temperature_baseline + light * heat_absorption
+        
+        # incorporte the target temperature with an exponential moving average
+        next_temperature = (
+            next_temperature * temperature_alpha +
+            target_temperature * (1. - temperature_alpha)
+        )
         
         return next_temperature
     
@@ -119,9 +178,11 @@ def weather(
         return next_water, next_moisture
 
     def rain_step(
+        normalized_altitude: jnp.ndarray,
         water: jnp.ndarray,
         moisture: jnp.ndarray,
         rain: jnp.ndarray,
+        wind: jnp.ndarray,
     ) -> jnp.ndarray:
         '''
         Rain when the water in the atmosphere surpasses a certain value
@@ -133,11 +194,34 @@ def weather(
         rain_amount = jnp.clip(rain_amount, max=moisture)
         next_water = water + rain_amount
         next_moisture = moisture - rain_amount
-        next_rain = jnp.where(
-            (rain == 0) & (moisture > params.moisture_start_raining),
-            True,
-            jnp.where((rain) & (moisture < params.moisture_stop_raining), False, rain)
-        )
+        altitude_rain_scale = (
+            1. - normalized_altitude + params.rain_altitude_scale)
+        moisture_start_raining = (
+            params.moisture_start_raining * altitude_rain_scale)
+        moisture_stop_raining = (
+            params.moisture_stop_raining * altitude_rain_scale)
+        start_raining = moisture > moisture_start_raining
+        stop_raining = moisture <= moisture_stop_raining
+        next_rain = (rain | start_raining) & ~stop_raining
+        
+        # smooth out the features
+        # turn off rain where there are less than three neighbors also raining
+        # turn on rain  where there are more than six neighbors also raining
+        kernel = jnp.array([
+            [1, 1, 1],
+            [1, 0, 1],
+            [1, 1, 1],
+        ], dtype=jnp.uint8).reshape((3,3,1,1))
+        raining_neighbors = jax.lax.conv_general_dilated(
+            next_rain.astype(jnp.uint8)[None,...,None],
+            kernel,
+            window_strides=(1,1),
+            padding='SAME',
+            dimension_numbers=('NHWC', 'HWIO', 'NHWC')
+        )[0,...,0]
+        next_rain = (next_rain & raining_neighbors > 3) | raining_neighbors > 6
+        
+        next_rain = jnp.roll(next_rain, shift=wind, axis=(0,1))
         
         return next_water, next_moisture, next_rain
     
@@ -159,35 +243,31 @@ def weather(
         moisture: jnp.ndarray, 
         rain: jnp.ndarray,
         wind: jnp.ndarray,
-        terrain: jnp.ndarray,
+        normalized_altitude: jnp.ndarray,
         light: jnp.ndarray,
     ) -> jnp.ndarray:
-        '''
-        Put evaporation and rain together to make the naive
-        full weather system
-        '''
+        
         # update the temperature
-        altitude = terrain + water
+        key, temperature_key = jrng.split(key)
         temperature = temperature_step(
-            temperature,
-            altitutde,
-            light,
-        )
+            temperature_key, water, temperature, normalized_altitude, light)
         
         # evaporate
         water, moisture = evaporate_step(water, temperature, moisture, rain)
         
         # change wind direction
         key, wind_key = jrng.split(key)
-        wind = step_wind(wind_key, wind, step_size=step_size)
-        
-        # blow the moisture around
-        moisture = moisture_diffusion_step(moisture, wind)
+        wind, discrete_wind = step_wind(wind_key, wind, step_size=step_size)
         
         # make it rain
-        water, moisture, rain = rain_step(water, moisture, rain)
+        water, moisture, rain = rain_step(
+            normalized_altitude, water, moisture, rain, discrete_wind)
         
-        return water, moisture, rain, wind
+        # blow the moisture around
+        key, moisture_key = jrng.split(key)
+        moisture = moisture_step(moisture_key, moisture, discrete_wind)
+        
+        return water, temperature, moisture, rain, wind
     
     return init, step
 

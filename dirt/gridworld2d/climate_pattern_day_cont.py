@@ -71,8 +71,7 @@ def get_normalize(
 
 def light_step(
     day_length: int,
-    terrain: jnp.ndarray,
-    water: jnp.ndarray,
+    altitude: jnp.array,
     light_strength: float,
     day_light_length: int,
     time: int,
@@ -87,8 +86,7 @@ def light_step(
     '''
     angle = get_angle(day_length, day_light_length, time)
     light_direction = jnp.array([jnp.cos(angle), jnp.sin(angle), 0.0])
-    final_terrain = terrain + water
-    normals = terrain_gradient(final_terrain)
+    normals = terrain_gradient(altitude)
     light_direction = light_direction.reshape(1, 1, 3)
     dot_products = jnp.einsum('ijk,ijk->ij', normals, light_direction)
     dot_products_norm = get_normalize(dot_products)
@@ -138,7 +136,7 @@ def release_temp(
     water_norm = get_normalize(water)
     current_evaporation_norm = get_normalize(current_evaporation)
     release_rate = (
-        light_intensity/night_effect * (1 - (1 - rain_effect) * rain_status) * (1 + water_effect - water_norm) * (1 + evaporation_effect - current_evaporation_norm)
+        light_intensity/night_effect * (1 - (1 - rain_effect) * rain_status) * (1 + water_effect - water_norm) * (1 + evaporation_effect - current_evaporation_norm))
     return temperature - release_rate
 
 def temperature_step(
