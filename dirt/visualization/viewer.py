@@ -18,7 +18,8 @@ from mechagogue.arg_wrappers import ignore_unused_args
 from dirt.visualization.height_map import (
     make_height_map_vertices_and_normals, make_height_map_mesh)
 
-default_get_active_players = lambda report : report.players
+# default_get_active_players = lambda report : report.players
+default_get_active_players = lambda report: report[0].players if isinstance(report, list) else report.players
 default_get_player_x = lambda report : report.player_x
 default_get_player_r = lambda report : report.player_r
 default_get_terrain_map = lambda params : jnp.zeros(
@@ -31,7 +32,7 @@ default_get_terrain_map = lambda params : jnp.zeros(
 #default_get_water_map = lambda : None
 default_get_player_color = lambda player_id : color_index_to_float(player_id+1)
 
-PLAYER_RADIUS=0.4
+PLAYER_RADIUS=0.8
 
 class Viewer:
     def __init__(
@@ -170,12 +171,19 @@ class Viewer:
             texture_name='terrain_texture',
             rough=1.,
         )
+
+        scale = 0.5  # 👈 adjust this to control relative size
+        scale_mat = np.diag([scale, scale, scale, 1.0])
+
+        center_shift = np.eye(4)
+        center_shift[0, 3] = - (w - 1) / 2
+        center_shift[1, 3] = - (h - 1) / 2
         
         self.renderer.add_instance(
             name='terrain',
             mesh_name='terrain_mesh',
             material_name='terrain_material',
-            transform=self.upright,
+            transform=self.upright @ scale_mat @ center_shift,
         )
         
         if self.get_water_map is not None:
@@ -213,7 +221,8 @@ class Viewer:
     
     def _init_players(self):
         active_players = self.get_active_players(self.params, self.report)
-        self.max_players, = active_players.shape
+        # self.max_players, = active_players.shape
+        self.max_players = int(active_players.shape[0]) if active_players.ndim > 0 else 1
         
         # make player cube
         self.renderer.load_mesh(
@@ -452,8 +461,10 @@ class Viewer:
         
         self.report = tree_getitem(
             self.current_report_block, block_step)
-        
-        #print(self.report)
+        # self.report = self.current_report_block[block_step]   
+        # print(self.report)
+        # print(type(self.report))
+        # breakpoint()
         
         self._update_terrain()
         #self._update_water()
@@ -561,8 +572,10 @@ class Viewer:
         y = player_x[..., 0]
         x = player_x[..., 1]
         z = self.total_height_map[y, x] + PLAYER_RADIUS
-        y = y - height/2.
-        x = x - width/2.
+        # y = y - height/2.
+        # x = x - width/2.
+        y = (y - (height - 1) / 2.)
+        x = (x - (width - 1) / 2.)
         
         cs = np.array((( 1, 0), ( 0, 1), (-1, 0), ( 0,-1)))[player_r]
         c = cs[...,0]
