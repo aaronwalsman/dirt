@@ -7,6 +7,7 @@ import jax.numpy as jnp
 
 from dirt.visualization.viewer import Viewer
 from dirt.examples.nomnom.train_nomnom import NomNomTrainParams, NomNomReport
+from dirt.envs.nomnom import NomNomAction
 
 def terrain_texture(report, texture_size):
     th, tw = texture_size
@@ -35,11 +36,39 @@ def start_viewer(output_directory):
         for file_path in os.listdir(output_directory)
         if file_path.startswith('report') and file_path.endswith('.state')
     ])
-    
+
+    # example_report = [
+    #     NomNomReport(
+    #         actions=NomNomAction(
+    #             forward=jnp.array([0]),
+    #             rotate=jnp.array([0]),
+    #             reproduce=jnp.array([0]),
+    #         ),
+    #         players=jnp.array([True]),
+    #         player_x=jnp.zeros((1, 2), dtype=jnp.int32),
+    #         player_r=jnp.zeros((1,), dtype=jnp.int32),
+    #         player_energy=jnp.zeros((1,), dtype=jnp.float32),
+    #         food_grid=jnp.zeros((4, 4), dtype=bool),
+    #     )
+    #     for _ in range(5)
+    # ]
+    example_report = NomNomReport(
+        actions=NomNomAction(
+            forward=jnp.array([0]),
+            rotate=jnp.array([0]),
+            reproduce=jnp.array([0]),
+        ),
+        players=jnp.array([True]),
+        player_x=jnp.zeros((1, 2), dtype=jnp.int32),
+        player_r=jnp.zeros((1,), dtype=jnp.int32),
+        player_energy=jnp.zeros((1,), dtype=jnp.float32),
+        food_grid=jnp.zeros((5, 5), dtype=bool),
+    )
+
     viewer = Viewer(
         NomNomTrainParams(),
         params_path,
-        NomNomReport(),
+        example_report,
         report_paths,
         window_width=1024,
         window_height=1024,

@@ -19,6 +19,7 @@ from mechagogue.serial import load_example_data, save_leaf_data
 
 from dirt.examples.nomnom.nomnom_model import nomnom_linear_model, nomnom_model
 from dirt.examples.nomnom.train_nomnom import NomNomTrainParams, NomNomModelParams, NomNomParams, NomNomReport, make_report
+from dirt.envs.nomnom import NomNomAction
 from dirt.examples.nomnom.nomnom_env_evaluate import nomnom_no_reproduce, place_food_in_middle, place_food_at_edge, place_food_randomly
 
 def simulate_player_single_agent(n_steps, single_player_params, food_num, key, save_report_path=None):
@@ -39,40 +40,68 @@ def simulate_player_single_agent(n_steps, single_player_params, food_num, key, s
     init, model = nomnom_linear_model(model_params)
     initial_food = jnp.sum(state.food_grid)
 
-    # for t in range(n_steps):
-    #     action = model(step_key, obs, single_player_params)
-    #     next_state, next_obs, _, _, _ = step_env(step_key, state, action)
+    all_reports = []
+
+    for t in range(n_steps):
+        rng_key, step_key = jrng.split(rng_key)
+        action = model(step_key, obs, single_player_params)
+        # print(action)
+        # print(type(action))
+        # breakpoint()
+        state, obs, _, _, _ = step_env(step_key, state, action)
         
-    #     # print(f"  Step {t}, action={action}, energy={next_obs.energy}")
-        
-    #     state, obs = next_state, next_obs
-    #     # print("Agent View:\n", obs.view)
+        # print(f"  Step {t}, action={action}, energy={next_obs.energy}")
+        if save_report_path is not None:
+            report = NomNomReport(
+                    actions=NomNomAction(
+                        forward=jnp.atleast_1d(action.forward),
+                        rotate=jnp.atleast_1d(action.rotate),
+                        reproduce=jnp.atleast_1d(action.reproduce),
+                    ),
+                    players=jnp.atleast_1d(True),
+                    player_x=jnp.atleast_2d(state.player_x),           # shape (1, 2)
+                    player_r=jnp.atleast_1d(state.player_r),           # shape (1,)
+                    player_energy=jnp.atleast_1d(state.player_energy), # shape (1,)
+                    food_grid=state.food_grid                          # assumed already (5, 5)
+                )
+            # print(report)
+            # print(type(report))
+            # breakpoint()
+            # step_report_path = save_report_path.replace(".state", f"_step{t:02}.state")
+            # save_leaf_data(report, step_report_path)
+            all_reports.append(report)
+    
+    final_food = jnp.sum(state.food_grid)
+    food_eaten = (initial_food - final_food).astype(jnp.float32)
+    return food_eaten, all_reports
+        # state, obs = next_state, next_obs
+        # # print("Agent View:\n", obs.view)
 
-    def step_fn(carry, _):
-        state, obs, key = carry
-        key, subkey = jrng.split(key)
-        action = model(subkey, obs, single_player_params)
-        state, obs, _, _, _ = step_env(subkey, state, action)
-        return (state, obs, key), None
+    # def step_fn(carry, _):
+    #     state, obs, key = carry
+    #     key, subkey = jrng.split(key)
+    #     action = model(subkey, obs, single_player_params)
+    #     state, obs, _, _, _ = step_env(subkey, state, action)
+    #     return (state, obs, key), None
 
-    carry_init = (state, obs, key)
-    (final_state, final_obs, final_key), _ = jax.lax.scan(step_fn, carry_init, jnp.arange(n_steps))
-    final_food = jnp.sum(final_state.food_grid)
-    # final_food = jnp.sum(state.food_grid)
-    # all_food_eaten = float(initial_food - final_food)
-    all_food_eaten = (initial_food - final_food).astype(jnp.float32)
+    # carry_init = (state, obs, key)
+    # (final_state, final_obs, final_key), _ = jax.lax.scan(step_fn, carry_init, jnp.arange(n_steps))
+    # final_food = jnp.sum(final_state.food_grid)
+    # # final_food = jnp.sum(state.food_grid)
+    # # all_food_eaten = float(initial_food - final_food)
+    # all_food_eaten = (initial_food - final_food).astype(jnp.float32)
 
-    if save_report_path is not None:
-        report = NomNomReport(
-            actions=model(final_key, obs, single_player_params),
-            players=jnp.array([True]),  # or more precise player mask if needed
-            player_x=final_state.player_x,
-            player_r=final_state.player_r,
-            player_energy=final_state.player_energy,
-            food_grid=final_state.food_grid,
-        )
-        save_leaf_data(report, save_report_path)
-    return all_food_eaten
+    # if save_report_path is not None:
+    #     report = NomNomReport(
+    #         actions=model(final_key, obs, single_player_params),
+    #         players=jnp.array([True]),  # or more precise player mask if needed
+    #         player_x=final_state.player_x,
+    #         player_r=final_state.player_r,
+    #         player_energy=final_state.player_energy,
+    #         food_grid=final_state.food_grid,
+    #     )
+    #     save_leaf_data(report, save_report_path)
+    # return all_food_eaten
 
 def evaluate_state_file(
     params,
@@ -171,9 +200,13 @@ def evaluate_state_file(
                 os.path.dirname(state_path),
                 f"report_eval_epoch{epoch:04}_agent{i:03}_trial{trial_idx:02}.state"
             )
-            food_eaten = simulate_player_single_agent(
+            food_eaten, all_reports = simulate_player_single_agent(
                 steps_per_trial, single_player_params, food_num, sim_key, save_report_path=report_path
             )
+            batched_report = jax.tree_util.tree_map(
+                lambda *xs: jnp.stack(xs), *all_reports  # List[NomNomReport]
+)
+            save_leaf_data(batched_report, report_path)
             all_food_eaten.append(food_eaten)
 
 

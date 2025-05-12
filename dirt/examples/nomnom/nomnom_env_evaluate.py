@@ -13,7 +13,7 @@ from dirt.models.nomnom import nomnom_model, NomNomModelParams
 
 # Reuse the existing NomNomParams but create a new instance with customized values.
 custom_5x5_params_fixed_food = NomNomParams(
-    world_size=(5, 5),
+    world_size=(4, 4),
     initial_players=1,
     max_players=1,         
     mean_initial_food=0,
