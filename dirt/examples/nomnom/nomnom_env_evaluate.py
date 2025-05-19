@@ -311,7 +311,7 @@ def place_food_randomly(
         key
     ) -> NomNomState:
     """
-    Sets a single piece of food in the center (2,2) of a 5x5 grid.
+    Sets several food in the grid.
     """
     H, W = state.food_grid.shape
 

@@ -266,7 +266,7 @@ if __name__ == "__main__":
     max_players = 1
 
     custom_5x5_params_fixed_food = NomNomParams(
-        world_size=(5, 5),
+        world_size=(64, 64),
         initial_players=1,          
         max_players=1,               
         mean_initial_food=0,         
