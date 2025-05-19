@@ -18,8 +18,7 @@ from mechagogue.arg_wrappers import ignore_unused_args
 from dirt.visualization.height_map import (
     make_height_map_vertices_and_normals, make_height_map_mesh)
 
-# default_get_active_players = lambda report : report.players
-default_get_active_players = lambda report: report[0].players if isinstance(report, list) else report.players
+default_get_active_players = lambda report : report.players
 default_get_player_x = lambda report : report.player_x
 default_get_player_r = lambda report : report.player_r
 default_get_terrain_map = lambda params : jnp.zeros(
@@ -32,7 +31,7 @@ default_get_terrain_map = lambda params : jnp.zeros(
 #default_get_water_map = lambda : None
 default_get_player_color = lambda player_id : color_index_to_float(player_id+1)
 
-PLAYER_RADIUS=0.8
+PLAYER_RADIUS=1.25
 
 class Viewer:
     def __init__(
@@ -54,6 +53,7 @@ class Viewer:
         get_terrain_texture=None,
         get_water_map=None,
         get_player_color=default_get_player_color,
+        get_sun_direction=None,
     ):
         
         self.get_active_players = ignore_unused_args(
@@ -78,6 +78,9 @@ class Viewer:
                 get_water_map, ('params', 'report'))
         self.get_player_color = ignore_unused_args(
             get_player_color, ('player_id', 'params', 'report'))
+        if get_sun_direction:
+            self.get_sun_direction = ignore_unused_args(
+                get_sun_direction, ('params', 'report'))
         
         self._init_params_and_reports(
             example_params,
@@ -89,7 +92,7 @@ class Viewer:
         )
         self._init_context_and_window(window_width, window_height)
         self._init_splendor_render()
-        self._init_terrain(terrain_texture_multiple)
+        self._init_landscape(terrain_texture_multiple)
         self._init_players()
         self._init_camera_and_lights()
         self._init_callbacks()
@@ -138,13 +141,15 @@ class Viewer:
             [ 0, 0, 0, 1],
         ])
     
-    def _init_terrain(self, texture_multiple):
+    def _init_landscape(self, texture_multiple):
         self.terrain_map = self.get_terrain_map(self.params, self.report)
         h, w = self.terrain_map.shape
         self.world_size = (h,w)
         self.terrain_texture_size = h * texture_multiple, w * texture_multiple
         
         vertices, normals, uvs, faces = make_height_map_mesh(self.terrain_map)
+        self.terrain_uvs = uvs
+        self.terrain_faces = faces
         self.renderer.load_mesh(
             name='terrain_mesh',
             mesh_data={
@@ -171,19 +176,12 @@ class Viewer:
             texture_name='terrain_texture',
             rough=1.,
         )
-
-        scale = 0.5  # 👈 adjust this to control relative size
-        scale_mat = np.diag([scale, scale, scale, 1.0])
-
-        center_shift = np.eye(4)
-        center_shift[0, 3] = - (w - 1) / 2
-        center_shift[1, 3] = - (h - 1) / 2
         
         self.renderer.add_instance(
             name='terrain',
             mesh_name='terrain_mesh',
             material_name='terrain_material',
-            transform=self.upright @ scale_mat @ center_shift,
+            transform=self.upright,
         )
         
         if self.get_water_map is not None:
@@ -218,11 +216,50 @@ class Viewer:
                 material_name='water_material',
                 transform=self.upright,
             )
+        
+        if hasattr(self, 'get_sun_direction'):
+            max_size = max(self.world_size)
+            self.renderer.load_mesh(
+                name='sun_mesh',
+                mesh_primitive={
+                    'shape' : 'sphere',
+                    'radius' : max_size * 0.05,
+                },
+                color_mode='flat_color',
+            )
+            self.renderer.load_material(
+                name='sun_material',
+                flat_color=(1,1,1),
+                rough=1.,
+            )
+            self.renderer.add_instance(
+                name='sun',
+                mesh_name='sun_mesh',
+                material_name='sun_material',
+                transform = self.upright,
+            )
+            self._update_sun_position()
+    
+    def _update_sun_position(self):
+        if hasattr(self, 'get_sun_direction'):
+            sun_direction = self.get_sun_direction(self.params, self.report)
+            max_size = max(self.world_size)
+            sun_transform = np.eye(4)
+            sun_transform[:3,3] = sun_direction * max_size * 1
+            #unclear_offset = jnp.array([
+            #    [ 0, 1, 0, 0],
+            #    [ 1, 0, 0, 0],
+            #    [ 0, 0, 1, 0],
+            #    [ 0, 0, 0, 1],
+            #])
+            sun_transform = sun_transform
+            
+            
+            self.renderer.set_instance_transform('sun', sun_transform)
     
     def _init_players(self):
         active_players = self.get_active_players(self.params, self.report)
-        # self.max_players, = active_players.shape
-        self.max_players = int(active_players.shape[0]) if active_players.ndim > 0 else 1
+        self.max_players, = active_players.shape
         
         # make player cube
         self.renderer.load_mesh(
@@ -398,6 +435,12 @@ class Viewer:
             [0, s, c, d],
             [0, 0, 0, 1],
         ])
+        camera_pose = np.array([
+            [ 0, 0,-1, 0],
+            [ 0, 1, 0, 0],
+            [ 1, 0, 0, 0],
+            [ 0, 0, 0, 1],
+        ]) @ camera_pose
         
         self.renderer.set_view_matrix(np.linalg.inv(camera_pose))
         
@@ -461,12 +504,10 @@ class Viewer:
         
         self.report = tree_getitem(
             self.current_report_block, block_step)
-        # self.report = self.current_report_block[block_step]   
-        # print(self.report)
-        # print(type(self.report))
-        # breakpoint()
         
-        self._update_terrain()
+        #print(self.report)
+        
+        self._update_landscape()
         #self._update_water()
         self._update_players()
     
@@ -537,13 +578,30 @@ class Viewer:
                     self.renderer.hide_instance(energy_background_name)
                     self.renderer.hide_instance(energy_name)
     
-    def _update_terrain(self):
+    def _update_landscape(self):
+        self._update_sun_position()
         if self.get_terrain_texture is not None:
             texture = self.get_terrain_texture(
                 self.params, self.report, self.terrain_texture_size)
             self.renderer.load_texture(
                 'terrain_texture',
                 texture_data = texture,
+            )
+        
+        if self.get_terrain_map:
+            self.terrain_map = self.get_terrain_map(self.params, self.report)
+            (
+                terrain_vertices,
+                terrain_normals,
+            ) = make_height_map_vertices_and_normals(self.terrain_map)
+            self.renderer.load_mesh(
+                name='terrain_mesh',
+                mesh_data={
+                    'vertices' : terrain_vertices,
+                    'normals' : terrain_normals,
+                    'faces' : self.terrain_faces,
+                    'uvs' : self.terrain_uvs,
+                }
             )
         
         if self.get_water_map:
@@ -572,10 +630,8 @@ class Viewer:
         y = player_x[..., 0]
         x = player_x[..., 1]
         z = self.total_height_map[y, x] + PLAYER_RADIUS
-        # y = y - height/2.
-        # x = x - width/2.
-        y = (y - (height - 1) / 2.)
-        x = (x - (width - 1) / 2.)
+        y = y - height/2.
+        x = x - width/2.
         
         cs = np.array((( 1, 0), ( 0, 1), (-1, 0), ( 0,-1)))[player_r]
         c = cs[...,0]
