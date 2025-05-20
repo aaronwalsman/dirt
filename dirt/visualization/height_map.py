@@ -17,14 +17,16 @@ import jax.numpy as jnp
 #   |   \|   \|   \|
 #   o----o----o----o
 
-def make_height_map_vertices_and_normals(height_map):
+def make_height_map_vertices_and_normals(height_map, spacing=1):
     h, w = height_map.shape
     bh = h + 2
     bw = w + 2
     
     vertices = jnp.zeros((bh, bw, 3), dtype=jnp.float32)
-    vertices = vertices.at[:,:,0].set(jnp.arange(bw)[None,:] - bw/2.)
-    vertices = vertices.at[:,:,1].set(jnp.arange(bh)[:,None] - bh/2.)
+    vertices = vertices.at[:,:,0].set(
+        spacing * (jnp.arange(bw)[None,:] - bw/2.))
+    vertices = vertices.at[:,:,1].set(
+        spacing * (jnp.arange(bh)[:,None] - bh/2.))
     vertices = vertices.at[1:h+1,1:w+1,2].set(height_map)
     
     normals = jnp.zeros((bh, bw, 3), dtype=jnp.float32)
@@ -64,12 +66,13 @@ def make_height_map_vertices_and_normals(height_map):
     
     return vertices, normals
 
-def make_height_map_mesh(height_map):
+def make_height_map_mesh(height_map, spacing=1):
     h, w = height_map.shape
     bh = h + 2
     bw = w + 2
     
-    vertices, normals = make_height_map_vertices_and_normals(height_map)
+    vertices, normals = make_height_map_vertices_and_normals(
+        height_map, spacing=spacing)
     
     # | |   |   |   | | #
     uvs = jnp.zeros((bh, bw, 2), dtype=jnp.float32)

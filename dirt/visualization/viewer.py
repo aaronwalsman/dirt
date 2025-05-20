@@ -1,5 +1,6 @@
 import numpy as np
 
+import jax
 import jax.numpy as jnp
 
 import glfw
@@ -45,6 +46,8 @@ class Viewer:
         step_0 = 0,
         start_step=0,
         terrain_texture_multiple=1,
+        downsample_heightmap=1,
+        max_render_players=512,
         get_active_players=default_get_active_players,
         get_player_x=default_get_player_x,
         get_player_r=default_get_player_r,
@@ -91,11 +94,12 @@ class Viewer:
             report_files,
             step_0=step_0,
             start_step=start_step,
+            downsample_heightmap=downsample_heightmap,
         )
         self._init_context_and_window(window_width, window_height)
         self._init_splendor_render()
-        self._init_landscape(terrain_texture_multiple)
-        self._init_players()
+        self._init_landscape(terrain_texture_multiple, downsample_heightmap)
+        self._init_players(max_render_players)
         self._init_camera_and_lights()
         self._init_callbacks()
         
@@ -112,6 +116,7 @@ class Viewer:
         report_files,
         step_0,
         start_step,
+        downsample_heightmap,
     ):
         self.step_0 = step_0
         self.current_step = start_step
@@ -126,6 +131,8 @@ class Viewer:
         self.reports_per_block = tree_len(self.current_report_block)
         
         self.step_N = step_0 + len(report_files) * self.reports_per_block
+        
+        self.downsample_heightmap = downsample_heightmap
     
     def _init_context_and_window(self, window_width, window_height):
         glfw_context.initialize()
@@ -145,13 +152,14 @@ class Viewer:
             [ 0, 0, 0, 1],
         ])
     
-    def _init_landscape(self, texture_multiple):
+    def _init_landscape(self, texture_multiple, downsample_heightmap):
         self.terrain_map = self.get_terrain_map(self.params, self.report)
         h, w = self.terrain_map.shape
-        self.world_size = (h,w)
+        self.world_size = (h*downsample_heightmap, w*downsample_heightmap)
         self.terrain_texture_size = h * texture_multiple, w * texture_multiple
         
-        vertices, normals, uvs, faces = make_height_map_mesh(self.terrain_map)
+        vertices, normals, uvs, faces = make_height_map_mesh(
+            self.terrain_map, spacing=self.downsample_heightmap)
         self.terrain_uvs = uvs
         self.terrain_faces = faces
         self.renderer.load_mesh(
@@ -196,7 +204,8 @@ class Viewer:
                 water_normals,
                 self.water_uvs,
                 self.water_faces,
-            ) = make_height_map_mesh(self.total_height_map)
+            ) = make_height_map_mesh(
+                self.total_height_map, spacing=self.downsample_heightmap)
             self.renderer.load_mesh(
                 name='water_mesh',
                 mesh_data={
@@ -261,9 +270,9 @@ class Viewer:
             
             self.renderer.set_instance_transform('sun', sun_transform)
     
-    def _init_players(self):
+    def _init_players(self, max_render_players):
         active_players = self.get_active_players(self.params, self.report)
-        self.max_players, = active_players.shape
+        self.max_players = min(active_players.shape[0], max_render_players)
         
         # make player cube
         self.renderer.load_mesh(
@@ -527,13 +536,45 @@ class Viewer:
         
         print(f'Active Players: {jnp.sum(active_players)}')
         
-        for player_id in range(self.max_players):
-            player_name = f'player_{player_id}'
-            eye_white_name = f'player_eye_white_{player_id}'
-            eye_pupil_name = f'player_eye_pupil_{player_id}'
-            energy_background_name = f'player_energy_background_{player_id}'
-            energy_name = f'player_energy_{player_id}'
-            if active_players[player_id]:
+        # figure out which players are in the frustum, and z sort them
+        render_players = {i : -1 for i in range(self.max_players)}
+        #if self.max_players >= scene_players:
+        #    render_players = {i:i for i in range(self.max_players)}
+        #else:
+        projection = self.renderer.get_projection()
+        view_matrix = self.renderer.get_view_matrix()
+        local_transforms = projection @ view_matrix @ player_transforms
+        local_positions = local_transforms[:,:,3]
+        screen_positions = local_positions[:,:2] / local_positions[:,[3]]
+        in_bounds = (
+            (jnp.abs(screen_positions[:,0]) <= 0.5) &
+            (jnp.abs(screen_positions[:,1]) <= 0.5)
+        )
+        
+        score = jnp.where(in_bounds, -local_positions[:,2], -jnp.inf)
+        _, best_players = jax.lax.top_k(score, self.max_players)
+        
+        #for player_id in range(scene_players):
+        #    if active_players[player_id]:
+        #        pass
+        next_render_id = 0
+        scene_players, = active_players.shape
+        for player_id in best_players: #range(scene_players):
+            if active_players[player_id] & in_bounds[player_id]:
+                render_players[next_render_id] = player_id
+                next_render_id += 1
+                if next_render_id not in render_players:
+                    break
+        
+        #for player_id in range(self.max_players):
+        #for render_id, player_id in render_players.items():
+        for render_id, player_id in render_players.items():
+            player_name = f'player_{render_id}'
+            eye_white_name = f'player_eye_white_{render_id}'
+            eye_pupil_name = f'player_eye_pupil_{render_id}'
+            energy_background_name = f'player_energy_background_{render_id}'
+            energy_name = f'player_energy_{render_id}'
+            if player_id != -1 and active_players[player_id]:
                 self.renderer.show_instance(player_name)
                 self.renderer.set_instance_transform(
                     player_name, player_transforms[player_id])
@@ -546,7 +587,7 @@ class Viewer:
                 
                 player_color = self.get_player_color(
                     player_id, self.params, self.report)
-                material_name = f'player_material_{player_id}'
+                material_name = f'player_material_{render_id}'
                 self.renderer.set_material_flat_color(
                     material_name, player_color)
                 
@@ -601,7 +642,8 @@ class Viewer:
             (
                 terrain_vertices,
                 terrain_normals,
-            ) = make_height_map_vertices_and_normals(self.terrain_map)
+            ) = make_height_map_vertices_and_normals(
+                self.terrain_map, spacing=self.downsample_heightmap)
             self.renderer.load_mesh(
                 name='terrain_mesh',
                 mesh_data={
@@ -618,7 +660,8 @@ class Viewer:
             (
                 water_vertices,
                 water_normals,
-            ) = make_height_map_vertices_and_normals(self.total_height_map)
+            ) = make_height_map_vertices_and_normals(
+                self.total_height_map, spacing=self.downsample_heightmap)
             self.renderer.load_mesh(
                 name='water_mesh',
                 mesh_data={
@@ -635,11 +678,11 @@ class Viewer:
     
     def _player_transform(self, player_x, player_r):
         height, width = self.world_size
-        y = player_x[..., 0]
-        x = player_x[..., 1]
-        z = self.total_height_map[y, x] + PLAYER_RADIUS
-        y = y - height/2.
-        x = x - width/2.
+        zy = player_x[..., 0] // self.downsample_heightmap
+        zx = player_x[..., 1] // self.downsample_heightmap
+        z = self.total_height_map[zy, zx] + PLAYER_RADIUS
+        y = player_x[..., 0] - height/2.  #y - height/2.
+        x = player_x[..., 1] - width/2. #x - width/2.
         
         cs = np.array((( 1, 0), ( 0, 1), (-1, 0), ( 0,-1)))[player_r]
         c = cs[...,0]

@@ -20,15 +20,13 @@ Here is a naive version, only adding the evaporation and rain drops
 
 @static_dataclass
 class WeatherParams:
+    
     # general
     world_size: Tuple[int,int] = (32, 32)
     max_effective_altitude = 100.
     min_effective_water = 0.05
     
     # temperature
-    min_temperature: float = -1.
-    initial_temperature: float = 1.
-    
     # notes on temperature:
     # DIRT temperatures are approximately 1 unit = 20c
     # The defaults here mean that:
@@ -37,22 +35,22 @@ class WeatherParams:
     #  - sea level with no sunlight will stabilize at -20c
     #  - sea level with full sunlight will stabilize at 40c
     #  - sea level over water will stabilize at 30c
+    # need to adjust due to expected sun per day
+    initial_temperature: float = 1.
     sea_level_temperature_baseline: float = -1.
     mountain_temperature_baseline: float = -2.
     ground_heat_absorption: float = 3.
     water_heat_absorption: float = 2.
-    ground_thermal_mass: float = 0.9995
-    water_thermal_mass: float = 0.9999
+    ground_thermal_mass: float = 0.995
+    water_thermal_mass: float = 0.999
     temperature_std: float = 1.
-    temperature_mix: float = 1.
     
     # moisture
     initial_moisture: float = 0.
-    evaporation_rate: float = 0.01
+    evaporation_rate: float = 0.001
     min_evaporation_temp: float = 0.1
     max_evaporation_temp: float = 2.
-    moisture_std: float = 1.
-    moisture_mix: float = 1.
+    moisture_std: float = 0.333
     
     # rain
     rain_per_step: float = 0.01
@@ -74,15 +72,17 @@ def weather(
     evaporation_temp_range = (
         params.max_evaporation_temp - params.min_evaporation_temp)
     
+    # setup the wind
     init_wind, step_wind_ou = ou_process(
         params.wind_std * jnp.sqrt(2*params.wind_reversion),
         params.wind_reversion,
         jnp.array(params.wind_bias, dtype=float_dtype),
         dtype=float_dtype,
     )
-    def step_wind(key, wind, step_size = 1.):
+    def step_wind(key, wind):
         ou_key, round_key = jrng.split(key)
         wind = step_wind_ou(ou_key, wind, step_size=step_size)
+        wind = wind * step_size
         wind_floor = jnp.floor(wind)
         wind_ceil = jnp.ceil(wind)
         p_ceil = wind - wind_floor
@@ -91,20 +91,30 @@ def weather(
             round_direction < p_ceil, wind_ceil, wind_floor)
         return wind, discrete_wind
     
-    temperature_diffusion_step = gas(
-        params.temperature_std,
-        params.temperature_mix,
+    init_temperature, temperature_diffusion_step, read_temperature, _, _ = gas(
+        params.world_size,
+        diffusion_std=params.temperature_std,
         boundary='wrap',
         include_wind=False,
+        step_size=step_size,
         float_dtype=float_dtype,
     )
     
-    moisture_step = gas(
-        params.moisture_std,
-        params.moisture_mix,
+    init_moisture, moisture_step, read_moisture, _, add_moisture = gas(
+        params.world_size,
+        diffusion_std=params.moisture_std,
         boundary='wrap',
+        step_size=step_size,
         float_dtype=float_dtype,
     )
+    
+    #init_smell, smell_step, read_smell, _, add_smell = gas(
+    #    ...
+    #)
+    
+    #init_audio, audio_step, read_audio, _, add_audio = gas(
+    #    ...
+    #)
     
     def temperature_step(
         key,
@@ -117,7 +127,6 @@ def weather(
         next_temperature = temperature_diffusion_step(key, temperature)
         
         # compute the normalized altitude and standing water
-        #normalized_altitude = altitude/params.max_effective_altitude
         standing_water = water > params.min_effective_water
         
         # compute the temperature blend
@@ -125,7 +134,7 @@ def weather(
             standing_water,
             params.water_thermal_mass,
             params.ground_thermal_mass,
-        )
+        ) ** step_size
         
         # compute the target_temperature
         temperature_baseline = (
@@ -137,7 +146,10 @@ def weather(
             params.water_heat_absorption,
             params.ground_heat_absorption,
         )
-        target_temperature = temperature_baseline + light * heat_absorption
+        # - this c factor corrects for the fact that the light is not full
+        #   strength all day long
+        c = 4./jnp.pi
+        target_temperature = temperature_baseline + c * light * heat_absorption
         
         # incorporte the target temperature with an exponential moving average
         next_temperature = (
@@ -228,8 +240,9 @@ def weather(
     def init(key):
         temperature = jnp.full(
             params.world_size, params.initial_temperature, dtype=float_dtype)
-        moisture = jnp.full(
-            params.world_size, params.initial_moisture, dtype=float_dtype)
+        #moisture = jnp.full(
+        #    params.world_size, params.initial_moisture, dtype=float_dtype)
+        moisture = init_moisture()
         rain = jnp.zeros(params.world_size, dtype=jnp.bool)
         key, wind_key = jrng.split(key)
         wind = init_wind(key)
@@ -257,7 +270,7 @@ def weather(
         
         # change wind direction
         key, wind_key = jrng.split(key)
-        wind, discrete_wind = step_wind(wind_key, wind, step_size=step_size)
+        wind, discrete_wind = step_wind(wind_key, wind)
         
         # make it rain
         water, moisture, rain = rain_step(
@@ -267,7 +280,7 @@ def weather(
         key, moisture_key = jrng.split(key)
         moisture = moisture_step(moisture_key, moisture, discrete_wind)
         
-        return water, temperature, moisture, rain, wind
+        return water, temperature, moisture, rain, wind, discrete_wind
     
     return init, step
 

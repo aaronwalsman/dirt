@@ -4,24 +4,68 @@ import jax.random as jrng
 
 from dirt.constants import DEFAULT_FLOAT_DTYPE
 
+def box_kernel_std(kernel_radius):
+    return (
+        jnp.sqrt(kernel_radius * (kernel_radius+1)) /
+        jnp.sqrt(3.)
+    )
+
 def gas(
-    diffusion_std,
-    diffusion_mix,
+    world_size,
+    cell_shape=(),
+    initial_value=0.,
+    downsample=1,
+    diffusion_std=0.333,
+    dissipation=0.,
+    diffusion_type='box',
     boundary='clip',
     clip_fill=0.,
     include_diffusion=True,
     include_wind=True,
+    step_size=1.,
+    max_kernel_radius=3,
     float_dtype=DEFAULT_FLOAT_DTYPE,
 ):
     
+    downsample_size = (world_size[0]//downsample, world_size[1]//downsample)
+    grid_size = (*downsample_size, *cell_shape)
+    
+    step_dissipation = dissipation ** (1./step_size)
+    
     if include_diffusion:
-        kernel_radius = jnp.ceil(3 * diffusion_std).astype(int)
-        x = jnp.arange(-kernel_radius, kernel_radius + 1)
-        kernel = jnp.exp(-x**2 / (2 * diffusion_std**2))
-        kernel = kernel / kernel.sum()
+        step_std = diffusion_std * jnp.sqrt(step_size)
+        
+        # do not use box if std is too low
+        min_box_std = box_kernel_std(1.)
+        if step_std < min_box_std:
+            diffusion_type = 'gaussian'
+        
+        # get the maximum std per iteration given the max_kernel_radius
+        if diffusion_type == 'gaussian':
+            max_iter_std = max_kernel_radius / 3.
+        elif diffusion_type == 'box':
+            max_iter_std = box_kernel_std(max_kernel_radius)
+        
+        # compute the number of iterations
+        iter_std = min(max_iter_std, step_std)
+        diffusion_iterations = jnp.ceil(
+            (step_std / iter_std)**2).astype(int)
+        
+        # make the kernel
+        if diffusion_type == 'gaussian':
+            radius = jnp.ceil(3 * iter_std).astype(int)
+            x = jnp.arange(-radius, radius + 1)
+            kernel = jnp.exp(-x**2 / (2 * iter_std**2)).astype(float_dtype)
+            kernel = kernel / kernel.sum()
+        elif diffusion_type == 'box':
+            radius = jnp.ceil(
+                (-1 + jnp.sqrt(1 + 12 * step_std ** 2)) / 2).astype(int)
+            n = 2 * radius + 1
+            kernel = jnp.ones(n, dtype=float_dtype) / n
+        
         kernel = kernel[:, None]
         kernel = kernel[..., None, None]
-        kernel = kernel.astype(float_dtype)
+        pad = radius * diffusion_iterations
         
         def diffusion_step(grid):
             if len(grid.shape) == 2:
@@ -33,37 +77,39 @@ def gas(
             h,w,c = grid.shape
             diffused_grid = grid[None,:,:,:]
             
-            diffused_grid = jnp.pad(diffused_grid, kernel_radius, mode='edge')
+            diffused_grid = jnp.pad(
+                diffused_grid,
+                ((0,0), (pad,pad), (pad,pad), (0,0)),
+                mode='edge',
+            )
             
-            # vertical
             channel_kernel = jnp.tile(kernel, (1, 1, 1, c))
-            diffused_grid = jax.lax.conv_general_dilated(
-                diffused_grid,
-                channel_kernel,
-                window_strides=(1,1),
-                padding='VALID',
-                dimension_numbers=('NHWC', 'HWIO', 'NHWC'),
-                feature_group_count=c,
-            )
-            
-            # horizontal
-            diffused_grid = jax.lax.conv_general_dilated(
-                diffused_grid,
-                channel_kernel.transpose((1,0,2,3)),
-                window_strides=(1,1),
-                padding='VALID',
-                dimension_numbers=('NHWC', 'HWIO', 'NHWC'),
-                feature_group_count=c,
-            )
-            diffused_grid = diffused_grid[
-                0,kernel_radius:-kernel_radius,kernel_radius:-kernel_radius,:]
-            
-            grid = grid * (1 - diffusion_mix) + diffused_grid * diffusion_mix
+            for _ in range(diffusion_iterations):
+                # vertical
+                diffused_grid = jax.lax.conv_general_dilated(
+                    diffused_grid,
+                    channel_kernel,
+                    window_strides=(1,1),
+                    padding='VALID',
+                    dimension_numbers=('NHWC', 'HWIO', 'NHWC'),
+                    feature_group_count=c,
+                )
+                
+                # horizontal
+                diffused_grid = jax.lax.conv_general_dilated(
+                    diffused_grid,
+                    channel_kernel.transpose((1,0,2,3)),
+                    window_strides=(1,1),
+                    padding='VALID',
+                    dimension_numbers=('NHWC', 'HWIO', 'NHWC'),
+                    feature_group_count=c,
+                )
+            diffused_grid = diffused_grid[0]
             
             if remove_last_channel:
-                grid = grid[...,0]
+                diffused_grid = diffused_grid[...,0]
             
-            return grid
+            return diffused_grid
     
     if include_wind:
         def wind_step(key, grid, wind):
@@ -79,14 +125,38 @@ def gas(
             
             return grid
     
+    def init():
+        grid = jnp.zeros(grid_size, dtype=float_dtype)
+        grid = grid.at[:,:].set(initial_value)
+        return grid
+    
     def step(key, grid, wind=None):
+        if step_dissipation:
+            grid = grid * (1. - step_dissipation)
         if include_wind:
             grid = wind_step(key, grid, wind)
         if include_diffusion:
             grid = diffusion_step(grid)
         return grid
     
-    return step
+    def read(grid, x):
+        cell = x // downsample
+        c0, c1 = cell[...,0], cell[...,1]
+        return grid[c0, c1]
+    
+    def write(grid, x, value):
+        cell = x // downsample
+        c0, c1 = cell[...,0], cell[...,1]
+        grid = grid.at[c0, c1].set(value)
+        return grid
+    
+    def add(grid, x, value):
+        cell = x // downsample
+        c0, c1 = cell[...,0], cell[...,1]
+        grid = grid.at[c0, c1].add(value)
+        return grid
+    
+    return init, step, read, write, add
 
 def step_old(
     gas_grid: jnp.ndarray,

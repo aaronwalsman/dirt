@@ -25,7 +25,7 @@ from dirt.envs.tera_arium import (
     TeraAriumParams,
     TeraAriumAction,
     TeraAriumTraits,
-    render_tera_arium,
+    tera_arium_renderer,
     tera_arium,
 )
 from dirt.visualization.viewer import Viewer
@@ -77,7 +77,13 @@ class TrainReport:
     
     sun_direction : jnp.ndarray = False
     
-def make_reporter(params):
+def log(epoch, reports):
+    print(f'Epoch: {epoch}')
+    #population_size = jnp.sum(reports.players[-1])
+    #print(f'Population Size: {population_size}')
+    # do other wandb stuff
+
+def configure(params):
     def make_report(
         state, players, parents, children, actions, traits, adaptations
     ):
@@ -89,57 +95,57 @@ def make_reporter(params):
             water=state.env_state.landscape.water,
             energy=state.env_state.landscape.energy,
             biomass=state.env_state.landscape.biomass,
-            light=state.env_state.landscape.air_light,
+            light=state.env_state.landscape.light,
             players=players,
             player_x=state.env_state.bugs.x,
             player_r=state.env_state.bugs.r,
             #sun_direction=state.env_state.landscape.sundial.sun_direction,
         )
     
-    return make_report
-
-def log(epoch, reports):
-    print(f'Epoch: {epoch}')
-    #population_size = jnp.sum(reports.players[-1])
-    #print(f'Population Size: {population_size}')
-    # do other wandb stuff
-
-def terrain_texture(report, texture_size):
-    th, tw = texture_size
-    terrain = report.terrain
-    world_size = terrain.shape
-    h, w = world_size
-    assert th % h == 0
-    assert tw % w == 0
-
-    ry = th//h
-    rx = tw//w
-   
-    print('Sun direction:', report.sun_direction)
+    render = tera_arium_renderer(params.env_params)
     
-    #texture = jnp.full((h, w), 127, dtype=jnp.uint8)
-    #texture = jnp.repeat(texture, ry, axis=0)
-    #texture = jnp.repeat(texture, rx, axis=1)
-    #texture = jnp.repeat(texture[:,:,None], 3, axis=2)
-    texture = render_tera_arium(
-        report.water,
-        report.energy,
-        report.biomass,
-        jnp.zeros((0,2), dtype=jnp.int32),
-        jnp.zeros((0,3), dtype=jnp.int32),
-        report.light,
-    )
-    print('MAX LIGHT:', jnp.max(report.light))
-    return np.array((texture * 255).astype(jnp.uint8))
+    def terrain_texture(report, texture_size):
+        th, tw = texture_size
+        terrain = report.terrain
+        world_size = terrain.shape
+        h, w = world_size
+        assert th % h == 0
+        assert tw % w == 0
 
-def get_player_energy(params, report):
-    return 1. #report.player_energy / params.env_params.max_energy
+        ry = th//h
+        rx = tw//w
+       
+        print('Sun direction:', report.sun_direction)
+        
+        #texture = jnp.full((h, w), 127, dtype=jnp.uint8)
+        #texture = jnp.repeat(texture, ry, axis=0)
+        #texture = jnp.repeat(texture, rx, axis=1)
+        #texture = jnp.repeat(texture[:,:,None], 3, axis=2)
+        
+        texture = render(
+            report.water,
+            report.temperature,
+            report.energy,
+            report.biomass,
+            jnp.zeros((0,2), dtype=jnp.int32),
+            jnp.zeros((0,3), dtype=jnp.int32),
+            report.light,
+        )
+        print('MAX LIGHT:', jnp.max(report.light))
+        return np.array((texture * 255).astype(jnp.uint8))
+
+    def get_player_energy(params, report):
+        return 1. #report.player_energy / params.env_params.max_energy
+    
+    return make_report, terrain_texture, get_player_energy
 
 if __name__ == '__main__':
 
     # get the parameters from the commandline
     params = TrainParams().from_commandline(skip_overrides=True)
     params = params.override_descendants()
+    
+    make_report, terrain_texture, get_player_energy = configure(params)
     
     if params.visualize:
         # get the path to the params and reports
@@ -225,7 +231,7 @@ if __name__ == '__main__':
             params.runner_params,
             init_train,
             step_train,
-            make_reporter(params),
+            make_report,
             log,
             output_directory=params.output_directory,
             load_state=params.load_state,

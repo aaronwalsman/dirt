@@ -24,8 +24,9 @@ def calculate_flow(
     directions labeled as: up(0), down(1), left(2), right(3)
     flow rate: fraction of water difference transfer between different areas 
     '''
+    flow_rate = jnp.clip(flow_rate, 0., 0.25)
     padded_height = jnp.pad(total_height, pad_width=1, mode='edge')
-
+    
     if direction == 0:
         neighbor = padded_height[:-2, 1:-1]
     elif direction == 1:
@@ -38,7 +39,9 @@ def calculate_flow(
         raise ValueError("Invalid direction. Must be one of 'up(0)', 'down(1)', 'left(2)', 'right(3)'.")
 
     diff = total_height - neighbor
-    flow = jnp.clip(diff * flow_rate, 0, water)
+    flow = jnp.clip(diff * flow_rate, 0, water/4)
+    #flow = flow_rate * (diff > 0.)
+    #flow = jnp.clip(flow, 0, water/4.)
     return flow
 
 def flow_step(
@@ -51,14 +54,18 @@ def flow_step(
     Rate is input in the calculate function
     '''
     total_height = terrain + water
-
+    
+    # AARON NOTE: I added a divide by 4 in calculate flow above, which I THINK
+    # means that we can compute the flows all at once without modifying water
+    # and then update water all at once, which will remove biases based on
+    # the order of directions
     flow_up = calculate_flow(total_height, water, 0, flow_rate)
-    water = water - flow_up + jnp.pad(flow_up, ((0, 1), (0, 0)))[1:, :]
     flow_down = calculate_flow(total_height, water, 1, flow_rate)
-    water = water - flow_down + jnp.pad(flow_down, ((1, 0), (0, 0)))[:-1, :]
     flow_left = calculate_flow(total_height, water, 2, flow_rate)
-    water = water - flow_left + jnp.pad(flow_left, ((0, 0), (0, 1)))[:, 1:]
     flow_right = calculate_flow(total_height, water, 3, flow_rate)
+    water = water - flow_up + jnp.pad(flow_up, ((0, 1), (0, 0)))[1:, :]
+    water = water - flow_down + jnp.pad(flow_down, ((1, 0), (0, 0)))[:-1, :]
+    water = water - flow_left + jnp.pad(flow_left, ((0, 0), (0, 1)))[:, 1:]
     water = water - flow_right + jnp.pad(flow_right, ((0, 0), (1, 0)))[:, :-1]
 
     return water

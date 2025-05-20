@@ -1,4 +1,4 @@
-from typing import TypeVar, Tuple
+from typing import Tuple
 
 import jax
 import jax.numpy as jnp
@@ -7,14 +7,15 @@ import jax.random as jrng
 import chex
 
 from mechagogue.static_dataclass import static_dataclass
-
 from mechagogue.dp.population_game import population_game
 
 from dirt.constants import (
     ROCK_COLOR,
     WATER_COLOR,
+    ICE_COLOR,
     ENERGY_TINT,
     BIOMASS_TINT,
+    BIOMASS_AND_ENERGY_TINT,
 )
 from dirt.envs.landscape import (
     LandscapeParams,
@@ -28,11 +29,7 @@ from dirt.envs.bug import (
     BugState,
     bugs,
 )
-
-TTeraAriumParams = TypeVar('TTeraAriumParams', bound='TeraAriumParams')
-TTeraAriumState = TypeVar('TTeraAriumState', bound='TeraAriumState')
-TTeraAriumObservation = TypeVar(
-    'TTeraAriumObservation', bound='TeraAriumObservation')
+from dirt.consumable import Consumable
 
 @static_dataclass
 class TeraAriumParams:
@@ -50,11 +47,6 @@ class TeraAriumParams:
 class TeraAriumState:
     
     landscape : LandscapeState
-    #height_grid : jnp.array
-    #water_grid : jnp.array
-    #ground_chemical_grid : jnp.array
-    #water_chemical_grid : jnp.array
-    #air_chemical_grid : jnp.array
     
     # player shaped data
     bugs : BugState
@@ -64,12 +56,21 @@ class TeraAriumState:
 
 @static_dataclass
 class TeraAriumObservation:
+    # grid external
     rgb : jnp.ndarray
     height : jnp.ndarray
     
-    ground_water : jnp.ndarray
-    ground_energy : jnp.ndarray
-    ground_biomass : jnp.ndarray
+    # single channel external
+    audio : jnp.ndarray
+    smell : jnp.ndarray
+    taste : Consumable
+    moisture : jnp.ndarray
+    wind : jnp.ndarray
+    temperature : jnp.ndarray
+    
+    # single channel internal   
+    health : jnp.ndarray
+    stomach : Consumable
 
 @static_dataclass
 class TeraAriumTraits:
@@ -81,6 +82,7 @@ TeraAriumTraits = BugTraits
 def tera_arium_renderer(params):
     def render(
         water,
+        temperature,
         energy,
         biomass,
         bug_x,
@@ -92,16 +94,31 @@ def tera_arium_renderer(params):
         # start with a baseline rock color of 50% gray
         rgb = jnp.full((h,w,3), ROCK_COLOR, dtype=water.dtype)
 
-        # overlay the water as blue
-        rgb = jnp.where(water[..., None] > 0.05, WATER_COLOR, rgb)
-
-        # apply the energy tint
+        # overlay the water as blue and ice as white
+        water_color = jnp.where(
+            temperature[:,:,None] <= 0,
+            ICE_COLOR,
+            WATER_COLOR,
+        )
+        rgb = jnp.where(water[..., None] > 0.05, water_color, rgb)
+        
+        # apply the energy and biomass tint
         clipped_energy = jnp.clip(energy, min=0., max=1.)
+        clipped_biomass = jnp.clip(biomass, min=0., max=1.)
+        biomass_and_energy = jnp.minimum(
+            clipped_energy, clipped_biomass)
+        just_energy = clipped_energy - biomass_and_energy
+        just_biomass = clipped_biomass - biomass_and_energy
+        rgb = rgb + biomass_and_energy[..., None] * BIOMASS_AND_ENERGY_TINT
+        rgb = rgb + just_energy[..., None] * ENERGY_TINT
+        rgb = rgb + just_biomass[..., None] * BIOMASS_TINT
+        '''
+        # apply the energy tint
         rgb = rgb + clipped_energy[..., None] * ENERGY_TINT
 
         # apply the biomass tint
-        clipped_biomass = jnp.clip(biomass, min=0., max=1.)
         rgb = rgb + clipped_biomass[..., None] * BIOMASS_TINT
+        '''
         
         # overlay the bug colors
         rgb = rgb.at[bug_x[...,0], bug_x[...,1]].set(bug_color)
@@ -116,22 +133,7 @@ def tera_arium_renderer(params):
     
     return render
 
-def tera_arium(params : TTeraAriumParams = TeraAriumParams()):
-    
-    #init_players, step_players, active_players = birthday_player_list(
-    #    params.max_players)
-    #init_family_tree, step_family_tree, active_family_tree = player_family_tree(
-    #    init_players, step_players, active_players, 1)
-    
-    #init_metabolism, step_metabolism = metabolism(params.metabolism_params)
-    
-    #init_climate, step_climate = climate(...)
-    #init_hydrology, step_hydrology = hydrology(...)
-    #init_geology, step_geology = geology(...)
-    
-    #landscape_params = params.landscape.replace(
-    #    world_size=params.world_size,
-    #)
+def tera_arium(params : TeraAriumParams = TeraAriumParams()):
     
     (
         init_landscape,
@@ -140,10 +142,6 @@ def tera_arium(params : TTeraAriumParams = TeraAriumParams()):
         add_landscape_consumable,
         step_landscape,
     ) = landscape(params.landscape)
-    #bug_params = params.bugs.replace(
-    #    initial_players=params.initial_players,
-    #    max_players=params.max_players,
-    #)
     (
         init_bugs,
         move_bugs,
@@ -155,7 +153,7 @@ def tera_arium(params : TTeraAriumParams = TeraAriumParams()):
     
     def init_state(
         key : chex.PRNGKey,
-    ) -> TTeraAriumState :
+    ) -> TeraAriumState :
         
         key, landscape_key = jrng.split(key)
         landscape_state = init_landscape(landscape_key)
@@ -169,8 +167,8 @@ def tera_arium(params : TTeraAriumParams = TeraAriumParams()):
     
     def observe(
         key : chex.PRNGKey,
-        state : TTeraAriumState,
-    ) -> TTeraAriumObservation:
+        state : TeraAriumState,
+    ) -> TeraAriumObservation:
         # player internal state
         
         # player external observation
@@ -178,10 +176,10 @@ def tera_arium(params : TTeraAriumParams = TeraAriumParams()):
     
     def transition(
         key : chex.PRNGKey,
-        state : TTeraAriumState,
+        state : TeraAriumState,
         action : BugAction,
         traits : BugTraits,
-    ) -> TTeraAriumState :
+    ) -> TeraAriumState :
         
         next_state = state
         

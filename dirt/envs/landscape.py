@@ -34,9 +34,10 @@ from mechagogue.static_dataclass import static_dataclass
 class LandscapeParams:
     world_size : Tuple[int, int] = (1024, 1024)
     step_sizes : Tuple[float, ...] = (1.,)
-    day_initial: int = 0.
+    initial_time: float = 0.
     
     # terrain
+    terrain_bias : float = 0
     terrain_octaves : int = 12
     terrain_max_octaves : Optional[int] = None
     terrain_lacunarity : float = 2.
@@ -46,9 +47,11 @@ class LandscapeParams:
     max_effective_altitude : float = 100.
     
     # water
-    water_per_cell : float = 2.
-    water_initial_fill_rate : float = 0.01
-    water_flow_rate : float = 0.1
+    sea_level : float = 0.
+    initial_water_per_cell : float = 0.
+    #water_initial_fill_rate : float = 0.01
+    water_flow_rate : float = 1
+    ice_flow_rate : float = 0.001
     air_moisture_diffusion : float = 1./3.
     min_effective_water : float = 0.05
     
@@ -64,7 +67,14 @@ class LandscapeParams:
     #wind_reversion : float = 0.001
     #wind_bias : Tuple[float, float] | jnp.ndarray = (0.,0.)
     #air_initial_temperature : float = 0.
-    air_initial_smell: float = 0.
+    
+    # smell
+    smell_downsample: int = 1
+    smell_channels: int = 8
+    
+    # audio
+    audio_downsample: int = 32
+    audio_channels: int = 8
     
     # light
     light_initial_strength: float = 0.35
@@ -86,8 +96,8 @@ class LandscapeParams:
     weather : WeatherParams = WeatherParams()
     
     # erosion
-    erosion_endurance : float = 0.05
-    erosion_ratio : float = 0.01
+    erosion_endurance : float = 0. #0.05
+    erosion_ratio : float = 0. #0.01
     
     # energy
     mean_energy_sites : float = 256.**2
@@ -108,7 +118,8 @@ class LandscapeState:
     wind : jnp.array
     light: jnp.array
     smell: jnp.array
-    day: int
+    audio: jnp.array
+    time: float
     
     energy : jnp.array
     biomass : jnp.array
@@ -117,14 +128,6 @@ def landscape(
     params : LandscapeParams = LandscapeParams(),
     float_dtype : Any = DEFAULT_FLOAT_DTYPE,
 ):
-    
-    # moved to weather
-    #init_wind, step_wind = ou_process(
-    #    params.wind_std,
-    #    params.wind_reversion,
-    #    jnp.zeros((2,), dtype=float_dtype),
-    #    dtype=float_dtype,
-    #)
     
     step_weathers = []
     for step_size in params.step_sizes:
@@ -149,13 +152,18 @@ def landscape(
             params.terrain_unit_scale,
             params.terrain_max_height,
             dtype=float_dtype,
-        )
+        ) + params.terrain_bias
         
         # erosion
         # - initialize erosion to be zero everywhere
         erosion = jnp.zeros(params.world_size, dtype=float_dtype)
         
         # water
+        #water = jnp.max(params.sea_level - terrain, 0.)
+        water = jnp.where(
+            terrain < params.sea_level, params.sea_level - terrain, 0.)
+        water = water + params.initial_water_per_cell
+        '''
         # - start with zero water everywhere
         water = jnp.zeros(params.world_size, dtype=float_dtype)
         
@@ -186,22 +194,36 @@ def landscape(
         current_water = jnp.sum(water)
         water = water * (total_water / current_water)
         
-        # air
-        #temperature = jnp.full(
-        #    params.world_size,
-        #    params.air_initial_temperature,
-        #    dtype=float_dtype,
-        #)
+        # - offset the terrain so that the water level (sea level) is zero
+        terrain = terrain - water_level
+        '''
+        # light
         light = jnp.zeros(params.world_size, dtype=float_dtype)
-        smell = jnp.zeros(params.world_size, dtype=float_dtype)
-        smell = smell[...,None]
+        
+        # smell
+        smell_size = (
+            params.world_size[0]//params.smell_downsample,
+            params.world_size[1]//params.smell_downsample,
+        )
+        smell = jnp.zeros(
+            (*smell_size, params.smell_channels), dtype=float_dtype)
+        
+        # audio
+        audio_size = (
+            params.world_size[0]//params.audio_downsample,
+            params.world_size[1]//params.audio_downsample,
+        )
+        audio = jnp.zeros(
+            (*audio_size, params.audio_channels), dtype=float_dtype)
         
         # weather
         key, weather_key = jrng.split(key)
         temperature, moisture, rain, wind = init_weather(weather_key)
         
-        day = params.day_initial
+        # time
+        t = params.initial_time
         
+        # energy
         key, energy_key = jrng.split(key)
         energy_sites = poisson_grid(
             energy_key,
@@ -213,6 +235,7 @@ def landscape(
         energy_per_site = params.initial_total_energy / total_energy_sites
         energy = (energy_sites * energy_per_site).astype(float_dtype)
         
+        # biomass
         key, biomass_key = jrng.split(key)
         biomass_sites = poisson_grid(
             biomass_key,
@@ -234,31 +257,31 @@ def landscape(
             wind,
             light,
             smell,
-            day,
+            audio,
+            t,
             energy,
             biomass,
         )
     
-    def get_consumable(state, locations):
-        y = locations[...,0]
-        x = locations[...,1]
-        water = state.water[y, x]
-        energy = state.energy[y, x]
-        biomass = state.biomass[y, x]
+    def get_consumable(state, x):
+        x0, x1 = x[...,0], x[...,1]
+        water = state.water[x0, x1]
+        energy = state.energy[x0, x1]
+        biomass = state.biomass[x0, x1]
         return Consumable(water, energy, biomass)
     
-    def set_consumable(state, locations, consumable):
-        y, x = locations[...,0], locations[...,1]
-        water = state.water.at[y, x].set(consumable.water)
-        energy = state.energy.at[y, x].set(consumable.energy)
-        biomass = state.biomass.at[y, x].set(consumable.biomass)
+    def set_consumable(state, x, consumable):
+        x0, x1 = x[...,0], x[...,1]
+        water = state.water.at[x0, x1].set(consumable.water)
+        energy = state.energy.at[x0, x1].set(consumable.energy)
+        biomass = state.biomass.at[x0, x1].set(consumable.biomass)
         return state.replace(water=water, energy=energy, biomass=biomass)
     
-    def add_consumable(state, locations, consumable):
-        y, x = locations[...,0], locations[...,1]
-        water = state.water.at[y, x].add(consumable.water)
-        energy = state.energy.at[y, x].add(consumable.energy)
-        biomass = state.biomass.at[y, x].add(consumable.biomass)
+    def add_consumable(state, x, consumable):
+        x0, x1 = x[...,0], x[...,1]
+        water = state.water.at[x0, x1].add(consumable.water)
+        energy = state.energy.at[x0, x1].add(consumable.energy)
+        biomass = state.biomass.at[x0, x1].add(consumable.biomass)
         return state.replace(water=water, energy=energy, biomass=biomass)
     
     step_functions = []
@@ -268,43 +291,38 @@ def landscape(
             state : LandscapeState,
         ) -> LandscapeState :
             
-            #return state
-            
             terrain = state.terrain
             water = state.water
             erosion = state.erosion
             wind = state.wind
             moisture = state.moisture
-            smell = state.smell
-            temperature = state.temperature
-            day = state.day
-
             rain = state.rain
+            smell = state.smell
+            audio = state.audio
+            temperature = state.temperature
+            t = state.time
+
             day_length = params.steps_per_day
             
             # Day_status
-            day += 1
-            light_length = get_day_light_length(day)
-            day_status = get_day_status(day_length, light_length, day)
-            
-            # move air
-            # - update the wind direction
-            #   TODO: iterate if step_size is too large
-            # moved to weather
-            #key, wind_key = jrng.split(key)
-            #wind = step_wind(
-            #    wind_key, wind, step_size=step_size)
-            
-            # - diffuse and move the air smell
-            diffusion_std = params.air_moisture_diffusion * (step_size**0.5)
+            t += step_size
+            light_length = get_day_light_length(t)
+            day_status = get_day_status(day_length, light_length, t)
             
             # TODO: Concretization problem... need to configure the
             # kernel and not have it dynamically shaped
             #smell = gas_step(
             #    smell, diffusion_std, 1., wind, 1)
+            key, smell_key = jrng.split(key)
+            #smell = smell_step(smell_key, smell, wind=
             
             # move water
-            water = flow_step(terrain, water, params.water_flow_rate)
+            flow_rate = jnp.where(
+                temperature < 0.,
+                params.ice_flow_rate * step_size,
+                params.water_flow_rate * step_size,
+            )
+            water = flow_step(terrain, water, flow_rate)
 
             # erode based on water flow
             old_terrain = terrain
@@ -323,13 +341,13 @@ def landscape(
                 altitude/params.max_effective_altitude, 0., 1.)
             
             # light change based on rotation of Sun
-            light_strength = get_day_light_strength(day)
+            light_strength = get_day_light_strength(t)
             light = light_step(
                 day_length,
                 altitude, 
                 light_strength,
                 light_length,
-                day,
+                t,
                 params.night_effect
             )
             
@@ -341,7 +359,7 @@ def landscape(
             # temperature changed based on light and rain
             #temperature = temperature_step(
             #    day_length, 
-            #    day, 
+            #    t, 
             #    water, 
             #    temperature, 
             #    rain,
@@ -367,7 +385,14 @@ def landscape(
             #    wind,
             #)
             key, weather_key = jrng.split(key)
-            water, temperature, moisture, rain, wind = step_weathers[i](
+            (
+                water,
+                temperature,
+                moisture,
+                rain,
+                wind,
+                discrete_wind,
+            ) = step_weathers[i](
                 weather_key,
                 water,
                 temperature,
@@ -387,8 +412,8 @@ def landscape(
                 rain=rain,
                 wind=wind,
                 light=light,
-                smell=smell,
-                day=day,
+                #smell=smell,
+                time=t,
             )
             
             return next_state
@@ -407,7 +432,7 @@ if __name__ == "__main__":
         state = step_fn(subkey, state)
         if i % 20 == 0:
             # inspect
-            print(f"\n--- Day {state.day} ---")
+            print(f"\n--- Day {state.time} ---")
             print("Wind velocity:", state.wind)
             print("Air temperature (mean):", jnp.mean(state.temperature))
             print("Water (sum):", jnp.sum(state.water + state.moisture))
