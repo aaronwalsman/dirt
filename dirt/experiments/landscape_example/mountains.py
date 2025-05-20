@@ -59,7 +59,10 @@ class TrainParams:
             terrain_max_height = 200.,
             terrain_bias = -25,
             weather = WeatherParams(
-                mountain_temperature_baseline = -3.
+                mountain_temperature_baseline = -3.,
+                include_rain = False,
+                include_temperature = False,
+                include_wind = False,
             )
         )
     )
@@ -67,7 +70,7 @@ class TrainParams:
         max_population=max_players,
     )
     runner_params : Any = EpochRunnerParams(
-        epochs=8,
+        epochs=1,
         steps_per_epoch=1000,
         save_state=True,
         save_reports=True,
@@ -112,12 +115,20 @@ def configure_functions(params):
             altitude/params.env_params.landscape.max_effective_altitude, 0., 1.)
         
         dv = params.downsample_visualizer
+        moisture = state.env_state.landscape.moisture
+        rain = state.env_state.landscape.rain
+        temperature = state.env_state.landscape.temperature
+        if params.env_params.landscape.weather.include_rain:
+            moisture = moisure[::dv,::dv]
+            rain = rain[::dv,::dv]
+        if params.env_params.landscape.weather.include_temperature:
+            temperature = temperature[::dv,::dv]
         return TrainReport(
             terrain=state.env_state.landscape.terrain[::dv,::dv],
             water=state.env_state.landscape.water[::dv,::dv],
-            moisture=state.env_state.landscape.moisture[::dv,::dv],
-            rain=state.env_state.landscape.rain[::dv,::dv],
-            temperature=state.env_state.landscape.temperature[::dv,::dv],
+            moisture=moisture,
+            rain=rain,
+            temperature=temperature,
             energy=state.env_state.landscape.energy[::dv,::dv],
             biomass=state.env_state.landscape.biomass[::dv,::dv],
             light=state.env_state.landscape.light[::dv,::dv],
@@ -170,25 +181,33 @@ def configure_functions(params):
             )
        
         elif display_mode == 3:
-            temperature = report.temperature[...,None]
-            texture = jnp.where(
-                temperature >= 0.,
-                temperature * jnp.array([0.5, 0., 0.], dtype=temperature.dtype),
-                -temperature * jnp.array([0., 0.,0.5], dtype=temperature.dtype),
-            )
+            if params.env_params.landscape.weather.include_temperature:
+                temperature = report.temperature[...,None]
+                hot = jnp.array([0.5, 0., 0.], dtype=temperature.dtype)
+                cold = jnp.array([0., 0., 0.5], dtype=temperature.dtype)
+                texture = jnp.where(
+                    temperature >= 0.,
+                    temperature * hot,
+                    -temperature * cold,
+                )
+            else:
+                texture = jnp.zeros((*terrain.shape,3), dtype=terrain.dtype)
             
         elif display_mode == 4:
-            normalized_moisture = (
-                report.moisture[...,None]/report.moisture_start_raining)
-            texture = normalized_moisture * jnp.array([1.,1.,1.])
-            texture = texture + report.rain[...,None] * jnp.array([0.25,0.25,1.])
+            if params.env_params.landscape.weather.include_rain:
+                moisture = report.moisture[...,None]
+                normalized_moisture = (moisture/report.moisture_start_raining)
+                texture = normalized_moisture * jnp.array([1.,1.,1.])
+                rain_color = jnp.array([0.25, 0.25, 1.], dtype=moisture.dtype)
+                texture = texture + report.rain[...,None] * rain_color
+            else:
+                texture = jnp.zeros((*terrain.shape,3), dtype=terrain.dtype)
         
         elif display_mode == 5:
             texture = (
                 report.normalized_altitude[...,None] * jnp.array([1.,1.,1.]))
         
         else:
-            print('HUH?')
             texture = jnp.zeros((*params.world_size, 3))
         
         print('Wind direction', report.wind_direction)
