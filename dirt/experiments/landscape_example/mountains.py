@@ -40,13 +40,13 @@ class TrainParams:
     seed : int = 1235
     initial_players : int = 2048
     max_players : int = 2048
-    world_size : Tuple[int,int] = (512,512) #(256,256) #(1024,1024)
+    world_size : Tuple[int,int] = (2048,2048) #(256,256) #(1024,1024)
     output_directory : str = '.'
     load_state : str = ''
     visualize : bool = False
     vis_width : int = 1024
     vis_height : int = 1024
-    downsample_visualizer : int = 1
+    downsample_visualizer : int = 4
     max_render_players : int =256
     env_params : Any = TeraAriumParams(
         landscape = LandscapeParams(
@@ -60,9 +60,9 @@ class TrainParams:
             terrain_bias = -25,
             weather = WeatherParams(
                 mountain_temperature_baseline = -3.,
-                include_rain = False,
+                include_rain = True,
                 include_temperature = False,
-                include_wind = False,
+                include_wind = True,
             )
         )
     )
