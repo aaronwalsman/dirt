@@ -223,9 +223,9 @@ def weather(
             [1, 1, 1],
             [1, 0, 1],
             [1, 1, 1],
-        ], dtype=jnp.uint8).reshape((3,3,1,1))
+        ], dtype=jnp.int8).reshape((3,3,1,1))
         raining_neighbors = jax.lax.conv_general_dilated(
-            next_rain.astype(jnp.uint8)[None,...,None],
+            next_rain.astype(jnp.int8)[None,...,None],
             kernel,
             window_strides=(1,1),
             padding='SAME',
