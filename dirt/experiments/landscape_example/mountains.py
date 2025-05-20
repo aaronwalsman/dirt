@@ -46,7 +46,7 @@ class TrainParams:
     visualize : bool = False
     vis_width : int = 1024
     vis_height : int = 1024
-    downsample_visualizer : int = 1
+    downsample_visualizer : int = 4
     max_render_players : int =256
     env_params : Any = TeraAriumParams(
         landscape = LandscapeParams(
@@ -119,7 +119,7 @@ def configure_functions(params):
         rain = state.env_state.landscape.rain
         temperature = state.env_state.landscape.temperature
         if params.env_params.landscape.weather.include_rain:
-            moisture = moisure[::dv,::dv]
+            moisture = moisture[::dv,::dv]
             rain = rain[::dv,::dv]
         if params.env_params.landscape.weather.include_temperature:
             temperature = temperature[::dv,::dv]
