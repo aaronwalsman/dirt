@@ -119,7 +119,7 @@ def configure_functions(params):
         rain = state.env_state.landscape.rain
         temperature = state.env_state.landscape.temperature
         if params.env_params.landscape.weather.include_rain:
-            moisture = moisure[::dv,::dv]
+            moisture = moisture[::dv,::dv]
             rain = rain[::dv,::dv]
         if params.env_params.landscape.weather.include_temperature:
             temperature = temperature[::dv,::dv]
