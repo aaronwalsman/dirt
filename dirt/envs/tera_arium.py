@@ -95,8 +95,10 @@ def tera_arium_renderer(params):
         rgb = jnp.full((h,w,3), ROCK_COLOR, dtype=water.dtype)
 
         # overlay the water as blue and ice as white
+        while len(temperature.shape) < 3:
+            temperature = temperature[..., None]
         water_color = jnp.where(
-            temperature[:,:,None] <= 0,
+            temperature <= 0,
             ICE_COLOR,
             WATER_COLOR,
         )
