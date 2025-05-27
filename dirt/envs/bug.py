@@ -21,6 +21,7 @@ class BugParams:
     initial_players : int = 1024
     max_players : int = 16384
     
+    # starting characteristics (make traits?)
     starting_health : float = 0.5
     starting_energy : float = 1.
     starting_water : float = 0.1
@@ -55,10 +56,6 @@ class BugTraits:
     base_color : jnp.ndarray
        
     photosynthesis : jnp.ndarray
-    
-    #speed : jnp.ndarray
-    #armor : jnp.ndarray
-    #teeth : jnp.ndarray
 
 @static_dataclass
 class BugAction:

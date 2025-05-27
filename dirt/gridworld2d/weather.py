@@ -12,17 +12,13 @@ import jax.random as jrng
 import jax.numpy as jnp
 import jax
 
-'''
-To make the whole world little more interesting...
-Why not add the weather system?
-Here is a naive version, only adding the evaporation and rain drops
-'''
-
 @static_dataclass
 class WeatherParams:
     
     # general
     world_size: Tuple[int,int] = (32, 32)
+    step_size: float = 1.
+    
     max_effective_altitude = 100.
     min_effective_water = 0.05
     
@@ -70,7 +66,6 @@ class WeatherParams:
 
 def weather(
     params: WeatherParams,
-    step_size: float = 1.,
     float_dtype: Any = DEFAULT_FLOAT_DTYPE,
 ):
     
@@ -89,8 +84,9 @@ def weather(
         
         def step_wind(key, wind):
             ou_key, round_key = jrng.split(key)
-            wind = step_wind_ou(ou_key, wind, step_size=step_size)
-            wind = wind * step_size
+            wind = step_wind_ou(
+                ou_key, wind, step_size=params.step_size)
+            wind = wind * params.step_size
             wind_floor = jnp.floor(wind)
             wind_ceil = jnp.ceil(wind)
             p_ceil = wind - wind_floor
@@ -111,7 +107,7 @@ def weather(
             diffusion_std=params.temperature_std,
             boundary='wrap',
             include_wind=False,
-            step_size=step_size,
+            step_size=params.step_size,
             float_dtype=float_dtype,
         )
     
@@ -120,7 +116,7 @@ def weather(
             params.world_size,
             diffusion_std=params.moisture_std,
             boundary='wrap',
-            step_size=step_size,
+            step_size=params.step_size,
             float_dtype=float_dtype,
         )
     
@@ -150,7 +146,7 @@ def weather(
             standing_water,
             params.water_thermal_mass,
             params.ground_thermal_mass,
-        ) ** step_size
+        ) ** params.step_size
         
         # compute the target_temperature
         temperature_baseline = (
@@ -196,7 +192,7 @@ def weather(
             evaporation_temp_range
         )
         evaporation_ammount = jnp.clip(evaporation_ammount, min=0., max=1.)
-        evaporation_ammount = evaporation_ammount * step_size
+        evaporation_ammount = evaporation_ammount * params.step_size
         evaporation = jnp.where(
             rain, 0, params.evaporation_rate * evaporation_ammount)
         evaporation = jnp.minimum(evaporation, water)
@@ -218,7 +214,8 @@ def weather(
 
         air_limit: how much water the atmosphete can hold
         '''
-        rain_amount = jnp.where(rain, params.rain_per_step * step_size, 0)
+        rain_amount = jnp.where(
+            rain, params.rain_per_step * params.step_size, 0)
         rain_amount = jnp.clip(rain_amount, max=moisture)
         next_water = water + rain_amount
         next_moisture = moisture - rain_amount
@@ -315,7 +312,7 @@ def weather(
             key, temperature_key = jrng.split(key)
             temperature = temperature_step(
                 temperature_key, water, temperature, normalized_altitude, light)
-        
+        #state =State(temperature, moisture, rain, wind, discrete_wind) 
         return water, temperature, moisture, rain, wind, discrete_wind
     
     return init, step

@@ -104,6 +104,7 @@ class Viewer:
         self._init_callbacks()
         
         self.display_mode = 1
+        self.show_players = True
         
         self.step_size = 1
         self.change_step(start_step)
@@ -526,6 +527,9 @@ class Viewer:
     
     def _update_players(self):
         active_players = self.get_active_players(self.params, self.report)
+        if not self.show_players:
+            active_players = jnp.zeros_like(active_players)
+        
         player_x = self.get_player_x(self.params, self.report)
         player_r = self.get_player_r(self.params, self.report)
         if self.get_player_energy is not None:
@@ -736,6 +740,10 @@ class Viewer:
             print(f'step size: {self.step_size}')
         if key in (340, 344):
             self._shift_down = action
+        
+        if key == 65 and action:
+             self.show_players = not self.show_players
+             self.change_step(self.current_step)
         
         if action == glfw.PRESS or action == glfw.REPEAT:
             if key == 44:

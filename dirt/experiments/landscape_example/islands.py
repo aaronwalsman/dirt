@@ -37,7 +37,7 @@ from dirt.visualization.viewer import Viewer
 @commandline_interface
 @static_dataclass
 class TrainParams:
-    seed : int = 1235
+    seed : int = 1236
     initial_players : int = 2048
     max_players : int = 2048
     world_size : Tuple[int,int] = (256,256) #(1024,1024)
@@ -57,7 +57,7 @@ class TrainParams:
             terrain_octaves = 12,
             terrain_unit_scale = 0.0025,
             terrain_max_height = 200.,
-            terrain_bias = -25,
+            terrain_bias = -65,
             weather = WeatherParams(
                 mountain_temperature_baseline = -3.,
                 include_rain = True,
@@ -199,8 +199,7 @@ def configure_functions(params):
                 normalized_moisture = (moisture/report.moisture_start_raining)
                 texture = normalized_moisture * jnp.array([1.,1.,1.])
                 rain_color = jnp.array([0.25, 0.25, 1.], dtype=moisture.dtype)
-                #texture = texture + report.rain[...,None] * rain_color
-                texture = jnp.where(report.rain[...,None], rain_color, texture)
+                texture = texture + report.rain[...,None] * rain_color
             else:
                 texture = jnp.zeros((*terrain.shape,3), dtype=terrain.dtype)
         

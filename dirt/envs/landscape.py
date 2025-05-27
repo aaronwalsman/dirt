@@ -47,26 +47,14 @@ class LandscapeParams:
     max_effective_altitude : float = 100.
     
     # water
+    # - different ways to fill the water
     sea_level : float = 0.
     initial_water_per_cell : float = 0.
-    #water_initial_fill_rate : float = 0.01
+    
     water_flow_rate : float = 1
     ice_flow_rate : float = 0.001
-    air_moisture_diffusion : float = 1./3.
+    air_moisture_diffusion : float = 0.333
     min_effective_water : float = 0.05
-    
-    # rain
-    # moved to weather
-    #rain_moisture_up_threshold : float = 0.8
-    #rain_moisture_down_threshold: float = 0.4
-    #rain_amount: float = 0.32
-    
-    # air
-    # moved to weather
-    #wind_std : float = 0.1
-    #wind_reversion : float = 0.001
-    #wind_bias : Tuple[float, float] | jnp.ndarray = (0.,0.)
-    #air_initial_temperature : float = 0.
     
     # smell
     smell_downsample: int = 1
@@ -131,8 +119,9 @@ def landscape(
     
     step_weathers = []
     for step_size in params.step_sizes:
+        weather_params = params.weather.replace(step_size=step_size)
         init_weather, step_weather = weather(
-            params.weather, step_size=step_size, float_dtype=float_dtype)
+            params.weather, float_dtype=float_dtype)
         step_weathers.append(step_weather)
     
     def init(

@@ -4,8 +4,6 @@ import jax.random as jrng
 
 import chex
 
-from mechagogue.static_dataclass import static_dataclass
-
 from dirt.constants import DEFAULT_FLOAT_DTYPE
 
 def ou_process(

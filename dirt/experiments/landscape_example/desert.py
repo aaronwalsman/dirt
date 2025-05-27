@@ -37,7 +37,7 @@ from dirt.visualization.viewer import Viewer
 @commandline_interface
 @static_dataclass
 class TrainParams:
-    seed : int = 1235
+    seed : int = 1238
     initial_players : int = 2048
     max_players : int = 2048
     world_size : Tuple[int,int] = (256,256) #(1024,1024)
@@ -50,16 +50,20 @@ class TrainParams:
     max_render_players : int =256
     env_params : Any = TeraAriumParams(
         landscape = LandscapeParams(
-            initial_total_energy = 256**2,
-            mean_energy_sites = 256**2,
-            initial_total_biomass = 256**2,
-            mean_biomass_sites = 256**2,
+            initial_total_energy = 128**2,
+            mean_energy_sites = 128**2,
+            initial_total_biomass = 128**2,
+            mean_biomass_sites = 128**2,
             terrain_octaves = 12,
-            terrain_unit_scale = 0.0025,
-            terrain_max_height = 200.,
-            terrain_bias = -25,
+            terrain_unit_scale = 0.0125,
+            terrain_max_height = 10.,
+            terrain_bias = 3,
             weather = WeatherParams(
+                initial_temperature = -1,
+                sea_level_temperature_baseline = -2.,
                 mountain_temperature_baseline = -3.,
+                ground_heat_absorption = 2.,
+                water_heat_absorption = 1.,
                 include_rain = True,
                 include_temperature = True,
                 include_wind = True,
@@ -199,8 +203,7 @@ def configure_functions(params):
                 normalized_moisture = (moisture/report.moisture_start_raining)
                 texture = normalized_moisture * jnp.array([1.,1.,1.])
                 rain_color = jnp.array([0.25, 0.25, 1.], dtype=moisture.dtype)
-                #texture = texture + report.rain[...,None] * rain_color
-                texture = jnp.where(report.rain[...,None], rain_color, texture)
+                texture = texture + report.rain[...,None] * rain_color
             else:
                 texture = jnp.zeros((*terrain.shape,3), dtype=terrain.dtype)
         
