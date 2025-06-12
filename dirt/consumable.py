@@ -1,8 +1,8 @@
 import jax.numpy as jnp
 
-from mechagogue.static_dataclass import static_dataclass
+from mechagogue.static import static_data
 
-@static_dataclass
+@static_data
 class Consumable:
     water : jnp.ndarray
     energy : jnp.ndarray

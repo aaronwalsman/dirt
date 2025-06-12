@@ -6,6 +6,8 @@ import chex
 
 from typing import Tuple, Optional, TypeVar, Any, Union
 
+from mechagogue.static import static_data, static_functions
+
 from dirt.constants import (
     DEFAULT_FLOAT_DTYPE,
     ROCK_COLOR,
@@ -18,7 +20,7 @@ from dirt.constants import (
 from dirt.gridworld2d.geology import fractal_noise
 from dirt.gridworld2d.erosion import simulate_erosion_step, reset_erosion_status
 from dirt.gridworld2d.water import flow_step, flow_step_twodir
-from dirt.gridworld2d.weather import WeatherParams, weather
+from dirt.gridworld2d.weather import WeatherParams, make_weather
 # from dirt.gridworld2d.climate_pattern_day import (
 #     temperature_step, light_step, get_day_status)
 from dirt.gridworld2d.climate_pattern_day_cont import (
@@ -28,12 +30,10 @@ from dirt.gridworld2d.climate_pattern_year import (
 from dirt.gridworld2d.spawn import poisson_grid
 from dirt.consumable import Consumable
 
-from mechagogue.static_dataclass import static_dataclass
-
-@static_dataclass
+@static_data
 class LandscapeParams:
     world_size : Tuple[int, int] = (1024, 1024)
-    step_sizes : Tuple[float] = (1.,)
+    #step_sizes : Tuple[float, ...] = (1.,)
     initial_time: float = 0.
     
     # terrain
@@ -48,26 +48,15 @@ class LandscapeParams:
     
     # water
     include_water_flow : bool = True
+    
+    # - different ways to fill the water
     sea_level : float = 0.
     initial_water_per_cell : float = 0.
-    #water_initial_fill_rate : float = 0.01
+    
     water_flow_rate : float = 1
     ice_flow_rate : float = 0.001
-    air_moisture_diffusion : float = 1./3.
+    air_moisture_diffusion : float = 0.333
     min_effective_water : float = 0.05
-    
-    # rain
-    # moved to weather
-    #rain_moisture_up_threshold : float = 0.8
-    #rain_moisture_down_threshold: float = 0.4
-    #rain_amount: float = 0.32
-    
-    # air
-    # moved to weather
-    #wind_std : float = 0.1
-    #wind_reversion : float = 0.001
-    #wind_bias : Tuple[float, float] | jnp.ndarray = (0.,0.)
-    #air_initial_temperature : float = 0.
     
     # smell
     smell_downsample: int = 1
@@ -109,7 +98,7 @@ class LandscapeParams:
     mean_biomass_sites : float = 256.**2
     initial_total_biomass : float = 256.**2
 
-@static_dataclass
+@static_data
 class LandscapeState:
     terrain : jnp.array
     erosion : jnp.array
@@ -126,171 +115,171 @@ class LandscapeState:
     energy : jnp.array
     biomass : jnp.array
 
-def landscape(
+def make_landscape(
     params : LandscapeParams = LandscapeParams(),
     float_dtype : Any = DEFAULT_FLOAT_DTYPE,
 ):
     
-    step_weathers = []
-    for step_size in params.step_sizes:
-        init_weather, step_weather = weather(
-            params.weather, step_size=step_size, float_dtype=float_dtype)
-        step_weathers.append(step_weather)
+    #step_weathers = []
+    #for step_size in params.step_sizes:
+    #weather_params = params.weather.replace(step_size=step_size)
+    weather = make_weather(params.weather, float_dtype=float_dtype)
+    #step_weathers.append(step_weather)
     
-    def init(
-        key : chex.PRNGKey,
-    ) -> LandscapeState :
+    @static_functions
+    class Landscape:
+        def init(
+            key : chex.PRNGKey,
+        ) -> LandscapeState :
+            
+            # terrain
+            # - use fractal_noise to generate an initial terrain grid
+            key, terrain_key = jrng.split(key)
+            terrain = fractal_noise(
+                terrain_key,
+                params.world_size,
+                params.terrain_octaves,
+                params.terrain_lacunarity,
+                params.terrain_persistence,
+                params.terrain_max_octaves,
+                params.terrain_unit_scale,
+                params.terrain_max_height,
+                dtype=float_dtype,
+            ) + params.terrain_bias
+            
+            # erosion
+            # - initialize erosion to be zero everywhere
+            erosion = jnp.zeros(params.world_size, dtype=float_dtype)
+            
+            # water
+            #water = jnp.max(params.sea_level - terrain, 0.)
+            water = jnp.where(
+                terrain < params.sea_level, params.sea_level - terrain, 0.)
+            water = water + params.initial_water_per_cell
+            '''
+            # - start with zero water everywhere
+            water = jnp.zeros(params.world_size, dtype=float_dtype)
+            
+            # - compute the total water we want distributed over the entire grid
+            total_water = (
+                params.water_per_cell * params.world_size[0] * params.world_size[1])
+            
+            # - then we will fill the lowest points on the grid with water until
+            #   the desired total water has been deposited in the grid
+            water_level = jnp.min(terrain)
+            
+            def water_level_cond(water_water_level):
+                water, water_level = water_water_level
+                return jnp.sum(water) < total_water
+            
+            def water_level_body(water_water_level):
+                water, water_level = water_water_level
+                water_level += params.water_initial_fill_rate # Suppose Fix
+                water = water_level - terrain
+                water = jnp.where(water < 0., 0., water)
+                water = water.astype(float_dtype)
+                return (water, water_level)
+            
+            water, water_level = jax.lax.while_loop(
+                water_level_cond, water_level_body, (water, water_level))
+            
+            # - scale the water everywhere in order to counteract any overshoot
+            current_water = jnp.sum(water)
+            water = water * (total_water / current_water)
+            
+            # - offset the terrain so that the water level (sea level) is zero
+            terrain = terrain - water_level
+            '''
+            # light
+            light = jnp.zeros(params.world_size, dtype=float_dtype)
+            
+            # smell
+            smell_size = (
+                params.world_size[0]//params.smell_downsample,
+                params.world_size[1]//params.smell_downsample,
+            )
+            smell = jnp.zeros(
+                (*smell_size, params.smell_channels), dtype=float_dtype)
+            
+            # audio
+            audio_size = (
+                params.world_size[0]//params.audio_downsample,
+                params.world_size[1]//params.audio_downsample,
+            )
+            audio = jnp.zeros(
+                (*audio_size, params.audio_channels), dtype=float_dtype)
+            
+            # weather
+            key, weather_key = jrng.split(key)
+            temperature, moisture, rain, wind = init_weather(weather_key)
+            
+            # time
+            t = params.initial_time
+            
+            # energy
+            key, energy_key = jrng.split(key)
+            energy_sites = poisson_grid(
+                energy_key,
+                params.mean_energy_sites,
+                round(params.mean_energy_sites*2),
+                params.world_size,
+            )
+            total_energy_sites = jnp.sum(energy_sites)
+            energy_per_site = params.initial_total_energy / total_energy_sites
+            energy = (energy_sites * energy_per_site).astype(float_dtype)
+            
+            # biomass
+            key, biomass_key = jrng.split(key)
+            biomass_sites = poisson_grid(
+                biomass_key,
+                params.mean_biomass_sites,
+                round(params.mean_biomass_sites*2),
+                params.world_size,
+            )
+            total_biomass_sites = jnp.sum(biomass_sites)
+            biomass_per_site = (
+                params.initial_total_biomass / total_biomass_sites)
+            biomass = (biomass_sites * biomass_per_site).astype(float_dtype)
+            
+            return LandscapeState(
+                terrain,
+                erosion,
+                water,
+                temperature,
+                moisture,
+                rain,
+                wind,
+                light,
+                smell,
+                audio,
+                t,
+                energy,
+                biomass,
+            )
         
-        # terrain
-        # - use fractal_noise to generate an initial terrain grid
-        key, terrain_key = jrng.split(key)
-        terrain = fractal_noise(
-            terrain_key,
-            params.world_size,
-            params.terrain_octaves,
-            params.terrain_lacunarity,
-            params.terrain_persistence,
-            params.terrain_max_octaves,
-            params.terrain_unit_scale,
-            params.terrain_max_height,
-            dtype=float_dtype,
-        ) + params.terrain_bias
+        def get_consumable(state, x):
+            x0, x1 = x[...,0], x[...,1]
+            water = state.water[x0, x1]
+            energy = state.energy[x0, x1]
+            biomass = state.biomass[x0, x1]
+            return Consumable(water, energy, biomass)
         
-        # erosion
-        # - initialize erosion to be zero everywhere
-        erosion = jnp.zeros(params.world_size, dtype=float_dtype)
+        def set_consumable(state, x, consumable):
+            x0, x1 = x[...,0], x[...,1]
+            water = state.water.at[x0, x1].set(consumable.water)
+            energy = state.energy.at[x0, x1].set(consumable.energy)
+            biomass = state.biomass.at[x0, x1].set(consumable.biomass)
+            return state.replace(water=water, energy=energy, biomass=biomass)
         
-        # water
-        #water = jnp.max(params.sea_level - terrain, 0.)
-        water = jnp.where(
-            terrain < params.sea_level, params.sea_level - terrain, 0.)
-        water = water + params.initial_water_per_cell
-        '''
-        # - start with zero water everywhere
-        water = jnp.zeros(params.world_size, dtype=float_dtype)
+        def add_consumable(state, x, consumable):
+            x0, x1 = x[...,0], x[...,1]
+            water = state.water.at[x0, x1].add(consumable.water)
+            energy = state.energy.at[x0, x1].add(consumable.energy)
+            biomass = state.biomass.at[x0, x1].add(consumable.biomass)
+            return state.replace(water=water, energy=energy, biomass=biomass)
         
-        # - compute the total water we want distributed over the entire grid
-        total_water = (
-            params.water_per_cell * params.world_size[0] * params.world_size[1])
-        
-        # - then we will fill the lowest points on the grid with water until
-        #   the desired total water has been deposited in the grid
-        water_level = jnp.min(terrain)
-        
-        def water_level_cond(water_water_level):
-            water, water_level = water_water_level
-            return jnp.sum(water) < total_water
-        
-        def water_level_body(water_water_level):
-            water, water_level = water_water_level
-            water_level += params.water_initial_fill_rate # Suppose Fix
-            water = water_level - terrain
-            water = jnp.where(water < 0., 0., water)
-            water = water.astype(float_dtype)
-            return (water, water_level)
-        
-        water, water_level = jax.lax.while_loop(
-            water_level_cond, water_level_body, (water, water_level))
-        
-        # - scale the water everywhere in order to counteract any overshoot
-        current_water = jnp.sum(water)
-        water = water * (total_water / current_water)
-        
-        # - offset the terrain so that the water level (sea level) is zero
-        terrain = terrain - water_level
-        '''
-        # light
-        if params.include_light:
-            light = jnp.ones(params.world_size, dtype=float_dtype)
-        else:
-            light = jnp.ones((), dtype=float_dtype)
-        
-        # smell
-        smell_size = (
-            params.world_size[0]//params.smell_downsample,
-            params.world_size[1]//params.smell_downsample,
-        )
-        smell = jnp.zeros(
-            (*smell_size, params.smell_channels), dtype=float_dtype)
-        
-        # audio
-        audio_size = (
-            params.world_size[0]//params.audio_downsample,
-            params.world_size[1]//params.audio_downsample,
-        )
-        audio = jnp.zeros(
-            (*audio_size, params.audio_channels), dtype=float_dtype)
-        
-        # weather
-        key, weather_key = jrng.split(key)
-        temperature, moisture, rain, wind = init_weather(weather_key)
-        
-        # time
-        t = params.initial_time
-        
-        # energy
-        key, energy_key = jrng.split(key)
-        energy_sites = poisson_grid(
-            energy_key,
-            params.mean_energy_sites,
-            round(params.mean_energy_sites*2),
-            params.world_size,
-        )
-        total_energy_sites = jnp.sum(energy_sites)
-        energy_per_site = params.initial_total_energy / total_energy_sites
-        energy = (energy_sites * energy_per_site).astype(float_dtype)
-        
-        # biomass
-        key, biomass_key = jrng.split(key)
-        biomass_sites = poisson_grid(
-            biomass_key,
-            params.mean_biomass_sites,
-            round(params.mean_biomass_sites*2),
-            params.world_size,
-        )
-        total_biomass_sites = jnp.sum(biomass_sites)
-        biomass_per_site = params.initial_total_biomass / total_biomass_sites
-        biomass = (biomass_sites * biomass_per_site).astype(float_dtype)
-        
-        return LandscapeState(
-            terrain,
-            erosion,
-            water,
-            temperature,
-            moisture,
-            rain,
-            wind,
-            light,
-            smell,
-            audio,
-            t,
-            energy,
-            biomass,
-        )
-    
-    def get_consumable(state, x):
-        x0, x1 = x[...,0], x[...,1]
-        water = state.water[x0, x1]
-        energy = state.energy[x0, x1]
-        biomass = state.biomass[x0, x1]
-        return Consumable(water, energy, biomass)
-    
-    def set_consumable(state, x, consumable):
-        x0, x1 = x[...,0], x[...,1]
-        water = state.water.at[x0, x1].set(consumable.water)
-        energy = state.energy.at[x0, x1].set(consumable.energy)
-        biomass = state.biomass.at[x0, x1].set(consumable.biomass)
-        return state.replace(water=water, energy=energy, biomass=biomass)
-    
-    def add_consumable(state, x, consumable):
-        x0, x1 = x[...,0], x[...,1]
-        water = state.water.at[x0, x1].add(consumable.water)
-        energy = state.energy.at[x0, x1].add(consumable.energy)
-        biomass = state.biomass.at[x0, x1].add(consumable.biomass)
-        return state.replace(water=water, energy=energy, biomass=biomass)
-    
-    step_functions = []
-    for i, step_size in enumerate(params.step_sizes):
+        #step_functions = []
+        #for i, step_size in enumerate(params.step_sizes):
         def step(
             key : chex.PRNGKey,
             state : LandscapeState,
@@ -426,11 +415,10 @@ def landscape(
             )
             
             return next_state
-        
-        step_functions.append(step)
+            
+            #step_functions.append(step)
     
-    return init, get_consumable, set_consumable, add_consumable, *step_functions
-
+    return Landscape
 
 if __name__ == "__main__":
     init, step_fn = landscape()

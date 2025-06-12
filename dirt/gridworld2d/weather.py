@@ -1,6 +1,6 @@
 from typing import Tuple, Any
 
-from mechagogue.static_dataclass import static_dataclass
+from mechagogue.static import static_data, static_functions
 
 from dirt.gridworld2d.geology import fractal_noise
 from dirt.gridworld2d.water import flow_step_twodir
@@ -12,17 +12,13 @@ import jax.random as jrng
 import jax.numpy as jnp
 import jax
 
-'''
-To make the whole world little more interesting...
-Why not add the weather system?
-Here is a naive version, only adding the evaporation and rain drops
-'''
-
-@static_dataclass
+@static_data
 class WeatherParams:
     
     # general
     world_size: Tuple[int,int] = (32, 32)
+    step_size: float = 1.
+    
     max_effective_altitude = 100.
     min_effective_water = 0.05
     
@@ -68,9 +64,8 @@ class WeatherParams:
     wind_reversion: float = 0.1
     wind_bias: Tuple[float,float] = (0.,0.)
 
-def weather(
+def make_weather(
     params: WeatherParams,
-    step_size: float = 1.,
     float_dtype: Any = DEFAULT_FLOAT_DTYPE,
 ):
     
@@ -87,10 +82,12 @@ def weather(
             dtype=float_dtype,
         )
         
+        '''
         def step_wind(key, wind):
             ou_key, round_key = jrng.split(key)
-            wind = step_wind_ou(ou_key, wind, step_size=step_size)
-            wind = wind * step_size
+            wind = step_wind_ou(
+                ou_key, wind, step_size=params.step_size)
+            wind = wind * params.step_size
             wind_floor = jnp.floor(wind)
             wind_ceil = jnp.ceil(wind)
             p_ceil = wind - wind_floor
@@ -98,6 +95,7 @@ def weather(
             discrete_wind = jnp.where(
                 round_direction < p_ceil, wind_ceil, wind_floor)
             return wind, discrete_wind
+        '''
     
     if params.include_temperature:
         (
@@ -111,7 +109,7 @@ def weather(
             diffusion_std=params.temperature_std,
             boundary='wrap',
             include_wind=False,
-            step_size=step_size,
+            #step_size=params.step_size,
             float_dtype=float_dtype,
         )
     
@@ -120,7 +118,7 @@ def weather(
             params.world_size,
             diffusion_std=params.moisture_std,
             boundary='wrap',
-            step_size=step_size,
+            #step_size=params.step_size,
             float_dtype=float_dtype,
         )
     
@@ -150,7 +148,7 @@ def weather(
             standing_water,
             params.water_thermal_mass,
             params.ground_thermal_mass,
-        ) ** step_size
+        ) ** params.step_size
         
         # compute the target_temperature
         temperature_baseline = (
@@ -196,7 +194,7 @@ def weather(
             evaporation_temp_range
         )
         evaporation_ammount = jnp.clip(evaporation_ammount, min=0., max=1.)
-        evaporation_ammount = evaporation_ammount * step_size
+        evaporation_ammount = evaporation_ammount * params.step_size
         evaporation = jnp.where(
             rain, 0, params.evaporation_rate * evaporation_ammount)
         evaporation = jnp.minimum(evaporation, water)
@@ -218,7 +216,8 @@ def weather(
 
         air_limit: how much water the atmosphete can hold
         '''
-        rain_amount = jnp.where(rain, params.rain_per_step * step_size, 0)
+        rain_amount = jnp.where(
+            rain, params.rain_per_step * params.step_size, 0)
         rain_amount = jnp.clip(rain_amount, max=moisture)
         next_water = water + rain_amount
         next_moisture = moisture - rain_amount
@@ -253,72 +252,80 @@ def weather(
         
         return next_water, next_moisture, next_rain
     
-    def init(key):
-        if params.include_wind:
-            key, wind_key = jrng.split(key)
-            wind = init_wind(key)
-        else:
-            wind = jnp.zeros((2,))
-        
-        if params.include_temperature:
-            temperature = jnp.full(
-                params.world_size,
-                params.initial_temperature,
-                dtype=float_dtype,
-            )
-        else:
-            temperature = jnp.full(
-                (), params.initial_temperature, dtype=float_dtype)
-        
-        if params.include_rain:
-            moisture = init_moisture()
-            rain = jnp.zeros(params.world_size, dtype=jnp.bool)
-        else:
-            moisture = jnp.zeros((), dtype=float_dtype)
-            rain = jnp.zeros((), dtype=jnp.bool)
-        
-        return temperature, moisture, rain, wind 
-    
-    def step(
-        key,
-        water: jnp.ndarray,
-        temperature: jnp.ndarray,
-        moisture: jnp.ndarray, 
-        rain: jnp.ndarray,
-        wind: jnp.ndarray,
-        normalized_altitude: jnp.ndarray,
-        light: jnp.ndarray,
-    ) -> jnp.ndarray:
-        
-        # change wind direction
-        if params.include_wind:
-            key, wind_key = jrng.split(key)
-            wind, discrete_wind = step_wind(wind_key, wind)
-        else:
-            discrete_wind = jnp.zeros((2,), dtype=jnp.int32)
-        
-        # rain
-        if params.include_rain:
-            # evaporate
-            water, moisture = evaporate_step(water, temperature, moisture, rain)
+    @static_functions
+    class Weather:
+        def init(key):
+            if params.include_wind:
+                key, wind_key = jrng.split(key)
+                wind = init_wind(key)
+            else:
+                wind = jnp.zeros((2,))
             
-            # make it rain
-            water, moisture, rain = rain_step(
-                normalized_altitude, water, moisture, rain, discrete_wind)
+            if params.include_temperature:
+                temperature = jnp.full(
+                    params.world_size,
+                    params.initial_temperature,
+                    dtype=float_dtype,
+                )
+            else:
+                temperature = jnp.full(
+                    (), params.initial_temperature, dtype=float_dtype)
             
-            # blow the moisture around
-            key, moisture_key = jrng.split(key)
-            moisture = moisture_step(moisture_key, moisture, discrete_wind)
+            if params.include_rain:
+                moisture = init_moisture()
+                rain = jnp.zeros(params.world_size, dtype=jnp.bool)
+            else:
+                moisture = jnp.zeros((), dtype=float_dtype)
+                rain = jnp.zeros((), dtype=jnp.bool)
+            
+            return temperature, moisture, rain, wind 
         
-        # update the temperature
-        if params.include_temperature:
-            key, temperature_key = jrng.split(key)
-            temperature = temperature_step(
-                temperature_key, water, temperature, normalized_altitude, light)
-        
-        return water, temperature, moisture, rain, wind, discrete_wind
+        def step(
+            key,
+            water: jnp.ndarray,
+            temperature: jnp.ndarray,
+            moisture: jnp.ndarray, 
+            rain: jnp.ndarray,
+            wind: jnp.ndarray,
+            normalized_altitude: jnp.ndarray,
+            light: jnp.ndarray,
+        ) -> jnp.ndarray:
+            
+            # change wind direction
+            if params.include_wind:
+                key, wind_key = jrng.split(key)
+                wind, discrete_wind = step_wind(wind_key, wind)
+            else:
+                discrete_wind = jnp.zeros((2,), dtype=jnp.int32)
+            
+            # rain
+            if params.include_rain:
+                # evaporate
+                water, moisture = evaporate_step(
+                    water, temperature, moisture, rain)
+                
+                # make it rain
+                water, moisture, rain = rain_step(
+                    normalized_altitude, water, moisture, rain, discrete_wind)
+                
+                # blow the moisture around
+                key, moisture_key = jrng.split(key)
+                moisture = moisture_step(moisture_key, moisture, discrete_wind)
+            
+            # update the temperature
+            if params.include_temperature:
+                key, temperature_key = jrng.split(key)
+                temperature = temperature_step(
+                    temperature_key,
+                    water,
+                    temperature,
+                    normalized_altitude,
+                    light,
+                )
+            #state =State(temperature, moisture, rain, wind, discrete_wind) 
+            return water, temperature, moisture, rain, wind, discrete_wind
     
-    return init, step
+    return Weather
 
 def simulate_weather(
     terrain: jnp.ndarray,

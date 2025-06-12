@@ -37,16 +37,16 @@ from dirt.visualization.viewer import Viewer
 @commandline_interface
 @static_dataclass
 class TrainParams:
-    seed : int = 1235
-    initial_players : int = 0 #2048
-    max_players : int = 0 #2048
-    world_size : Tuple[int,int] = (8196,8196) #(256,256) #(1024,1024)
+    seed : int = 1236
+    initial_players : int = 2048
+    max_players : int = 2048
+    world_size : Tuple[int,int] = (256,256) #(1024,1024)
     output_directory : str = '.'
     load_state : str = ''
     visualize : bool = False
     vis_width : int = 1024
     vis_height : int = 1024
-    downsample_visualizer : int = 8
+    downsample_visualizer : int = 1
     max_render_players : int =256
     env_params : Any = TeraAriumParams(
         landscape = LandscapeParams(
@@ -57,7 +57,7 @@ class TrainParams:
             terrain_octaves = 12,
             terrain_unit_scale = 0.0025,
             terrain_max_height = 200.,
-            terrain_bias = -25,
+            terrain_bias = -65,
             weather = WeatherParams(
                 mountain_temperature_baseline = -3.,
                 include_rain = True,
@@ -71,7 +71,7 @@ class TrainParams:
     )
     runner_params : Any = EpochRunnerParams(
         epochs=4,
-        steps_per_epoch=1024,
+        steps_per_epoch=1000,
         save_state=True,
         save_reports=True,
     )
@@ -199,8 +199,7 @@ def configure_functions(params):
                 normalized_moisture = (moisture/report.moisture_start_raining)
                 texture = normalized_moisture * jnp.array([1.,1.,1.])
                 rain_color = jnp.array([0.25, 0.25, 1.], dtype=moisture.dtype)
-                #texture = texture + report.rain[...,None] * rain_color
-                texture = jnp.where(report.rain[...,None], rain_color, texture)
+                texture = texture + report.rain[...,None] * rain_color
             else:
                 texture = jnp.zeros((*terrain.shape,3), dtype=terrain.dtype)
         
@@ -316,8 +315,7 @@ if __name__ == '__main__':
             params.runner_params,
             init_train,
             step_train,
-            #make_report,
-            lambda *args, **kwargs : None,
+            make_report,
             log,
             output_directory=params.output_directory,
             load_state=params.load_state,
