@@ -34,6 +34,8 @@ def make_gas(
     
     if include_wind:
         def wind_step(key, grid, wind):
+            # convert the real-valued wind to a discrete_wind offset at the
+            # correct grid resolution
             wind = jnp.clip(wind, -max_wind, max_wind)
             downsampled_wind = wind / downsample
             wind_lo = jnp.floor(downsampled_wind).astype(jnp.int32)
@@ -41,46 +43,18 @@ def make_gas(
             rounding = jrng.bernoulli(key, downsampled_wind-wind_lo)
             discrete_wind = jnp.where(rounding, wind_hi, wind_lo)
             
-            #if boundary != 'collect':
+            # apply the discrete_wind offset
             grid = jnp.roll(grid, shift=discrete_wind, axis=(0,1))
             
             if boundary in ('clip', 'collect', 'redistribute'):
                 
-                '''
-                xlo = jnp.arange(max_wind_cells)
-                xlo_mask = (
-                    (xlo >= discrete_wind[0]) &
-                    (xlo < downsample_size[0] + discrete_wind[0])
-                )
-                xlo_mask = xlo_mask[:,None,*((None,)*len(cell_shape))]
-                xhi = xlo + downsample_size[0] - max_wind_cells
-                xhi_mask = (
-                    (xhi >= discrete_wind[0]) &
-                    (xhi < downsample_size[0] + discrete_wind[0])
-                )
-                xhi_mask = xhi_mask[:,None,*((None,)*len(cell_shape))]
-                
-                ylo = jnp.arange(max_wind_cells)
-                ylo_mask = (
-                    (ylo >= discrete_wind[1]) &
-                    (ylo < downsample_size[1] + discrete_wind[1])
-                )
-                ylo_mask = ylo_mask[None,:,*((None,)*len(cell_shape))]
-                yhi = ylo + downsample_size[1] - max_wind_cells
-                yhi_mask = (
-                    (yhi >= discrete_wind[1]) &
-                    (yhi < downsample_size[1] + discrete_wind[1])
-                )
-                yhi_mask = yhi_mask[None,:,*((None,)*len(cell_shape))]
-                '''
-                
+                # compute the masks for gas blown over the edge
                 ar_0 = jnp.arange(downsample_size[0])
+                ar_1 = jnp.arange(downsample_size[1])
                 mask_0 = (
                     (ar_0 >= discrete_wind[0]) &
                     (ar_0 < downsample_size[0] + discrete_wind[0])
                 )
-                
-                ar_1 = jnp.arange(downsample_size[1])
                 mask_1 = (
                     (ar_1 >= discrete_wind[1]) &
                     (ar_1 < downsample_size[1] + discrete_wind[1])
@@ -88,49 +62,20 @@ def make_gas(
                 cell_pad = (None,)*len(cell_shape)
                 
                 if boundary == 'clip':
-                    grid = grid.at[:max_wind_cells].multiply(
-                        mask_0[:max_wind_cells,None,*cell_pad])
-                    grid = grid.at[-max_wind_cells:].multiply(
-                        mask_0[-max_wind_cells:,None,*cell_pad])
-                    grid = grid.at[:,:max_wind_cells].multiply(
-                        mask_1[None,:max_wind_cells,*cell_pad])
-                    grid = grid.at[:,-max_wind_cells:].multiply(
-                        mask_1[None,-max_wind_cells:,*cell_pad])
+                    # zero out any gas that was blown over the boundaries
+                    m = max_wind_cells
+                    grid = grid.at[:m].multiply(mask_0[:m,None,*cell_pad])
+                    grid = grid.at[-m:].multiply(mask_0[-m:,None,*cell_pad])
+                    grid = grid.at[:,:m].multiply(mask_1[None,:m,*cell_pad])
+                    grid = grid.at[:,-m:].multiply(mask_1[None,-m:,*cell_pad])
                 
                 if boundary == 'redistribute':
-                    '''
-                    # get the gas that has blown over each edge
-                    lo_lo_corner = grid[:max_wind_cells, :max_wind_cells]
-                    lo_mid_edge = grid[
-                        :max_wind_cells, max_wind_cells:-max_wind_cells]
-                    lo_hi_corner = grid[:max_wind_cells, -max_wind_cells:]
-                    mid_hi_edge = grid[
-                        max_wind_cells:-max_wind_cells, -max_wind_cells:]
-                    hi_hi_corner = grid[-max_wind_cells:, -max_wind_cells:]
-                    hi_mid_edge = grid[
-                        -max_wind_cells:, max_wind_cells:-max_wind_cells]
-                    hi_lo_corner = grid[-max_wind_cells:, :max_wind_cells]
-                    mid_lo_edge = grid[
-                        max_wind_cells:-max_wind_cells, :max_wind_cells]
-                    
-                    # sum these chunks
-                    redistribute_total = (
-                        jnp.sum(lo_lo_corner * ~xlo_mask * ~ylo_mask) +
-                        jnp.sum(lo_mid_edge * ~xlo_mask) +
-                        jnp.sum(lo_hi_corner * ~xlo_mask * ~yhi_mask) +
-                        jnp.sum(mid_hi_edge * ~yhi_mask) +
-                        jnp.sum(hi_hi_corner * ~xhi_mask * ~yhi_mask) +
-                        jnp.sum(hi_mid_edge * ~xhi_mask) +
-                        jnp.sum(hi_lo_corner * ~xhi_mask * ~ylo_mask) +
-                        jnp.sum(mid_lo_edge * ~ylo_mask)
-                    )
-                    '''
                     
                     def get_block_total(lo0, hi0, lo1, hi1):
                         block = grid[lo0:hi0,lo1:hi1]
                         mask = ~mask_0[lo0:hi0,None] | ~mask_1[None,lo1:hi1]
                         mask = mask[:,:,*cell_pad]
-                        return jnp.sum(block * mask)
+                        return jnp.sum(block * mask, axis=(0,1))
                     
                     m = max_wind_cells
                     redistribute_total = (
@@ -144,11 +89,7 @@ def make_gas(
                         get_block_total(m,-m,0,m)
                     )
                     
-                    # zero out the blown-over content
-                    #grid = grid.at[:max_wind_cells].multiply(xlo_mask)
-                    #grid = grid.at[-max_wind_cells:].multiply(xhi_mask)
-                    #grid = grid.at[:,:max_wind_cells].multiply(ylo_mask)
-                    #grid = grid.at[:,-max_wind_cells:].multiply(yhi_mask)
+                    # zero out any gas that was blown over the boundaries
                     grid = grid.at[:m].multiply(mask_0[:m,None,*cell_pad])
                     grid = grid.at[-m:].multiply(mask_0[-m:,None,*cell_pad])
                     grid = grid.at[:,:m].multiply(mask_1[None,:m,*cell_pad])
@@ -160,18 +101,7 @@ def make_gas(
                 
                 elif boundary == 'collect':
                     
-                    ar_0 = jnp.arange(downsample_size[0])
-                    mask_0 = (
-                        (ar_0 >= discrete_wind[0]) &
-                        (ar_0 < downsample_size[0] + discrete_wind[0])
-                    )
-                    
-                    ar_1 = jnp.arange(downsample_size[1])
-                    mask_1 = (
-                        (ar_1 >= discrete_wind[1]) &
-                        (ar_1 < downsample_size[1] + discrete_wind[1])
-                    )
-                    
+                    # compute the destination locations
                     dest_0 = ar_0 + discrete_wind[0]
                     dest_0 = jnp.clip(dest_0, 0, downsample_size[0]-1)
                     dest_0 = jnp.roll(dest_0, shift=discrete_wind[0])
@@ -179,14 +109,9 @@ def make_gas(
                     dest_1 = jnp.clip(dest_1, 0, downsample_size[1]-1)
                     dest_1 = jnp.roll(dest_1, shift=discrete_wind[1])
                     
-                    def collect_block(
-                        grid,
-                        lo0,
-                        hi0,
-                        lo1,
-                        hi1,
-                        #mask,
-                    ):
+                    # define the function that will redistribute gas that blows
+                    # over the border onto the correct edge
+                    def collect_block(grid, lo0, hi0, lo1, hi1):
                         block = grid[lo0:hi0, lo1:hi1]
                         
                         block_dest_0 = dest_0[lo0:hi0]
@@ -203,104 +128,74 @@ def make_gas(
                         mask = mask[:,:,*cell_pad]
                         
                         grid = grid.at[coord_0, coord_1].add(
-                            (block * mask).reshape(-1))
+                            (block * mask).reshape(-1,*cell_shape))
                         return grid
                     
+                    # apply the collect function to the 8 border regions
                     m = max_wind_cells
-                    grid = collect_block(
-                        grid,0,m,0,m) #,(~xlo_mask|~ylo_mask))
-                    grid = collect_block(
-                        grid,0,m,m,-m) #,~xlo_mask)
-                    grid = collect_block(
-                        grid,0,m,-m,None) #,(~xlo_mask|~yhi_mask))
-                    grid = collect_block(
-                        grid,m,-m,-m,None) #,~yhi_mask)
-                    grid = collect_block(
-                        grid,-m,None,-m,None) #,(~xhi_mask|~yhi_mask))
-                    grid = collect_block(
-                        grid,-m,None,m,-m) #,~xhi_mask)
-                    grid = collect_block(
-                        grid,-m,None,0,m) #,(~xhi_mask|~ylo_mask))
-                    grid = collect_block(
-                        grid,m,-m,0,m) #,~ylo_mask)
+                    grid = collect_block(grid,0,m,0,m)
+                    grid = collect_block(grid,0,m,m,-m)
+                    grid = collect_block(grid,0,m,-m,None)
+                    grid = collect_block(grid,m,-m,-m,None)
+                    grid = collect_block(grid,-m,None,-m,None)
+                    grid = collect_block(grid,-m,None,m,-m)
+                    grid = collect_block(grid,-m,None,0,m)
+                    grid = collect_block(grid,m,-m,0,m)
                     
+                    # zero out any gas that was blown over the boundaries
                     grid = grid.at[:m].multiply(mask_0[:m,None,*cell_pad])
                     grid = grid.at[-m:].multiply(mask_0[-m:,None,*cell_pad])
                     grid = grid.at[:,:m].multiply(mask_1[None,:m,*cell_pad])
                     grid = grid.at[:,-m:].multiply(mask_1[None,-m:,*cell_pad])
-                    
-                    #grid = grid.at[:max_wind_cells].multiply(xlo_mask)
-                    #grid = grid.at[-max_wind_cells:].multiply(xhi_mask)
-                    #grid = grid.at[:,:max_wind_cells].multiply(ylo_mask)
-                    #grid = grid.at[:,-max_wind_cells:].multiply(yhi_mask)
             
-            jax.debug.print('sum {s}', s=jnp.sum(grid))
             return grid
     
     if include_diffusion:
         
-        '''
-        # make the kernel
-        if diffusion_type == 'gaussian':
-            radius = jnp.ceil(3 * iter_std).astype(int)
-            x = jnp.arange(-radius, radius + 1)
-            kernel = jnp.exp(-x**2 / (2 * iter_std**2)).astype(float_dtype)
-            kernel = kernel / kernel.sum()
-        elif diffusion_type == 'box':
-            radius = jnp.ceil(
-                (-1 + jnp.sqrt(1 + 12 * step_std ** 2)) / 2).astype(int)
-            n = 2 * radius + 1
-            kernel = jnp.ones(n, dtype=float_dtype) / n
-        '''
-        
+        # build the box filter convolution
         n = 2 * diffusion_radius + 1
         kernel = jnp.ones(n, dtype=float_dtype) / n
         
-        kernel = kernel[:, None]
-        kernel = kernel[..., None, None]
-        pad = diffusion_radius #* diffusion_iterations
-        
         def diffusion_step(grid):
-            if len(grid.shape) == 2:
-                grid = grid[:,:,None]
-                remove_last_channel = True
-            else:
-                remove_last_channel = False
-            assert len(grid.shape) == 3
-            h,w,c = grid.shape
+            # reshape the grid into 1,h,w,c format for conv_general_dilated
+            h,w,*reshape_channels = grid.shape
+            grid = grid.reshape(h,w,-1)
+            _,_,c = grid.shape
             diffused_grid = grid[None,:,:,:]
             
+            # pad the grid
+            r = diffusion_radius
             diffused_grid = jnp.pad(
                 diffused_grid,
-                ((0,0), (pad,pad), (pad,pad), (0,0)),
+                ((0,0), (r,r), (r,r), (0,0)),
                 mode='edge',
             )
             
-            channel_kernel = jnp.tile(kernel, (1, 1, 1, c))
-            #for _ in range(diffusion_iterations):
-            # vertical
+            # vertical convolution
+            vertical_kernel = jnp.tile(kernel[:,None,None,None], (1, 1, 1, c))
             diffused_grid = jax.lax.conv_general_dilated(
                 diffused_grid,
-                channel_kernel,
+                vertical_kernel,
                 window_strides=(1,1),
                 padding='VALID',
                 dimension_numbers=('NHWC', 'HWIO', 'NHWC'),
                 feature_group_count=c,
             )
             
-            # horizontal
+            # horizontal convolution
+            horizontal_kernel = jnp.tile(kernel[None,:,None,None], (1, 1, 1, c))
             diffused_grid = jax.lax.conv_general_dilated(
                 diffused_grid,
-                channel_kernel.transpose((1,0,2,3)),
+                horizontal_kernel,
                 window_strides=(1,1),
                 padding='VALID',
                 dimension_numbers=('NHWC', 'HWIO', 'NHWC'),
                 feature_group_count=c,
             )
+            
+            # reshape to original size
             diffused_grid = diffused_grid[0]
-            
-            if remove_last_channel:
-                diffused_grid = diffused_grid[...,0]
+            diffused_grid = diffused_grid.reshape(h,w,*reshape_channels)
             
             return diffused_grid
     
@@ -337,101 +232,3 @@ def make_gas(
             return grid
     
     return Gas
-
-def step_old(
-    gas_grid: jnp.ndarray,
-    sigma: float,
-    mix: float,
-    wind: jnp.ndarray,
-    C: int
-) -> jnp.ndarray:
-    '''
-    Diffuses a gas grid based on a gaussian kernel using separable convolutions.
-    '''
-
-    # make the gaussian kernel
-    kernel_radius = jnp.ceil(3 * sigma).astype(int)
-    x = jnp.arange(-kernel_radius, kernel_radius + 1)
-    kernel = jnp.exp(-x**2 / (2 * sigma**2))
-    kernel = kernel / kernel.sum()
-    kernel = kernel[:, None]
-    kernel = kernel[..., None, None]
-    kernel = jnp.tile(kernel, (1, 1, 1, C))
-    kernel = kernel.astype(gas_grid.dtype)
-
-    # Reshape input for conv operations (needs 4D: NHWC format)
-    #x = gas_grid.reshape(1, *gas_grid.shape, 1)
-    # gas_grid = gas_grid[..., None] if gas_grid.ndim == 2 else gas_grid
-    
-    # Apply horizontal then vertical convolution
-    diffused_gas_grid = gas_grid[None, :, :, :]
-    diffused_gas_grid = jax.lax.conv_general_dilated(
-        diffused_gas_grid,
-        kernel,
-        window_strides=(1, 1),
-        padding='SAME',
-        dimension_numbers=('NHWC', 'HWIO', 'NHWC'),
-        feature_group_count=C
-    )
-    diffused_gas_grid = jax.lax.conv_general_dilated(
-        diffused_gas_grid,
-        kernel.transpose((1, 0, 2, 3)),
-        window_strides=(1, 1),
-        padding='SAME',
-        dimension_numbers=('NHWC', 'HWIO', 'NHWC'),
-        feature_group_count=C
-    )
-    diffused_gas_grid = diffused_gas_grid[0,:,:,:]
-    
-    gas_grid = gas_grid * (1 - mix) + diffused_gas_grid * mix
-
-    # apply wind with bilinear interpolation
-    wind_y, wind_x = wind
-
-    # Get the four nearest grid points
-    h = jnp.arange(gas_grid.shape[0]) + wind_y # Change H/W according to the specification
-    w = jnp.arange(gas_grid.shape[1]) + wind_x # Change H/W according to the specification
-    wind_y, wind_x = jnp.meshgrid(h, w, indexing="ij")
-    x0 = jnp.floor(wind_x).astype(int)
-    y0 = jnp.floor(wind_y).astype(int)
-    x1 = x0 + 1
-    y1 = y0 + 1
-
-    # Clip indices so they remain within grid bounds.
-    y0 = jnp.clip(y0, 0, gas_grid.shape[0] - 1)
-    x0 = jnp.clip(x0, 0, gas_grid.shape[1] - 1)
-    y1 = jnp.clip(y1, 0, gas_grid.shape[0] - 1)
-    x1 = jnp.clip(x1, 0, gas_grid.shape[1] - 1)
-    
-    # Calculate interpolation weights
-    wx1 = wind_x - x0
-    wy1 = wind_y - y0
-    wx0 = 1 - wx1
-    wy0 = 1 - wy1
-
-    # # Ensure indices stay within bounds
-    # x0 = jnp.clip(x0, 0, gas_grid.shape[1] - 1)
-    # y0 = jnp.clip(y0, 0, gas_grid.shape[0] - 1)
-    # x1 = jnp.clip(x1, 0, gas_grid.shape[1] - 1)
-    # y1 = jnp.clip(y1, 0, gas_grid.shape[0] - 1)
-    
-    # Distribute gas to the four nearest points
-
-    new_grid = jnp.zeros_like(gas_grid)
-
-    new_grid = new_grid.at[y0, x0, :].add((gas_grid * ((wy0 * wx0)[..., None])).astype(gas_grid.dtype))
-    new_grid = new_grid.at[y0, x1, :].add((gas_grid * ((wy0 * wx1)[..., None])).astype(gas_grid.dtype))
-    new_grid = new_grid.at[y1, x0, :].add((gas_grid * ((wy1 * wx0)[..., None])).astype(gas_grid.dtype))
-    new_grid = new_grid.at[y1, x1, :].add((gas_grid * ((wy1 * wx1)[..., None])).astype(gas_grid.dtype))
-
-    return new_grid
-
-if __name__ == '__main__':
-    gas_grid = jnp.zeros((5, 7, 3))
-    gas_grid = gas_grid.at[3, 3, :].set(1)
-    result = step(gas_grid, 0.5, 0.5, (0.1, 0.5), 3)
-
-    for c in range(result.shape[2]):
-        print(f"Channel {c}:")
-        print(result[:, :, c])
-        print()
