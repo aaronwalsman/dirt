@@ -127,18 +127,18 @@ def make_gas(
                     grid = next_grid
                 
                 elif boundary == 'collect':
-                    lo_lo_corner = grid[:max_wind_cells, :max_wind_cells]
-                    lo_mid_edge = grid[
-                        :max_wind_cells, max_wind_cells:-max_wind_cells]
-                    lo_hi_corner = grid[:max_wind_cells, -max_wind_cells:]
-                    mid_hi_edge = grid[
-                        max_wind_cells:-max_wind_cells, -max_wind_cells:]
-                    hi_hi_corner = grid[-max_wind_cells:, -max_wind_cells:]
-                    hi_mid_edge = grid[
-                        -max_wind_cells:, max_wind_cells:-max_wind_cells]
-                    hi_lo_corner = grid[-max_wind_cells:, :max_wind_cells]
-                    mid_lo_edge = grid[
-                        max_wind_cells:-max_wind_cells, :max_wind_cells]
+                    #lo_lo_corner = grid[:max_wind_cells, :max_wind_cells]
+                    #lo_mid_edge = grid[
+                    #    :max_wind_cells, max_wind_cells:-max_wind_cells]
+                    #lo_hi_corner = grid[:max_wind_cells, -max_wind_cells:]
+                    #mid_hi_edge = grid[
+                    #    max_wind_cells:-max_wind_cells, -max_wind_cells:]
+                    #hi_hi_corner = grid[-max_wind_cells:, -max_wind_cells:]
+                    #hi_mid_edge = grid[
+                    #    -max_wind_cells:, max_wind_cells:-max_wind_cells]
+                    #hi_lo_corner = grid[-max_wind_cells:, :max_wind_cells]
+                    #mid_lo_edge = grid[
+                    #    max_wind_cells:-max_wind_cells, :max_wind_cells]
                     
                     l0 = jnp.arange(downsample_size[0]) + discrete_wind[0]
                     l0 = jnp.clip(l0, 0, downsample_size[0]-1)
@@ -149,13 +149,15 @@ def make_gas(
                     
                     def collect_block(
                         grid,
-                        block,
+                        #block,
                         start_x,
                         stop_x,
                         start_y,
                         stop_y,
                         mask,
                     ):
+                        block = grid[start_x:stop_x, start_y:stop_y]
+                        
                         block0, block1 = jnp.meshgrid(
                             l0[start_x:stop_x],
                             l1[start_y:stop_y],
@@ -168,21 +170,21 @@ def make_gas(
                     
                     m = max_wind_cells
                     grid = collect_block(
-                        grid,lo_lo_corner,0,m,0,m,(~xlo_mask|~ylo_mask))
+                        grid,0,m,0,m,(~xlo_mask|~ylo_mask))
                     grid = collect_block(
-                        grid,lo_mid_edge,0,m,m,-m,~xlo_mask)
+                        grid,0,m,m,-m,~xlo_mask)
                     grid = collect_block(
-                        grid,lo_hi_corner,0,m,-m,None,(~xlo_mask|~yhi_mask))
+                        grid,0,m,-m,None,(~xlo_mask|~yhi_mask))
                     grid = collect_block(
-                        grid,mid_hi_edge,m,-m,-m,None,~yhi_mask)
+                        grid,m,-m,-m,None,~yhi_mask)
                     grid = collect_block(
-                        grid,hi_hi_corner,-m,None,-m,None,(~xhi_mask|~yhi_mask))
+                        grid,-m,None,-m,None,(~xhi_mask|~yhi_mask))
                     grid = collect_block(
-                        grid,hi_mid_edge,-m,None,m,-m,~xhi_mask)
+                        grid,-m,None,m,-m,~xhi_mask)
                     grid = collect_block(
-                        grid,hi_lo_corner,-m,None,0,m,(~xhi_mask|~ylo_mask))
+                        grid,-m,None,0,m,(~xhi_mask|~ylo_mask))
                     grid = collect_block(
-                        grid,mid_lo_edge,m,-m,0,m,~ylo_mask)
+                        grid,m,-m,0,m,~ylo_mask)
                     
                     '''
                     lolo0, lolo1 = jnp.meshgrid(
