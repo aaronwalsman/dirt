@@ -115,258 +115,104 @@ def make_gas(
                     num_cells = (downsample_size[0]*downsample_size[1])
                     grid = grid + redistribute_total / num_cells
                 
-                elif boundary == 'collect_slow':
-                    l0 = jnp.arange(downsample_size[0]) + discrete_wind[0]
-                    l0 = jnp.clip(l0, 0, downsample_size[0]-1)
-                    l1 = jnp.arange(downsample_size[1]) + discrete_wind[1]
-                    l1 = jnp.clip(l1, 0, downsample_size[1]-1)
-                    l0m, l1m = jnp.meshgrid(l0, l1, indexing='ij')
-                    next_grid = jnp.zeros_like(grid)
-                    next_grid = next_grid.at[
-                        l0m.reshape(-1), l1m.reshape(-1)].add(grid.reshape(-1))
-                    grid = next_grid
-                
                 elif boundary == 'collect':
-                    #lo_lo_corner = grid[:max_wind_cells, :max_wind_cells]
-                    #lo_mid_edge = grid[
-                    #    :max_wind_cells, max_wind_cells:-max_wind_cells]
-                    #lo_hi_corner = grid[:max_wind_cells, -max_wind_cells:]
-                    #mid_hi_edge = grid[
-                    #    max_wind_cells:-max_wind_cells, -max_wind_cells:]
-                    #hi_hi_corner = grid[-max_wind_cells:, -max_wind_cells:]
-                    #hi_mid_edge = grid[
-                    #    -max_wind_cells:, max_wind_cells:-max_wind_cells]
-                    #hi_lo_corner = grid[-max_wind_cells:, :max_wind_cells]
-                    #mid_lo_edge = grid[
-                    #    max_wind_cells:-max_wind_cells, :max_wind_cells]
+                
+                    '''
+                    xlo = jnp.arange(max_wind_cells)
+                    xlo_mask = (
+                        (xlo >= discrete_wind[0]) &
+                        (xlo < downsample_size[0] + discrete_wind[0])
+                    )
+                    xlo_mask = xlo_mask[:,None,*((None,)*len(cell_shape))]
+                    xhi = xlo + downsample_size[0] - max_wind_cells
+                    xhi_mask = (
+                        (xhi >= discrete_wind[0]) &
+                        (xhi < downsample_size[0] + discrete_wind[0])
+                    )
+                    xhi_mask = xhi_mask[:,None,*((None,)*len(cell_shape))]
                     
-                    l0 = jnp.arange(downsample_size[0]) + discrete_wind[0]
-                    l0 = jnp.clip(l0, 0, downsample_size[0]-1)
-                    l0 = jnp.roll(l0, shift=discrete_wind[0])
-                    l1 = jnp.arange(downsample_size[1]) + discrete_wind[1]
-                    l1 = jnp.clip(l1, 0, downsample_size[1]-1)
-                    l1 = jnp.roll(l1, shift=discrete_wind[1])
+                    ylo = jnp.arange(max_wind_cells)
+                    ylo_mask = (
+                        (ylo >= discrete_wind[1]) &
+                        (ylo < downsample_size[1] + discrete_wind[1])
+                    )
+                    ylo_mask = ylo_mask[None,:,*((None,)*len(cell_shape))]
+                    yhi = ylo + downsample_size[1] - max_wind_cells
+                    yhi_mask = (
+                        (yhi >= discrete_wind[1]) &
+                        (yhi < downsample_size[1] + discrete_wind[1])
+                    )
+                    yhi_mask = yhi_mask[None,:,*((None,)*len(cell_shape))]
+                    '''
+                    
+                    ar_0 = jnp.arange(downsample_size[0])
+                    mask_0 = (
+                        (ar_0 >= discrete_wind[0]) &
+                        (ar_0 < downsample_size[0] + discrete_wind[0])
+                    )
+                    
+                    ar_1 = jnp.arange(downsample_size[1])
+                    mask_1 = (
+                        (ar_1 >= discrete_wind[1]) &
+                        (ar_1 < downsample_size[1] + discrete_wind[1])
+                    )
+                    
+                    dest_0 = ar_0 + discrete_wind[0]
+                    dest_0 = jnp.clip(dest_0, 0, downsample_size[0]-1)
+                    dest_0 = jnp.roll(dest_0, shift=discrete_wind[0])
+                    dest_1 = ar_1 + discrete_wind[1]
+                    dest_1 = jnp.clip(dest_1, 0, downsample_size[1]-1)
+                    dest_1 = jnp.roll(dest_1, shift=discrete_wind[1])
                     
                     def collect_block(
                         grid,
-                        #block,
-                        start_x,
-                        stop_x,
-                        start_y,
-                        stop_y,
-                        mask,
+                        lo0,
+                        hi0,
+                        lo1,
+                        hi1,
+                        #mask,
                     ):
-                        block = grid[start_x:stop_x, start_y:stop_y]
+                        block = grid[lo0:hi0, lo1:hi1]
                         
-                        block0, block1 = jnp.meshgrid(
-                            l0[start_x:stop_x],
-                            l1[start_y:stop_y],
-                            indexing='ij',
-                        )
-                        block0, block1 = block0.reshape(-1), block1.reshape(-1)
-                        grid = grid.at[block0, block1].add(
+                        block_dest_0 = dest_0[lo0:hi0]
+                        block_dest_1 = dest_1[lo1:hi1]
+                        coord_0, coord_1 = jnp.meshgrid(
+                            block_dest_0, block_dest_1, indexing='ij')
+                        coord_0 = coord_0.reshape(-1)
+                        coord_1 = coord_1.reshape(-1)
+                        
+                        block_mask_0 = ~mask_0[lo0:hi0]
+                        block_mask_1 = ~mask_1[lo1:hi1]
+                        mask = block_mask_0[:,None] | block_mask_1[None,:]
+                        
+                        mask = mask[:,:,*((None,)*len(cell_shape))]
+                        
+                        grid = grid.at[coord_0, coord_1].add(
                             (block * mask).reshape(-1))
                         return grid
                     
                     m = max_wind_cells
                     grid = collect_block(
-                        grid,0,m,0,m,(~xlo_mask|~ylo_mask))
+                        grid,0,m,0,m) #,(~xlo_mask|~ylo_mask))
                     grid = collect_block(
-                        grid,0,m,m,-m,~xlo_mask)
+                        grid,0,m,m,-m) #,~xlo_mask)
                     grid = collect_block(
-                        grid,0,m,-m,None,(~xlo_mask|~yhi_mask))
+                        grid,0,m,-m,None) #,(~xlo_mask|~yhi_mask))
                     grid = collect_block(
-                        grid,m,-m,-m,None,~yhi_mask)
+                        grid,m,-m,-m,None) #,~yhi_mask)
                     grid = collect_block(
-                        grid,-m,None,-m,None,(~xhi_mask|~yhi_mask))
+                        grid,-m,None,-m,None) #,(~xhi_mask|~yhi_mask))
                     grid = collect_block(
-                        grid,-m,None,m,-m,~xhi_mask)
+                        grid,-m,None,m,-m) #,~xhi_mask)
                     grid = collect_block(
-                        grid,-m,None,0,m,(~xhi_mask|~ylo_mask))
+                        grid,-m,None,0,m) #,(~xhi_mask|~ylo_mask))
                     grid = collect_block(
-                        grid,m,-m,0,m,~ylo_mask)
-                    
-                    '''
-                    lolo0, lolo1 = jnp.meshgrid(
-                        l0[:max_wind_cells],
-                        l1[:max_wind_cells],
-                        indexing='ij',
-                    )
-                    grid = grid.at[
-                        lolo0.reshape(-1), lolo1.reshape(-1)].add(
-                        lo_lo_corner.reshape(-1) *
-                        (~xlo_mask | ~ylo_mask).reshape(-1))
-                    
-                    jax.debug.print('all {a}', a=jnp.all(grid == new_grid))
-                    
-                    lomid0, lomid1 = jnp.meshgrid(
-                        l0[:max_wind_cells],
-                        l1[max_wind_cells:-max_wind_cells],
-                        indexing='ij',
-                    )
-                    grid = grid.at[
-                        lomid0.reshape(-1), lomid1.reshape(-1)].add(
-                        (lo_mid_edge * ~xlo_mask).reshape(-1))
-                    
-                    lohi0, lohi1 = jnp.meshgrid(
-                        l0[:max_wind_cells],
-                        l1[-max_wind_cells:],
-                        indexing='ij',
-                    )
-                    grid = grid.at[
-                        lohi0.reshape(-1), lohi1.reshape(-1)].add(
-                        lo_hi_corner.reshape(-1) *
-                        (~xlo_mask | ~yhi_mask).reshape(-1))
-                    
-                    midhi0, midhi1 = jnp.meshgrid(
-                        l0[max_wind_cells:-max_wind_cells],
-                        l1[-max_wind_cells:],
-                        indexing='ij',
-                    )
-                    grid = grid.at[
-                        midhi0.reshape(-1), midhi1.reshape(-1)].add(
-                        (mid_hi_edge * ~yhi_mask).reshape(-1))
-                    
-                    hihi0, hihi1 = jnp.meshgrid(
-                        l0[-max_wind_cells:],
-                        l1[-max_wind_cells:],
-                        indexing='ij',
-                    )
-                    grid = grid.at[
-                        hihi0.reshape(-1), hihi1.reshape(-1)].add(
-                        hi_hi_corner.reshape(-1) *
-                        (~xhi_mask | ~yhi_mask).reshape(-1))
-                    
-                    himid0, himid1 = jnp.meshgrid(
-                        l0[-max_wind_cells:],
-                        l1[max_wind_cells:-max_wind_cells],
-                        indexing='ij',
-                    )
-                    grid = grid.at[
-                        himid0.reshape(-1), himid1.reshape(-1)].add(
-                        (hi_mid_edge * ~xhi_mask).reshape(-1))
-                    
-                    hilo0, hilo1 = jnp.meshgrid(
-                        l0[-max_wind_cells:],
-                        l1[:max_wind_cells],
-                        indexing='ij',
-                    )
-                    grid = grid.at[
-                        hilo0.reshape(-1), hilo1.reshape(-1)].add(
-                        hi_lo_corner.reshape(-1) *
-                        (~xhi_mask | ~ylo_mask).reshape(-1))
-                    
-                    midlo0, midlo1 = jnp.meshgrid(
-                        l0[max_wind_cells:-max_wind_cells],
-                        l1[:max_wind_cells],
-                        indexing='ij',
-                    )
-                    grid = grid.at[
-                        midlo0.reshape(-1), midlo1.reshape(-1)].add(
-                        (mid_lo_edge * ~ylo_mask).reshape(-1))
-                    '''
+                        grid,m,-m,0,m) #,~ylo_mask)
                     
                     grid = grid.at[:max_wind_cells].multiply(xlo_mask)
                     grid = grid.at[-max_wind_cells:].multiply(xhi_mask)
                     grid = grid.at[:,:max_wind_cells].multiply(ylo_mask)
                     grid = grid.at[:,-max_wind_cells:].multiply(yhi_mask)
-                
-                elif False: #boundary == 'collect':
-                    # get the gas that has blown over each edge
-                    lo_lo_corner = grid[:max_wind_cells, :max_wind_cells]
-                    lo_mid_edge = grid[
-                        :max_wind_cells, max_wind_cells:-max_wind_cells]
-                    lo_hi_corner = grid[:max_wind_cells, -max_wind_cells:]
-                    mid_hi_edge = grid[
-                        max_wind_cells:-max_wind_cells, -max_wind_cells:]
-                    hi_hi_corner = grid[-max_wind_cells:, -max_wind_cells:]
-                    hi_mid_edge = grid[
-                        -max_wind_cells:, max_wind_cells:-max_wind_cells]
-                    hi_lo_corner = grid[-max_wind_cells:, :max_wind_cells]
-                    mid_lo_edge = grid[
-                        max_wind_cells:-max_wind_cells, :max_wind_cells]
-                    
-                    grid = grid.at[:max_wind_cells].multiply(xlo_mask)
-                    grid = grid.at[-max_wind_cells:].multiply(xhi_mask)
-                    grid = grid.at[:,:max_wind_cells].multiply(ylo_mask)
-                    grid = grid.at[:,-max_wind_cells:].multiply(yhi_mask)
-                    
-                    #l0 = jnp.arange(downsample_size[0])
-                    #l0 = jnp.roll(l0, shift=discrete_wind[0]) + discrete_wind[0]
-                    #l0 = jnp.clip(l0, 0, downsample_size[0]-1)
-                    #l1 = jnp.arange(downsample_size[1])
-                    #l1 = jnp.roll(l1, shift=discrete_wind[1]) + discrete_wind[1]
-                    #l1 = jnp.clip(l1, 0, downsample_size[1]-1)
-                    
-                    #collect_location = jnp.where(
-                    #    discrete_wind < 0, 0, downsample_size)
-                    
-                    l0_lo = jnp.arange(max_wind_cells)
-                    l0_hi = jnp.arange(
-                        downsample_size[0] - max_wind_cells, downsample_size[0])
-                    l0 = jnp.concatenate((l0_lo, l0_hi))
-                    l0 = jnp.roll(l0, shift=discrete_wind[0]) + discrete_wind[0]
-                    l0 = jnp.clip(l0, 0, downsample_size[0]-1)
-                    
-                    l0_lo, l0_hi = l0[:max_wind_cells], l0[max_wind_cells:]
-                    
-                    l1_lo = jnp.arange(max_wind_cells)
-                    l1_hi = jnp.arange(
-                        downsample_size[1] - max_wind_cells, downsample_size[1])
-                    l1 = jnp.concatenate((l1_lo, l1_hi))
-                    l1 = jnp.roll(l1, shift=discrete_wind[1]) + discrete_wind[1]
-                    l1 = jnp.clip(l1, 0, downsample_size[1]-1)
-                    l1_lo, l1_hi = l1[:max_wind_cells], l1[max_wind_cells:]
-                    
-                    #lo_lo_locations = jnp.zeros(
-                    #    (max_wind_cells, max_wind_cells, 2), dtype=jnp.int32)
-                    #lo_lo_locations.at[...,0].set(l0_lo[:,None])
-                    #lo_lo_locations.at[...,1].set(l1_lo[None,:])
-                    
-                    aa, bb = jnp.meshgrid(l0_lo, l1_lo)
-                    
-                    lo_lo_masked = (
-                        lo_lo_corner * ~xlo_mask * ~ylo_mask)
-                    jax.debug.print('lo_lo {lolo}', lolo=lo_lo_corner)
-                    grid = grid.at[aa.reshape(-1), bb.reshape(-1)].add(
-                        lo_lo_masked.reshape(-1))
-                    
-                    #jax.debug.print(
-                    #    'lo {l}, {x}, {y}',
-                    #    l=lo_lo_masked,
-                    #    x=xlo_mask,
-                    #    y=ylo_mask,
-                    #)
-                    
-                    
-                    #grid = jax.lax.scatter_add(
-                    #    grid,
-                    #    lo_lo_locations.reshape(-1,2),
-                    #    lo_lo_corner.reshape(-1),
-                    #    indices_are_sorted=False,
-                    #    unique_indices=False,
-                    #)
-                    
-                    '''
-                    xa = jnp.arange(downsample_size[0])[:,None]
-                    ya = jnp.arange(downsample_size[1])[None,:]
-                
-                    wrapped_x = (
-                        ((discrete_wind[0] > 0) & (xa < discrete_wind[0])) |
-                        ((discrete_wind[0] < 0) &
-                            (xa >= discrete_wind[0] + downsample_size[0]))
-                    )
-                    wrapped_y = (
-                        ((discrete_wind[1] > 0) & (ya < discrete_wind[1])) |
-                        ((discrete_wind[1] < 0) &
-                            (xa >= discrete_wind[1] + downsample_size[1]))
-                    )
-                    wrapped = wrapped_x | wrapped_y
-                    wrapped_values = grid * wrapped
-                    
-                    grid_clean = grid * (~wrapped)
-                    '''
-                    
             
             jax.debug.print('sum {s}', s=jnp.sum(grid))
             return grid
