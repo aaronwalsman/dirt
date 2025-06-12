@@ -24,7 +24,7 @@ class GasParams:
     visualize : bool = False
     
     world_size = (1024,1024)
-    downsample = 8
+    downsample = 1
     steps = 1000
     
     wind_std = 3
@@ -98,18 +98,27 @@ if __name__ == '__main__':
             
             return (key, wind_state, gas_state), gas_state
         
-        gas_step = jax.jit(gas_step)
-        _ = gas_step((key, wind_state, gas_state), None)
+        @jax.jit
+        def run_scan(key, wind_state, gas_state, steps):
+            key_wind_gas, gasses = jax.lax.scan(
+                gas_step,
+                (key, wind_state, gas_state),
+                None,
+                length=params.steps,
+            )
+            
+            return key_wind_gas, gasses
+        
+        (key, wind_state, gas_state), g = run_scan(
+            key, wind_state, gas_state, params.steps)
+        g.block_until_ready()
         
         t0 = time.time()
-        key_wind_gas, gasses = jax.lax.scan(
-            gas_step,
-            (key, wind_state, gas_state),
-            None,
-            length=params.steps,
-        )
+        (key, wind_state, gas_state), gasses = run_scan(
+            key, wind_state, gas_state, params.steps)
         gasses.block_until_ready()
         print(time.time() - t0)
+        
         save_leaf_data(params, params_path)
         save_leaf_data(gasses, reports_path)
     
