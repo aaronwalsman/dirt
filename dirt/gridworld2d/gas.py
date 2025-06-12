@@ -147,8 +147,6 @@ def make_gas(
                     l1 = jnp.clip(l1, 0, downsample_size[1]-1)
                     l1 = jnp.roll(l1, shift=discrete_wind[1])
                     
-                    '''
-                    # BROKEN SOMEHOW
                     def collect_block(
                         grid,
                         block,
@@ -170,7 +168,7 @@ def make_gas(
                     
                     m = max_wind_cells
                     grid = collect_block(
-                        grid,lo_lo_corner,0,m,0,m,(~xlo_mask|ylo_mask))
+                        grid,lo_lo_corner,0,m,0,m,(~xlo_mask|~ylo_mask))
                     grid = collect_block(
                         grid,lo_mid_edge,0,m,m,-m,~xlo_mask)
                     grid = collect_block(
@@ -185,8 +183,8 @@ def make_gas(
                         grid,hi_lo_corner,-m,None,0,m,(~xhi_mask|~ylo_mask))
                     grid = collect_block(
                         grid,mid_lo_edge,m,-m,0,m,~ylo_mask)
-                    '''
                     
+                    '''
                     lolo0, lolo1 = jnp.meshgrid(
                         l0[:max_wind_cells],
                         l1[:max_wind_cells],
@@ -196,6 +194,8 @@ def make_gas(
                         lolo0.reshape(-1), lolo1.reshape(-1)].add(
                         lo_lo_corner.reshape(-1) *
                         (~xlo_mask | ~ylo_mask).reshape(-1))
+                    
+                    jax.debug.print('all {a}', a=jnp.all(grid == new_grid))
                     
                     lomid0, lomid1 = jnp.meshgrid(
                         l0[:max_wind_cells],
@@ -262,6 +262,7 @@ def make_gas(
                     grid = grid.at[
                         midlo0.reshape(-1), midlo1.reshape(-1)].add(
                         (mid_lo_edge * ~ylo_mask).reshape(-1))
+                    '''
                     
                     grid = grid.at[:max_wind_cells].multiply(xlo_mask)
                     grid = grid.at[-max_wind_cells:].multiply(xhi_mask)
@@ -365,7 +366,7 @@ def make_gas(
                     '''
                     
             
-            #jax.debug.print('sum {s}', s=jnp.sum(grid))
+            jax.debug.print('sum {s}', s=jnp.sum(grid))
             return grid
     
     if include_diffusion:
