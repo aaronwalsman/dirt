@@ -66,7 +66,7 @@ class WeatherParams:
     include_wind: bool = True
     wind_std: float = 3
     wind_reversion: float = 0.1
-    wind_bias: Tuple[float,float] | jnp.ndarray = (0.,0.)
+    wind_bias: Tuple[float,float] = (0.,0.)
 
 def weather(
     params: WeatherParams,

@@ -250,10 +250,17 @@ def bugs(
         energy_offset -= uphill * volume * params.base_climb_metabolism
         
         # - photosynthesis
+        if len(light.shape) == 2:
+            local_light = light[x0[...,0], x0[...,1]]
+        elif len(light.shape) == 0:
+            local_light = light
+        else:
+            raise Exception('Unsupported light shape')
+        
         energy_offset += (
             traits.photosynthesis *
             params.photosynthesis_energy_gain *
-            light[x0[...,0], x0[...,1]]
+            local_light
         )
         
         # - compute the updated energy

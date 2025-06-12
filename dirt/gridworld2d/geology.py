@@ -51,7 +51,8 @@ def fractal_noise(
     # Frequency and amplitude for each octave
     frequencies = (lacunarity ** jnp.arange(octaves)).astype(dtype)
     amplitudes = (persistence ** jnp.arange(octaves)).astype(dtype)
-
+    
+    '''
     # Vectorize across octaves
     def octave_noise(key, frequency, amplitude):
         scaled_coords = coords * frequency
@@ -61,3 +62,20 @@ def fractal_noise(
                 in_axes=(0, 0, 0))(keys, frequencies, amplitudes)
     
     return jnp.sum(octave_noises, axis=0).reshape(world_size) * height_scale
+    '''
+    # scan to save memory
+    def scan_octave(f, key_frequency_amplitude):
+        key, frequency, amplitude = key_frequency_amplitude
+        scaled_coords = coords * frequency
+        f = f + amplitude * perlin_noise(
+            key, scaled_coords)
+        return f, None
+    
+    f, _ = jax.lax.scan(
+        scan_octave,
+        jnp.zeros((world_size[0]*world_size[1],), dtype=dtype),
+        (keys, frequencies, amplitudes),
+    )
+    
+    return f.reshape(world_size) * height_scale
+    

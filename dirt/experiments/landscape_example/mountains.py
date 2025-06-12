@@ -38,15 +38,15 @@ from dirt.visualization.viewer import Viewer
 @static_dataclass
 class TrainParams:
     seed : int = 1235
-    initial_players : int = 2048
-    max_players : int = 2048
-    world_size : Tuple[int,int] = (2048,2048) #(256,256) #(1024,1024)
+    initial_players : int = 0 #2048
+    max_players : int = 0 #2048
+    world_size : Tuple[int,int] = (8196,8196) #(256,256) #(1024,1024)
     output_directory : str = '.'
     load_state : str = ''
     visualize : bool = False
     vis_width : int = 1024
     vis_height : int = 1024
-    downsample_visualizer : int = 4
+    downsample_visualizer : int = 8
     max_render_players : int =256
     env_params : Any = TeraAriumParams(
         landscape = LandscapeParams(
@@ -60,9 +60,9 @@ class TrainParams:
             terrain_bias = -25,
             weather = WeatherParams(
                 mountain_temperature_baseline = -3.,
-                include_rain = True,
+                include_rain = False,
                 include_temperature = False,
-                include_wind = True,
+                include_wind = False,
             )
         )
     )
@@ -70,8 +70,8 @@ class TrainParams:
         max_population=max_players,
     )
     runner_params : Any = EpochRunnerParams(
-        epochs=1,
-        steps_per_epoch=1000,
+        epochs=4,
+        steps_per_epoch=1024,
         save_state=True,
         save_reports=True,
     )
@@ -315,7 +315,8 @@ if __name__ == '__main__':
             params.runner_params,
             init_train,
             step_train,
-            make_report,
+            #make_report,
+            lambda *args, **kwargs : None,
             log,
             output_directory=params.output_directory,
             load_state=params.load_state,
