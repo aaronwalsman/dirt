@@ -46,6 +46,7 @@ def make_gas(
             
             if boundary in ('clip', 'collect', 'redistribute'):
                 
+                '''
                 xlo = jnp.arange(max_wind_cells)
                 xlo_mask = (
                     (xlo >= discrete_wind[0]) &
@@ -71,14 +72,33 @@ def make_gas(
                     (yhi < downsample_size[1] + discrete_wind[1])
                 )
                 yhi_mask = yhi_mask[None,:,*((None,)*len(cell_shape))]
+                '''
+                
+                ar_0 = jnp.arange(downsample_size[0])
+                mask_0 = (
+                    (ar_0 >= discrete_wind[0]) &
+                    (ar_0 < downsample_size[0] + discrete_wind[0])
+                )
+                
+                ar_1 = jnp.arange(downsample_size[1])
+                mask_1 = (
+                    (ar_1 >= discrete_wind[1]) &
+                    (ar_1 < downsample_size[1] + discrete_wind[1])
+                )
+                cell_pad = (None,)*len(cell_shape)
                 
                 if boundary == 'clip':
-                    grid = grid.at[:max_wind_cells].multiply(xlo_mask)
-                    grid = grid.at[-max_wind_cells:].multiply(xhi_mask)
-                    grid = grid.at[:,:max_wind_cells].multiply(ylo_mask)
-                    grid = grid.at[:,-max_wind_cells:].multiply(yhi_mask)
+                    grid = grid.at[:max_wind_cells].multiply(
+                        mask_0[:max_wind_cells,None,*cell_pad])
+                    grid = grid.at[-max_wind_cells:].multiply(
+                        mask_0[-max_wind_cells:,None,*cell_pad])
+                    grid = grid.at[:,:max_wind_cells].multiply(
+                        mask_1[None,:max_wind_cells,*cell_pad])
+                    grid = grid.at[:,-max_wind_cells:].multiply(
+                        mask_1[None,-max_wind_cells:,*cell_pad])
                 
                 if boundary == 'redistribute':
+                    '''
                     # get the gas that has blown over each edge
                     lo_lo_corner = grid[:max_wind_cells, :max_wind_cells]
                     lo_mid_edge = grid[
@@ -104,46 +124,41 @@ def make_gas(
                         jnp.sum(hi_lo_corner * ~xhi_mask * ~ylo_mask) +
                         jnp.sum(mid_lo_edge * ~ylo_mask)
                     )
+                    '''
+                    
+                    def get_block_total(lo0, hi0, lo1, hi1):
+                        block = grid[lo0:hi0,lo1:hi1]
+                        mask = ~mask_0[lo0:hi0,None] | ~mask_1[None,lo1:hi1]
+                        mask = mask[:,:,*cell_pad]
+                        return jnp.sum(block * mask)
+                    
+                    m = max_wind_cells
+                    redistribute_total = (
+                        get_block_total(0,m,0,m) +
+                        get_block_total(0,m,m,-m) +
+                        get_block_total(0,m,-m,None) +
+                        get_block_total(m,-m,-m,None) +
+                        get_block_total(-m,None,-m,None) +
+                        get_block_total(-m,None,m,-m) +
+                        get_block_total(-m,None,0,m) +
+                        get_block_total(m,-m,0,m)
+                    )
                     
                     # zero out the blown-over content
-                    grid = grid.at[:max_wind_cells].multiply(xlo_mask)
-                    grid = grid.at[-max_wind_cells:].multiply(xhi_mask)
-                    grid = grid.at[:,:max_wind_cells].multiply(ylo_mask)
-                    grid = grid.at[:,-max_wind_cells:].multiply(yhi_mask)
+                    #grid = grid.at[:max_wind_cells].multiply(xlo_mask)
+                    #grid = grid.at[-max_wind_cells:].multiply(xhi_mask)
+                    #grid = grid.at[:,:max_wind_cells].multiply(ylo_mask)
+                    #grid = grid.at[:,-max_wind_cells:].multiply(yhi_mask)
+                    grid = grid.at[:m].multiply(mask_0[:m,None,*cell_pad])
+                    grid = grid.at[-m:].multiply(mask_0[-m:,None,*cell_pad])
+                    grid = grid.at[:,:m].multiply(mask_1[None,:m,*cell_pad])
+                    grid = grid.at[:,-m:].multiply(mask_1[None,-m:,*cell_pad])
                     
                     # redistribute the blown-over content to each grid cell
                     num_cells = (downsample_size[0]*downsample_size[1])
                     grid = grid + redistribute_total / num_cells
                 
                 elif boundary == 'collect':
-                
-                    '''
-                    xlo = jnp.arange(max_wind_cells)
-                    xlo_mask = (
-                        (xlo >= discrete_wind[0]) &
-                        (xlo < downsample_size[0] + discrete_wind[0])
-                    )
-                    xlo_mask = xlo_mask[:,None,*((None,)*len(cell_shape))]
-                    xhi = xlo + downsample_size[0] - max_wind_cells
-                    xhi_mask = (
-                        (xhi >= discrete_wind[0]) &
-                        (xhi < downsample_size[0] + discrete_wind[0])
-                    )
-                    xhi_mask = xhi_mask[:,None,*((None,)*len(cell_shape))]
-                    
-                    ylo = jnp.arange(max_wind_cells)
-                    ylo_mask = (
-                        (ylo >= discrete_wind[1]) &
-                        (ylo < downsample_size[1] + discrete_wind[1])
-                    )
-                    ylo_mask = ylo_mask[None,:,*((None,)*len(cell_shape))]
-                    yhi = ylo + downsample_size[1] - max_wind_cells
-                    yhi_mask = (
-                        (yhi >= discrete_wind[1]) &
-                        (yhi < downsample_size[1] + discrete_wind[1])
-                    )
-                    yhi_mask = yhi_mask[None,:,*((None,)*len(cell_shape))]
-                    '''
                     
                     ar_0 = jnp.arange(downsample_size[0])
                     mask_0 = (
@@ -185,7 +200,7 @@ def make_gas(
                         block_mask_1 = ~mask_1[lo1:hi1]
                         mask = block_mask_0[:,None] | block_mask_1[None,:]
                         
-                        mask = mask[:,:,*((None,)*len(cell_shape))]
+                        mask = mask[:,:,*cell_pad]
                         
                         grid = grid.at[coord_0, coord_1].add(
                             (block * mask).reshape(-1))
@@ -209,10 +224,15 @@ def make_gas(
                     grid = collect_block(
                         grid,m,-m,0,m) #,~ylo_mask)
                     
-                    grid = grid.at[:max_wind_cells].multiply(xlo_mask)
-                    grid = grid.at[-max_wind_cells:].multiply(xhi_mask)
-                    grid = grid.at[:,:max_wind_cells].multiply(ylo_mask)
-                    grid = grid.at[:,-max_wind_cells:].multiply(yhi_mask)
+                    grid = grid.at[:m].multiply(mask_0[:m,None,*cell_pad])
+                    grid = grid.at[-m:].multiply(mask_0[-m:,None,*cell_pad])
+                    grid = grid.at[:,:m].multiply(mask_1[None,:m,*cell_pad])
+                    grid = grid.at[:,-m:].multiply(mask_1[None,-m:,*cell_pad])
+                    
+                    #grid = grid.at[:max_wind_cells].multiply(xlo_mask)
+                    #grid = grid.at[-max_wind_cells:].multiply(xhi_mask)
+                    #grid = grid.at[:,:max_wind_cells].multiply(ylo_mask)
+                    #grid = grid.at[:,-max_wind_cells:].multiply(yhi_mask)
             
             jax.debug.print('sum {s}', s=jnp.sum(grid))
             return grid
