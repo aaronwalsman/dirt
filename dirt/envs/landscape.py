@@ -39,7 +39,7 @@ class LandscapeParams:
     # terrain
     terrain_bias : float = 0
     terrain_octaves : int = 12
-    terrain_max_octaves : Optional[int] = None
+    terrain_max_octaves : int = None
     terrain_lacunarity : float = 2.
     terrain_persistence : float = 0.5
     terrain_unit_scale : float = 0.005
@@ -47,6 +47,8 @@ class LandscapeParams:
     max_effective_altitude : float = 100.
     
     # water
+    include_water_flow : bool = True
+    
     # - different ways to fill the water
     sea_level : float = 0.
     initial_water_per_cell : float = 0.
@@ -65,6 +67,7 @@ class LandscapeParams:
     audio_channels: int = 8
     
     # light
+    include_light: bool = True
     light_initial_strength: float = 0.35
     night_effect: float = 0.15
     cloud_shade: float = 0.25
@@ -308,39 +311,43 @@ def make_landscape(
             #smell = smell_step(smell_key, smell, wind=
             
             # move water
-            flow_rate = jnp.where(
-                temperature < 0.,
-                params.ice_flow_rate * step_size,
-                params.water_flow_rate * step_size,
-            )
-            water = flow_step(terrain, water, flow_rate)
+            if params.include_water_flow:
+                flow_rate = jnp.where(
+                    temperature < 0.,
+                    params.ice_flow_rate * step_size,
+                    params.water_flow_rate * step_size,
+                )
+                water = flow_step(terrain, water, flow_rate)
 
-            # erode based on water flow
-            old_terrain = terrain
-            terrain, erosion = simulate_erosion_step(
-                old_terrain, 
-                water, 
-                erosion, 
-                params.water_flow_rate, 
-                params.erosion_endurance, 
-                params.erosion_ratio
-            )
-            erosion = reset_erosion_status(terrain, old_terrain, erosion)
+                # erode based on water flow
+                old_terrain = terrain
+                terrain, erosion = simulate_erosion_step(
+                    old_terrain, 
+                    water, 
+                    erosion, 
+                    params.water_flow_rate, 
+                    params.erosion_endurance, 
+                    params.erosion_ratio
+                )
+                erosion = reset_erosion_status(terrain, old_terrain, erosion)
             
             altitude = terrain + water
             normalized_altitude = jnp.clip(
                 altitude/params.max_effective_altitude, 0., 1.)
             
             # light change based on rotation of Sun
-            light_strength = get_day_light_strength(t)
-            light = light_step(
-                day_length,
-                altitude, 
-                light_strength,
-                light_length,
-                t,
-                params.night_effect
-            )
+            if params.include_light:
+                light_strength = get_day_light_strength(t)
+                light = light_step(
+                    day_length,
+                    altitude, 
+                    light_strength,
+                    light_length,
+                    t,
+                    params.night_effect
+                )
+            else:
+                light = jnp.ones((), dtype=float_dtype)
             
             # reduce light based on shade from clouds and rain
             clouds = moisture / params.weather.moisture_start_raining
