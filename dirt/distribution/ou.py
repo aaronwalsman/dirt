@@ -4,9 +4,11 @@ import jax.random as jrng
 
 import chex
 
+from mechagogue.static import static_functions
+
 from dirt.constants import DEFAULT_FLOAT_DTYPE
 
-def ou_process(
+def make_ou_process(
     sigma : jnp.ndarray,
     theta : jnp.ndarray,
     mu : jnp.ndarray,
@@ -15,28 +17,30 @@ def ou_process(
     channels, = mu.shape
     unit_sigma = (2 * theta * sigma**2)**0.5
     
-    def init(
-        key : chex.PRNGKey,
-    ):
-        std = sigma / jnp.sqrt(2 * theta)
-        x = mu + jrng.normal(key, (channels,), dtype=dtype) * std #sigma
-        return x
-    
-    def step(
-        key : chex.PRNGKey,
-        x : jnp.array,
-        step_size : float = 1.
-    ):
-        step_theta = theta * step_size
-        step_sigma = unit_sigma * (step_size**0.5)
+    @static_functions
+    class OuProcess:
+        def init(
+            key : chex.PRNGKey,
+        ):
+            std = sigma / jnp.sqrt(2 * theta)
+            x = mu + jrng.normal(key, (channels,), dtype=dtype) * std #sigma
+            return x
         
-        step_reversion = step_theta * (mu - x)
-        step_noise = jrng.normal(key, (channels,), dtype=dtype) * step_sigma
-        x = x + step_reversion + step_noise
-        
-        return x
+        def step(
+            key : chex.PRNGKey,
+            x : jnp.array,
+            step_size : float = 1.
+        ):
+            step_theta = theta * step_size
+            step_sigma = unit_sigma * (step_size**0.5)
+            
+            step_reversion = step_theta * (mu - x)
+            step_noise = jrng.normal(key, (channels,), dtype=dtype) * step_sigma
+            x = x + step_reversion + step_noise
+            
+            return x
     
-    return init, step
+    return OuProcess
 
 if __name__ == '__main__':
     init_process, step_process = ou_process(

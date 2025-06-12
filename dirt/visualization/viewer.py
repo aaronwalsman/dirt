@@ -14,7 +14,8 @@ from splendor.image import save_image
 
 from mechagogue.tree import tree_len, tree_getitem
 from mechagogue.serial import load_example_data
-from mechagogue.arg_wrappers import ignore_unused_args
+from mechagogue.standardize import standardize_args
+#from mechagogue.arg_wrappers import ignore_unused_args
 
 from dirt.visualization.height_map import (
     make_height_map_vertices_and_normals, make_height_map_mesh)
@@ -59,32 +60,35 @@ class Viewer:
         get_sun_direction=None,
     ):
         
-        self.get_active_players = ignore_unused_args(
-            get_active_players, ('params', 'report'))
-        self.get_player_x = ignore_unused_args(
+        if get_active_players is not None:
+            self.get_active_players = standardize_args(
+                get_active_players, ('params', 'report'))
+        else:
+            self.get_active_players = get_active_players
+        self.get_player_x = standardize_args(
             get_player_x, ('params', 'report'))
-        self.get_player_r = ignore_unused_args(
+        self.get_player_r = standardize_args(
             get_player_r, ('params', 'report'))
         self.get_player_energy = get_player_energy
         if get_player_energy:
-            self.get_player_energy = ignore_unused_args(
+            self.get_player_energy = standardize_args(
                 self.get_player_energy, ('params', 'report'))
-        self.get_terrain_map = ignore_unused_args(
+        self.get_terrain_map = standardize_args(
             get_terrain_map, ('params', 'report'))
         self.get_terrain_texture = get_terrain_texture
         if self.get_terrain_texture:
-            self.get_terrain_texture = ignore_unused_args(
+            self.get_terrain_texture = standardize_args(
                 self.get_terrain_texture,
                 ('params', 'report', 'texture_size', 'display_mode'),
             )
         self.get_water_map = get_water_map
         if self.get_water_map:
-            self.get_water_map = ignore_unused_args(
+            self.get_water_map = standardize_args(
                 get_water_map, ('params', 'report'))
-        self.get_player_color = ignore_unused_args(
+        self.get_player_color = standardize_args(
             get_player_color, ('player_id', 'params', 'report'))
         if get_sun_direction:
-            self.get_sun_direction = ignore_unused_args(
+            self.get_sun_direction = standardize_args(
                 get_sun_direction, ('params', 'report'))
         
         self._init_params_and_reports(
@@ -99,7 +103,8 @@ class Viewer:
         self._init_context_and_window(window_width, window_height)
         self._init_splendor_render()
         self._init_landscape(terrain_texture_multiple, downsample_heightmap)
-        self._init_players(max_render_players)
+        if self.get_active_players is not None:
+            self._init_players(max_render_players)
         self._init_camera_and_lights()
         self._init_callbacks()
         
@@ -523,7 +528,8 @@ class Viewer:
         
         self._update_landscape()
         #self._update_water()
-        self._update_players()
+        if self.get_active_players is not None:
+            self._update_players()
     
     def _update_players(self):
         active_players = self.get_active_players(self.params, self.report)
