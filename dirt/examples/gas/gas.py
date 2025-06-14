@@ -24,7 +24,7 @@ class GasParams:
     visualize : bool = False
     
     world_size = (1024,1024)
-    downsample = 1
+    downsample = 4
     steps = 1000
     
     wind_std = 3
@@ -51,12 +51,14 @@ if __name__ == '__main__':
         jnp.array(params.wind_bias, dtype=float_dtype),
         dtype=float_dtype
     )
+    max_wind = int(params.wind_std * 3)
     
     gas = make_gas(
         world_size=params.world_size,
         downsample=params.downsample,
         boundary=params.boundary,
         cell_shape=(),
+        max_wind=max_wind,
     )
         
     params_path = f'{params.output_directory}/params.state'

@@ -57,6 +57,7 @@ def make_gas(
                 grid = grid[m:-m,m:-m]
             
             elif boundary in ('clip', 'collect', 'redistribute'):
+                # TODO: would this be better using padding and rolling?
                 grid = jnp.roll(grid, shift=discrete_wind, axis=(0,1))
                 
                 # compute the masks for gas blown over the edge
@@ -72,39 +73,34 @@ def make_gas(
                 )
                 cell_pad = (None,)*len(cell_shape)
                 
-                def fill_void(grid):
+                def fill_empty(grid):
                     m = max_wind_cells
                     fill = 0
                     grid = grid.at[:m].set(jnp.where(
                         mask_0[:m,None,*cell_pad],
                         grid[:m],
-                        fill,
+                        empty_value,
                     ))
                     grid = grid.at[-m:].set(jnp.where(
                         mask_0[-m:,None,*cell_pad],
                         grid[-m:],
-                        fill,
+                        empty_value,
                     ))
                     grid = grid.at[:,:m].set(jnp.where(
                         mask_1[None,:m,*cell_pad],
                         grid[:,:m],
-                        fill,
+                        empty_value,
                     ))
                     grid = grid.at[:,-m:].set(jnp.where(
                         mask_1[None,-m:,*cell_pad],
                         grid[:,-m:],
-                        fill,
+                        empty_value,
                     ))
                     return grid
                 
                 if boundary == 'clip':
-                    ## zero out any gas that was blown over the boundaries
-                    #m = max_wind_cells
-                    #grid = grid.at[:m].multiply(mask_0[:m,None,*cell_pad])
-                    #grid = grid.at[-m:].multiply(mask_0[-m:,None,*cell_pad])
-                    #grid = grid.at[:,:m].multiply(mask_1[None,:m,*cell_pad])
-                    #grid = grid.at[:,-m:].multiply(mask_1[None,-m:,*cell_pad])
-                    grid = fill_void(grid)
+                    # fill areas that should be empty
+                    grid = fill_empty(grid)
                 
                 if boundary == 'redistribute':
                     
@@ -126,12 +122,8 @@ def make_gas(
                         get_block_total(m,-m,0,m)
                     )
                     
-                    ## zero out any gas that was blown over the boundaries
-                    #grid = grid.at[:m].multiply(mask_0[:m,None,*cell_pad])
-                    #grid = grid.at[-m:].multiply(mask_0[-m:,None,*cell_pad])
-                    #grid = grid.at[:,:m].multiply(mask_1[None,:m,*cell_pad])
-                    #grid = grid.at[:,-m:].multiply(mask_1[None,-m:,*cell_pad])
-                    grid = fill_void(grid)
+                    # fill areas that should be empty
+                    grid = fill_empty(grid)
                     
                     # redistribute the blown-over content to each grid cell
                     num_cells = (downsample_size[0]*downsample_size[1])
@@ -180,13 +172,10 @@ def make_gas(
                     grid = collect_block(grid,-m,None,0,m)
                     grid = collect_block(grid,m,-m,0,m)
                     
-                    ## zero out any gas that was blown over the boundaries
-                    #grid = grid.at[:m].multiply(mask_0[:m,None,*cell_pad])
-                    #grid = grid.at[-m:].multiply(mask_0[-m:,None,*cell_pad])
-                    #grid = grid.at[:,:m].multiply(mask_1[None,:m,*cell_pad])
-                    #grid = grid.at[:,-m:].multiply(mask_1[None,-m:,*cell_pad])
-                    grid = fill_void(grid)
+                    # fill areas that should be empty
+                    grid = fill_empty(grid)
             
+            jax.debug.print('sum: {s}', s=jnp.sum(grid))
             return grid
     
     if include_diffusion:
