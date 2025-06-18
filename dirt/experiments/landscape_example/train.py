@@ -7,6 +7,8 @@ import jax
 import jax.numpy as jnp
 import jax.random as jrng
 
+from splendor.image import save_image
+
 from mechagogue.static_dataclass import static_dataclass
 from mechagogue.commandline import commandline_interface
 from mechagogue.pop.natural_selection import (
@@ -25,6 +27,7 @@ from dirt.envs.tera_arium import (
     TeraAriumParams,
     TeraAriumAction,
     TeraAriumTraits,
+    #render_tera_arium,
     tera_arium_renderer,
     tera_arium,
 )
@@ -34,9 +37,9 @@ from dirt.visualization.viewer import Viewer
 @static_dataclass
 class TrainParams:
     seed : int = 1234
-    initial_players : int = 2048
-    max_players : int = 2048
-    world_size : Tuple[int,int] = (512, 512)
+    initial_players : int = 2
+    max_players : int = 2
+    world_size : Tuple[int,int] = (256,256)
     output_directory : str = '.'
     load_state : str = ''
     visualize : bool = False
@@ -57,7 +60,7 @@ class TrainParams:
         max_population=max_players,
     )
     runner_params : Any = EpochRunnerParams(
-        epochs=4,
+        epochs=8,
         steps_per_epoch=1000,
         save_state=True,
         save_reports=True,
@@ -67,6 +70,9 @@ class TrainParams:
 class TrainReport:
     terrain : jnp.ndarray = False
     water : jnp.ndarray = False
+    moisture : jnp.ndarray = False
+    rain : jnp.ndarray = False
+    temperature : jnp.ndarray = False
     energy : jnp.ndarray = False
     biomass : jnp.ndarray = False
     light : jnp.ndarray = False
@@ -77,34 +83,52 @@ class TrainReport:
     
     sun_direction : jnp.ndarray = False
     
-def log(epoch, reports):
-    print(f'Epoch: {epoch}')
-    #population_size = jnp.sum(reports.players[-1])
-    #print(f'Population Size: {population_size}')
-    # do other wandb stuff
-
-def configure(params):
+    moisture_start_raining : float = 0.
+    wind_direction : jnp.ndarray = False
+    normalized_altitude : jnp.ndarray = False
+    
+def configure_functions(params):
+    
+    render_tera_arium = tera_arium_renderer(params.env_params)
+    
     def make_report(
         state, players, parents, children, actions, traits, adaptations
     ):
         
         #jax.debug.print('x {x}', x=state.env_state.bugs.x[:8])
         
+        altitude = (
+            state.env_state.landscape.terrain + 
+            state.env_state.landscape.water
+        )
+        normalized_altitude = jnp.clip(
+            altitude/params.env_params.landscape.max_effective_altitude, 0., 1.)
+        
         return TrainReport(
             terrain=state.env_state.landscape.terrain,
             water=state.env_state.landscape.water,
+            moisture=state.env_state.landscape.moisture,
+            rain=state.env_state.landscape.rain,
+            temperature=state.env_state.landscape.temperature,
             energy=state.env_state.landscape.energy,
             biomass=state.env_state.landscape.biomass,
             light=state.env_state.landscape.light,
             players=players,
             player_x=state.env_state.bugs.x,
             player_r=state.env_state.bugs.r,
+            moisture_start_raining=params.env_params.landscape.weather.moisture_start_raining,
+            wind_direction=state.env_state.landscape.wind,
             #sun_direction=state.env_state.landscape.sundial.sun_direction,
+            normalized_altitude=normalized_altitude,
         )
-    
-    render = tera_arium_renderer(params.env_params)
-    
-    def terrain_texture(report, texture_size):
+
+    def log(epoch, reports):
+        print(f'Epoch: {epoch}')
+        #population_size = jnp.sum(reports.players[-1])
+        #print(f'Population Size: {population_size}')
+        # do other wandb stuff
+
+    def terrain_texture(report, texture_size, display_mode):
         th, tw = texture_size
         terrain = report.terrain
         world_size = terrain.shape
@@ -114,38 +138,69 @@ def configure(params):
 
         ry = th//h
         rx = tw//w
+        
+        if display_mode == 1:
+            texture = render_tera_arium(
+                report.water,
+                report.temperature,
+                report.energy,
+                report.biomass,
+                jnp.zeros((0,2), dtype=jnp.int32),
+                jnp.zeros((0,3), dtype=jnp.int32),
+                report.light,
+            )
+        
+        elif display_mode == 2:
+            texture = render_tera_arium(
+                report.water,
+                report.temperature,
+                report.energy,
+                report.biomass,
+                jnp.zeros((0,2), dtype=jnp.int32),
+                jnp.zeros((0,3), dtype=jnp.int32),
+                jnp.ones_like(report.light),
+            )
        
-        print('Sun direction:', report.sun_direction)
+        elif display_mode == 3:
+            temperature = report.temperature[...,None]
+            texture = jnp.where(
+                temperature >= 0.,
+                temperature * jnp.array([0.5, 0., 0.], dtype=temperature.dtype),
+                -temperature * jnp.array([0., 0.,0.5], dtype=temperature.dtype),
+            )
+            
+        elif display_mode == 4:
+            normalized_moisture = (
+                report.moisture[...,None]/report.moisture_start_raining)
+            texture = normalized_moisture * jnp.array([0.,1.,0.])
+            texture = texture + report.rain[...,None] * jnp.array([0.,0.,1.])
         
-        #texture = jnp.full((h, w), 127, dtype=jnp.uint8)
-        #texture = jnp.repeat(texture, ry, axis=0)
-        #texture = jnp.repeat(texture, rx, axis=1)
-        #texture = jnp.repeat(texture[:,:,None], 3, axis=2)
+        elif display_mode == 5:
+            texture = (
+                report.normalized_altitude[...,None] * jnp.array([1.,1.,1.]))
         
-        texture = render(
-            report.water,
-            report.temperature,
-            report.energy,
-            report.biomass,
-            jnp.zeros((0,2), dtype=jnp.int32),
-            jnp.zeros((0,3), dtype=jnp.int32),
-            report.light,
-        )
-        print('MAX LIGHT:', jnp.max(report.light))
-        return np.array((texture * 255).astype(jnp.uint8))
-
-    def get_player_energy(params, report):
-        return 1. #report.player_energy / params.env_params.max_energy
+        else:
+            print('HUH?')
+            texture = jnp.zeros((*params.world_size, 3))
+        
+        print('Wind direction', report.wind_direction)
+        
+        texture = np.array((texture * 255).astype(jnp.uint8))
+        #save_image(texture, 'tmp.png')
+        return texture
     
-    return make_report, terrain_texture, get_player_energy
+    return make_report, log, terrain_texture
+
+def get_player_energy(params, report):
+    return 1. #report.player_energy / params.env_params.max_energy
 
 if __name__ == '__main__':
 
     # get the parameters from the commandline
     params = TrainParams().from_commandline(skip_overrides=True)
     params = params.override_descendants()
-    
-    make_report, terrain_texture, get_player_energy = configure(params)
+        
+    make_report, log, terrain_texture = configure_functions(params)
     
     if params.visualize:
         # get the path to the params and reports

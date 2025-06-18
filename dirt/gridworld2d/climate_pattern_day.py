@@ -1,7 +1,7 @@
 from dirt.gridworld2d.geology import fractal_noise
 from dirt.gridworld2d.water import flow_step_twodir
 from dirt.gridworld2d.erosion import simulate_erosion_step, reset_erosion_status
-from dirt.gridworld2d.naive_weather_system import weather_step
+#from dirt.gridworld2d.naive_weather_system import weather_step
 import jax.random as jrng
 import jax.numpy as jnp
 import jax
@@ -73,13 +73,14 @@ def get_normalize(
     return (array - min_val) / (max_val - min_val + 1e-8)
 
 def light_step(
-    day_length: int,
+    #day_length: int,
     terrain: jnp.ndarray,
     water: jnp.ndarray,
     light_strength: float,
-    day_light_length: int,
-    time: int,
-    night_effect
+    #day_light_length: int,
+    #time: int,
+    light_direction,
+    night_effect = 0.1
 ) -> jnp.ndarray:
     '''
     light_strength: determined by the distance between the terrain and the Sun
@@ -88,15 +89,16 @@ def light_step(
 
     Get the Idea from website: https://learnopengl.com/Lighting/Basic-Lighting
     '''
-    angle = get_angle(day_length, day_light_length, time)
-    light_direction = jnp.array([jnp.cos(angle), jnp.sin(angle), 0.0])
+    #angle = get_angle(day_length, day_light_length, time)
+    #light_direction = jnp.array([jnp.cos(angle), jnp.sin(angle), 0.0])
     final_terrain = terrain + water
     normals = terrain_gradient(final_terrain)
     light_direction = light_direction.reshape(1, 1, 3)
     dot_products = jnp.einsum('ijk,ijk->ij', normals, light_direction)
-    dot_products_norm = get_normalize(dot_products)
-    light_intensity = jnp.clip(dot_products_norm * light_strength, 0, 1)
-    return jnp.where(time % day_length <= day_light_length, light_intensity, night_effect * light_intensity)
+    #dot_products_norm = get_normalize(dot_products)
+    light_intensity = jnp.clip(dot_products * light_strength, night_effect, 1)
+    #return jnp.where(time % day_length <= day_light_length, light_intensity, night_effect * light_intensity)
+    return light_intensity
 
 
 def absorb_temp(

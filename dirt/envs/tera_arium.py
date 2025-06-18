@@ -1,4 +1,4 @@
-from typing import TypeVar, Tuple
+from typing import Tuple
 
 import jax
 import jax.numpy as jnp
@@ -6,157 +6,84 @@ import jax.random as jrng
 
 import chex
 
-from mechagogue.static_dataclass import static_dataclass
-
-from mechagogue.dp.population_game import population_game
+from mechagogue.static import static_data
+from mechagogue.dp.poeg import make_poeg
 
 from dirt.constants import (
     ROCK_COLOR,
     WATER_COLOR,
+    ICE_COLOR,
     ENERGY_TINT,
     BIOMASS_TINT,
+    BIOMASS_AND_ENERGY_TINT,
 )
 from dirt.envs.landscape import (
-    TLandscapeParams,
-    TLandscapeState,
     LandscapeParams,
     LandscapeState,
-    landscape,
+    make_landscape,
 )
-from dirt.envs.bug import (
-    TBugParams,
-    TBugAction,
-    TBugTraits,
+from dirt.bug import (
     BugParams,
     BugAction,
     BugTraits,
     BugState,
-    bugs,
+    make_bugs,
 )
+from dirt.consumable import Consumable
 
-TTeraAriumParams = TypeVar('TTeraAriumParams', bound='TeraAriumParams')
-TTeraAriumState = TypeVar('TTeraAriumState', bound='TeraAriumState')
-TTeraAriumObservation = TypeVar(
-    'TTeraAriumObservation', bound='TeraAriumObservation')
-
-@static_dataclass
+@static_data
 class TeraAriumParams:
     world_size : Tuple[int, int] = (1024, 1024)
     
     initial_players : int = 1024
     max_players : int = 16384
     
-    landscape : TLandscapeParams = LandscapeParams()
-    bugs : TBugParams = BugParams()
+    min_effective_water : float = 0.05
+    
+    landscape : LandscapeParams = LandscapeParams()
+    bugs : BugParams = BugParams()
 
-@static_dataclass
+@static_data
 class TeraAriumState:
-    
-    landscape : TLandscapeState
-    #height_grid : jnp.array
-    #water_grid : jnp.array
-    #ground_chemical_grid : jnp.array
-    #water_chemical_grid : jnp.array
-    #air_chemical_grid : jnp.array
-    
-    # player shaped data
+    landscape : LandscapeState
     bugs : BugState
-    #player_x : jnp.ndarray
-    #player_r : jnp.ndarray
-    #player_chemicals : jnp.ndarray
 
-@static_dataclass
+@static_data
 class TeraAriumObservation:
+    # grid external
     rgb : jnp.ndarray
     height : jnp.ndarray
     
-    ground_water : jnp.ndarray
-    ground_energy : jnp.ndarray
-    ground_biomass : jnp.ndarray
+    # single channel external
+    audio : jnp.ndarray
+    smell : jnp.ndarray
+    taste : Consumable
+    moisture : jnp.ndarray
+    wind : jnp.ndarray
+    temperature : jnp.ndarray
+    
+    # single channel internal   
+    health : jnp.ndarray
+    stomach : Consumable
 
-@static_dataclass
+@static_data
 class TeraAriumTraits:
     pass
 
 TeraAriumAction = BugAction
 TeraAriumTraits = BugTraits
 
-def render_tera_arium(
-    water,
-    energy,
-    biomass,
-    bug_x,
-    bug_color,
-    light,
-):
-    h, w = water.shape
-
-    # start with a baseline rock color of 50% gray
-    rgb = jnp.full((h,w,3), ROCK_COLOR, dtype=water.dtype)
-
-    # overlay the water as blue
-    rgb = jnp.where(water[..., None] > 0.05, WATER_COLOR, rgb)
-
-    # apply the energy tint
-    clipped_energy = jnp.clip(energy, min=0., max=1.)
-    rgb = rgb + clipped_energy[..., None] * ENERGY_TINT
-
-    # apply the biomass tint
-    clipped_biomass = jnp.clip(biomass, min=0., max=1.)
-    rgb = rgb + clipped_biomass[..., None] * BIOMASS_TINT
+def make_tera_arium(params : TeraAriumParams = TeraAriumParams()):
     
-    # overlay the bug colors
-    rgb = rgb.at[bug_x[...,0], bug_x[...,1]].set(bug_color)
-    
-    # apply lighting
-    rgb = rgb * light[..., None]
-    
-    # clip between 0 and 1
-    rgb = jnp.clip(rgb, min=0., max=1.)
-    
-    return rgb
-
-def tera_arium(params : TTeraAriumParams = TeraAriumParams()):
-    
-    #init_players, step_players, active_players = birthday_player_list(
-    #    params.max_players)
-    #init_family_tree, step_family_tree, active_family_tree = player_family_tree(
-    #    init_players, step_players, active_players, 1)
-    
-    #init_metabolism, step_metabolism = metabolism(params.metabolism_params)
-    
-    #init_climate, step_climate = climate(...)
-    #init_hydrology, step_hydrology = hydrology(...)
-    #init_geology, step_geology = geology(...)
-    
-    #landscape_params = params.landscape.replace(
-    #    world_size=params.world_size,
-    #)
-    (
-        init_landscape,
-        get_landscape_consumable,
-        set_landscape_consumable,
-        step_landscape,
-    ) = landscape(params.landscape)
-    #bug_params = params.bugs.replace(
-    #    initial_players=params.initial_players,
-    #    max_players=params.max_players,
-    #)
-    (
-        init_bugs,
-        move_bugs,
-        bugs_eat,
-        bug_metabolism,
-        active_bugs,
-        bug_family_info,
-    ) = bugs(params.bugs)
+    landscape = make_landscape(params.landscape)
+    bugs = make_bugs(params.bugs)
     
     def init_state(
         key : chex.PRNGKey,
-    ) -> TTeraAriumState :
+    ) -> TeraAriumState :
         
         key, landscape_key = jrng.split(key)
-        landscape_state = init_landscape(landscape_key)
+        landscape_state = landscape.init(landscape_key)
         
         key, bug_key = jrng.split(key)
         bug_state = init_bugs(bug_key)
@@ -167,8 +94,8 @@ def tera_arium(params : TTeraAriumParams = TeraAriumParams()):
     
     def observe(
         key : chex.PRNGKey,
-        state : TTeraAriumState,
-    ) -> TTeraAriumObservation:
+        state : TeraAriumState,
+    ) -> TeraAriumObservation:
         # player internal state
         
         # player external observation
@@ -176,62 +103,62 @@ def tera_arium(params : TTeraAriumParams = TeraAriumParams()):
     
     def transition(
         key : chex.PRNGKey,
-        state : TTeraAriumState,
-        action : TBugAction,
-        traits : TBugTraits,
-    ) -> TTeraAriumState :
+        state : TeraAriumState,
+        action : BugAction,
+        traits : BugTraits,
+    ) -> TeraAriumState :
         
         next_state = state
         
         # bugs
         bug_state = next_state.bugs
         
-        deaths = jnp.zeros(params.max_players, dtype=jnp.bool)
+        max_players = state.bugs.family_tree.parents.shape[0]
+        deaths = jnp.zeros(max_players, dtype=jnp.bool)
         
         # - eat
         #   do this before anything else happens so that the food an agent
         #   observed in the last time step is still in the right location
         # -- pull consumables out of the environment
-        landscape_state = next_state.landscape
-        landscape_consumable = get_landscape_consumable(
-            landscape_state, bug_state.x)
+        next_landscape_state = next_state.landscape
+        landscape_consumable = landscape.get_consumable(
+            next_landscape_state, bug_state.x)
         # -- eat
-        next_bug_state, leftovers = bugs_eat(
+        next_bug_state, leftovers = bugs.eat(
             bug_state, landscape_consumable, action)
         # -- put the leftovers back into the landscape
-        landscape_state = set_landscape_consumable(
-            landscape_state, bug_state.x, leftovers)
-        next_state = next_state.replace(landscape=landscape_state)
+        next_landscape_state = landscape.set_consumable(
+            next_landscape_state, bug_state.x, leftovers)
         
         # - fight
         pass
         
         # - move bugs
-        next_bug_state = move_bugs(next_bug_state, action)
+        next_bug_state = bugs.move(next_bug_state, action)
         
-        # - metabolize
-        next_bug_state = bug_metabolism(
+        # - metabolize and reproduce
+        next_bug_state, expelled, expelled_locations = bug_metabolism(
             bug_state,
+            action,
             next_bug_state,
             traits,
-            landscape_state.terrain,
-            landscape_state.water,
+            next_landscape_state.terrain,
+            next_landscape_state.water,
+            next_landscape_state.light,
         )
+        # -- put the expelled resources back into the landscape
+        next_landscape_state = landscape.add_consumable(
+            next_landscape_state, expelled_locations, expelled)
         
-        # - reproduce
-        pass
-        
-        # - step family tree
-        #family_tree, child_locations = step_family_tree(
-        #    state.family_tree, deaths, parents)
-        
-        # landscape
+        # natural landscape processes
         key, landscape_key = jrng.split(key)
-        next_landscape_state = step_landscape(
-            landscape_key, next_state.landscape)
-        next_state = next_state.replace(landscape=next_landscape_state)
+        next_landscape_state = landscape.step(
+            landscape_key, next_landscape_state)
         
-        next_state = next_state.replace(bugs=next_bug_state)
+        next_state = next_state.replace(
+            landscape=next_landscape_state,
+            bugs=next_bug_state
+        )
         
         return next_state
     
@@ -241,5 +168,62 @@ def tera_arium(params : TTeraAriumParams = TeraAriumParams()):
     def family_info(state):
         return bug_family_info(state.bugs)
     
-    return population_game(
+    def render(
+        water,
+        temperature,
+        energy,
+        biomass,
+        bug_x,
+        bug_color,
+        light,
+    ):
+        h, w = water.shape
+
+        # start with a baseline rock color of 50% gray
+        rgb = jnp.full((h,w,3), ROCK_COLOR, dtype=water.dtype)
+
+        # overlay the water as blue and ice as white
+        while len(temperature.shape) < 3:
+            temperature = temperature[..., None]
+        water_color = jnp.where(
+            temperature <= 0,
+            ICE_COLOR,
+            WATER_COLOR,
+        )
+        rgb = jnp.where(water[..., None] > 0.05, water_color, rgb)
+        
+        # apply the energy and biomass tint
+        clipped_energy = jnp.clip(energy, min=0., max=1.)
+        clipped_biomass = jnp.clip(biomass, min=0., max=1.)
+        biomass_and_energy = jnp.minimum(
+            clipped_energy, clipped_biomass)
+        just_energy = clipped_energy - biomass_and_energy
+        just_biomass = clipped_biomass - biomass_and_energy
+        rgb = rgb + biomass_and_energy[..., None] * BIOMASS_AND_ENERGY_TINT
+        rgb = rgb + just_energy[..., None] * ENERGY_TINT
+        rgb = rgb + just_biomass[..., None] * BIOMASS_TINT
+        '''
+        # apply the energy tint
+        rgb = rgb + clipped_energy[..., None] * ENERGY_TINT
+
+        # apply the biomass tint
+        rgb = rgb + clipped_biomass[..., None] * BIOMASS_TINT
+        '''
+        
+        # overlay the bug colors
+        rgb = rgb.at[bug_x[...,0], bug_x[...,1]].set(bug_color)
+        
+        # apply lighting
+        rgb = rgb * light[..., None]
+        
+        # clip between 0 and 1
+        rgb = jnp.clip(rgb, min=0., max=1.)
+        
+        return rgb
+    
+    game = make_poeg(
         init_state, transition, observe, active_players, family_info)
+    
+    game.render = staticmethod(render)
+    
+    return game

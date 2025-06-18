@@ -1,5 +1,6 @@
 import numpy as np
 
+import jax
 import jax.numpy as jnp
 
 import glfw
@@ -13,7 +14,8 @@ from splendor.image import save_image
 
 from mechagogue.tree import tree_len, tree_getitem
 from mechagogue.serial import load_example_data
-from mechagogue.arg_wrappers import ignore_unused_args
+from mechagogue.standardize import standardize_args
+#from mechagogue.arg_wrappers import ignore_unused_args
 
 from dirt.visualization.height_map import (
     make_height_map_vertices_and_normals, make_height_map_mesh)
@@ -45,6 +47,8 @@ class Viewer:
         step_0 = 0,
         start_step=0,
         terrain_texture_multiple=1,
+        downsample_heightmap=1,
+        max_render_players=512,
         get_active_players=default_get_active_players,
         get_player_x=default_get_player_x,
         get_player_r=default_get_player_r,
@@ -53,30 +57,39 @@ class Viewer:
         get_terrain_texture=None,
         get_water_map=None,
         get_player_color=default_get_player_color,
+        get_sun_direction=None,
     ):
         
-        self.get_active_players = ignore_unused_args(
-            get_active_players, ('params', 'report'))
-        self.get_player_x = ignore_unused_args(
+        if get_active_players is not None:
+            self.get_active_players = standardize_args(
+                get_active_players, ('params', 'report'))
+        else:
+            self.get_active_players = get_active_players
+        self.get_player_x = standardize_args(
             get_player_x, ('params', 'report'))
-        self.get_player_r = ignore_unused_args(
+        self.get_player_r = standardize_args(
             get_player_r, ('params', 'report'))
         self.get_player_energy = get_player_energy
         if get_player_energy:
-            self.get_player_energy = ignore_unused_args(
+            self.get_player_energy = standardize_args(
                 self.get_player_energy, ('params', 'report'))
-        self.get_terrain_map = ignore_unused_args(
+        self.get_terrain_map = standardize_args(
             get_terrain_map, ('params', 'report'))
         self.get_terrain_texture = get_terrain_texture
         if self.get_terrain_texture:
-            self.get_terrain_texture = ignore_unused_args(
-                self.get_terrain_texture, ('params', 'report', 'texture_size'))
+            self.get_terrain_texture = standardize_args(
+                self.get_terrain_texture,
+                ('params', 'report', 'texture_size', 'display_mode'),
+            )
         self.get_water_map = get_water_map
         if self.get_water_map:
-            self.get_water_map = ignore_unused_args(
+            self.get_water_map = standardize_args(
                 get_water_map, ('params', 'report'))
-        self.get_player_color = ignore_unused_args(
+        self.get_player_color = standardize_args(
             get_player_color, ('player_id', 'params', 'report'))
+        if get_sun_direction:
+            self.get_sun_direction = standardize_args(
+                get_sun_direction, ('params', 'report'))
         
         self._init_params_and_reports(
             example_params,
@@ -85,13 +98,18 @@ class Viewer:
             report_files,
             step_0=step_0,
             start_step=start_step,
+            downsample_heightmap=downsample_heightmap,
         )
         self._init_context_and_window(window_width, window_height)
         self._init_splendor_render()
-        self._init_terrain(terrain_texture_multiple)
-        self._init_players()
+        self._init_landscape(terrain_texture_multiple, downsample_heightmap)
+        if self.get_active_players is not None:
+            self._init_players(max_render_players)
         self._init_camera_and_lights()
         self._init_callbacks()
+        
+        self.display_mode = 1
+        self.show_players = True
         
         self.step_size = 1
         self.change_step(start_step)
@@ -104,6 +122,7 @@ class Viewer:
         report_files,
         step_0,
         start_step,
+        downsample_heightmap,
     ):
         self.step_0 = step_0
         self.current_step = start_step
@@ -118,6 +137,8 @@ class Viewer:
         self.reports_per_block = tree_len(self.current_report_block)
         
         self.step_N = step_0 + len(report_files) * self.reports_per_block
+        
+        self.downsample_heightmap = downsample_heightmap
     
     def _init_context_and_window(self, window_width, window_height):
         glfw_context.initialize()
@@ -137,13 +158,16 @@ class Viewer:
             [ 0, 0, 0, 1],
         ])
     
-    def _init_terrain(self, texture_multiple):
+    def _init_landscape(self, texture_multiple, downsample_heightmap):
         self.terrain_map = self.get_terrain_map(self.params, self.report)
         h, w = self.terrain_map.shape
-        self.world_size = (h,w)
+        self.world_size = (h*downsample_heightmap, w*downsample_heightmap)
         self.terrain_texture_size = h * texture_multiple, w * texture_multiple
         
-        vertices, normals, uvs, faces = make_height_map_mesh(self.terrain_map)
+        vertices, normals, uvs, faces = make_height_map_mesh(
+            self.terrain_map, spacing=self.downsample_heightmap)
+        self.terrain_uvs = uvs
+        self.terrain_faces = faces
         self.renderer.load_mesh(
             name='terrain_mesh',
             mesh_data={
@@ -186,7 +210,8 @@ class Viewer:
                 water_normals,
                 self.water_uvs,
                 self.water_faces,
-            ) = make_height_map_mesh(self.total_height_map)
+            ) = make_height_map_mesh(
+                self.total_height_map, spacing=self.downsample_heightmap)
             self.renderer.load_mesh(
                 name='water_mesh',
                 mesh_data={
@@ -210,10 +235,50 @@ class Viewer:
                 material_name='water_material',
                 transform=self.upright,
             )
+        
+        if hasattr(self, 'get_sun_direction'):
+            max_size = max(self.world_size)
+            self.renderer.load_mesh(
+                name='sun_mesh',
+                mesh_primitive={
+                    'shape' : 'sphere',
+                    'radius' : max_size * 0.05,
+                },
+                color_mode='flat_color',
+            )
+            self.renderer.load_material(
+                name='sun_material',
+                flat_color=(1,1,1),
+                rough=1.,
+            )
+            self.renderer.add_instance(
+                name='sun',
+                mesh_name='sun_mesh',
+                material_name='sun_material',
+                transform = self.upright,
+            )
+            self._update_sun_position()
     
-    def _init_players(self):
+    def _update_sun_position(self):
+        if hasattr(self, 'get_sun_direction'):
+            sun_direction = self.get_sun_direction(self.params, self.report)
+            max_size = max(self.world_size)
+            sun_transform = np.eye(4)
+            sun_transform[:3,3] = sun_direction * max_size * 1
+            #unclear_offset = jnp.array([
+            #    [ 0, 1, 0, 0],
+            #    [ 1, 0, 0, 0],
+            #    [ 0, 0, 1, 0],
+            #    [ 0, 0, 0, 1],
+            #])
+            sun_transform = sun_transform
+            
+            
+            self.renderer.set_instance_transform('sun', sun_transform)
+    
+    def _init_players(self, max_render_players):
         active_players = self.get_active_players(self.params, self.report)
-        self.max_players, = active_players.shape
+        self.max_players = min(active_players.shape[0], max_render_players)
         
         # make player cube
         self.renderer.load_mesh(
@@ -389,6 +454,12 @@ class Viewer:
             [0, s, c, d],
             [0, 0, 0, 1],
         ])
+        camera_pose = np.array([
+            [ 0, 0,-1, 0],
+            [ 0, 1, 0, 0],
+            [ 1, 0, 0, 0],
+            [ 0, 0, 0, 1],
+        ]) @ camera_pose
         
         self.renderer.set_view_matrix(np.linalg.inv(camera_pose))
         
@@ -455,12 +526,16 @@ class Viewer:
         
         #print(self.report)
         
-        self._update_terrain()
+        self._update_landscape()
         #self._update_water()
-        self._update_players()
+        if self.get_active_players is not None:
+            self._update_players()
     
     def _update_players(self):
         active_players = self.get_active_players(self.params, self.report)
+        if not self.show_players:
+            active_players = jnp.zeros_like(active_players)
+        
         player_x = self.get_player_x(self.params, self.report)
         player_r = self.get_player_r(self.params, self.report)
         if self.get_player_energy is not None:
@@ -471,13 +546,45 @@ class Viewer:
         
         print(f'Active Players: {jnp.sum(active_players)}')
         
-        for player_id in range(self.max_players):
-            player_name = f'player_{player_id}'
-            eye_white_name = f'player_eye_white_{player_id}'
-            eye_pupil_name = f'player_eye_pupil_{player_id}'
-            energy_background_name = f'player_energy_background_{player_id}'
-            energy_name = f'player_energy_{player_id}'
-            if active_players[player_id]:
+        # figure out which players are in the frustum, and z sort them
+        render_players = {i : -1 for i in range(self.max_players)}
+        #if self.max_players >= scene_players:
+        #    render_players = {i:i for i in range(self.max_players)}
+        #else:
+        projection = self.renderer.get_projection()
+        view_matrix = self.renderer.get_view_matrix()
+        local_transforms = projection @ view_matrix @ player_transforms
+        local_positions = local_transforms[:,:,3]
+        screen_positions = local_positions[:,:2] / local_positions[:,[3]]
+        in_bounds = (
+            (jnp.abs(screen_positions[:,0]) <= 0.5) &
+            (jnp.abs(screen_positions[:,1]) <= 0.5)
+        )
+        
+        score = jnp.where(in_bounds, -local_positions[:,2], -jnp.inf)
+        _, best_players = jax.lax.top_k(score, self.max_players)
+        
+        #for player_id in range(scene_players):
+        #    if active_players[player_id]:
+        #        pass
+        next_render_id = 0
+        scene_players, = active_players.shape
+        for player_id in best_players: #range(scene_players):
+            if active_players[player_id] & in_bounds[player_id]:
+                render_players[next_render_id] = player_id
+                next_render_id += 1
+                if next_render_id not in render_players:
+                    break
+        
+        #for player_id in range(self.max_players):
+        #for render_id, player_id in render_players.items():
+        for render_id, player_id in render_players.items():
+            player_name = f'player_{render_id}'
+            eye_white_name = f'player_eye_white_{render_id}'
+            eye_pupil_name = f'player_eye_pupil_{render_id}'
+            energy_background_name = f'player_energy_background_{render_id}'
+            energy_name = f'player_energy_{render_id}'
+            if player_id != -1 and active_players[player_id]:
                 self.renderer.show_instance(player_name)
                 self.renderer.set_instance_transform(
                     player_name, player_transforms[player_id])
@@ -490,7 +597,7 @@ class Viewer:
                 
                 player_color = self.get_player_color(
                     player_id, self.params, self.report)
-                material_name = f'player_material_{player_id}'
+                material_name = f'player_material_{render_id}'
                 self.renderer.set_material_flat_color(
                     material_name, player_color)
                 
@@ -526,13 +633,35 @@ class Viewer:
                     self.renderer.hide_instance(energy_background_name)
                     self.renderer.hide_instance(energy_name)
     
-    def _update_terrain(self):
+    def _update_landscape(self):
+        self._update_sun_position()
         if self.get_terrain_texture is not None:
             texture = self.get_terrain_texture(
-                self.params, self.report, self.terrain_texture_size)
+                self.params,
+                self.report,
+                self.terrain_texture_size,
+                self.display_mode,
+            )
             self.renderer.load_texture(
                 'terrain_texture',
                 texture_data = texture,
+            )
+        
+        if self.get_terrain_map:
+            self.terrain_map = self.get_terrain_map(self.params, self.report)
+            (
+                terrain_vertices,
+                terrain_normals,
+            ) = make_height_map_vertices_and_normals(
+                self.terrain_map, spacing=self.downsample_heightmap)
+            self.renderer.load_mesh(
+                name='terrain_mesh',
+                mesh_data={
+                    'vertices' : terrain_vertices,
+                    'normals' : terrain_normals,
+                    'faces' : self.terrain_faces,
+                    'uvs' : self.terrain_uvs,
+                }
             )
         
         if self.get_water_map:
@@ -541,7 +670,8 @@ class Viewer:
             (
                 water_vertices,
                 water_normals,
-            ) = make_height_map_vertices_and_normals(self.total_height_map)
+            ) = make_height_map_vertices_and_normals(
+                self.total_height_map, spacing=self.downsample_heightmap)
             self.renderer.load_mesh(
                 name='water_mesh',
                 mesh_data={
@@ -558,11 +688,11 @@ class Viewer:
     
     def _player_transform(self, player_x, player_r):
         height, width = self.world_size
-        y = player_x[..., 0]
-        x = player_x[..., 1]
-        z = self.total_height_map[y, x] + PLAYER_RADIUS
-        y = y - height/2.
-        x = x - width/2.
+        zy = player_x[..., 0] // self.downsample_heightmap
+        zx = player_x[..., 1] // self.downsample_heightmap
+        z = self.total_height_map[zy, zx] + PLAYER_RADIUS
+        y = player_x[..., 0] - height/2.  #y - height/2.
+        x = player_x[..., 1] - width/2. #x - width/2.
         
         cs = np.array((( 1, 0), ( 0, 1), (-1, 0), ( 0,-1)))[player_r]
         c = cs[...,0]
@@ -603,6 +733,11 @@ class Viewer:
         self.renderer.color_render(flip_y=False)
     
     def key_callback(self, window, key, scancode, action, mods):
+        # 0-9 sets various display modes
+        if action == glfw.PRESS and key >= 48 and key < 58:
+            self.display_mode = (key - 48)
+            print(f'display mode: {self.display_mode}')
+            self.change_step(self.current_step)
         if action == glfw.PRESS and key == 45:
             self.step_size = max(1, self.step_size-1)
             print(f'step size: {self.step_size}')
@@ -611,6 +746,10 @@ class Viewer:
             print(f'step size: {self.step_size}')
         if key in (340, 344):
             self._shift_down = action
+        
+        if key == 65 and action:
+             self.show_players = not self.show_players
+             self.change_step(self.current_step)
         
         if action == glfw.PRESS or action == glfw.REPEAT:
             if key == 44:

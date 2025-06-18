@@ -1,7 +1,7 @@
 from dirt.gridworld2d.geology import fractal_noise
 from dirt.gridworld2d.water import flow_step_twodir
 from dirt.gridworld2d.erosion import simulate_erosion_step, reset_erosion_status
-from dirt.gridworld2d.naive_weather_system import weather_step
+#from dirt.gridworld2d.naive_weather_system import weather_step
 import jax.random as jrng
 import jax.numpy as jnp
 import jax
@@ -71,8 +71,7 @@ def get_normalize(
 
 def light_step(
     day_length: int,
-    terrain: jnp.ndarray,
-    water: jnp.ndarray,
+    altitude: jnp.array,
     light_strength: float,
     day_light_length: int,
     time: int,
@@ -87,8 +86,7 @@ def light_step(
     '''
     angle = get_angle(day_length, day_light_length, time)
     light_direction = jnp.array([jnp.cos(angle), jnp.sin(angle), 0.0])
-    final_terrain = terrain + water
-    normals = terrain_gradient(final_terrain)
+    normals = terrain_gradient(altitude)
     light_direction = light_direction.reshape(1, 1, 3)
     dot_products = jnp.einsum('ijk,ijk->ij', normals, light_direction)
     dot_products_norm = get_normalize(dot_products)
@@ -137,7 +135,8 @@ def release_temp(
     '''
     water_norm = get_normalize(water)
     current_evaporation_norm = get_normalize(current_evaporation)
-    release_rate = light_intensity/night_effect * (1 - (1 - rain_effect) * rain_status) * (1 + water_effect - water_norm) * (1 + evaporation_effect - current_evaporation_norm)
+    release_rate = (
+        light_intensity/night_effect * (1 - (1 - rain_effect) * rain_status) * (1 + water_effect - water_norm) * (1 + evaporation_effect - current_evaporation_norm))
     return temperature - release_rate
 
 def temperature_step(
@@ -157,8 +156,30 @@ def temperature_step(
     '''
     Simulate the per step light and temperature system
     '''
-    return jnp.where(time % day_length <= day_light_length, absorb_temp(light_intensity, water, temperature, rain_status, current_evaporation, water_effect, rain_effect, evaporation_effect), release_temp(light_intensity, water, temperature, rain_status, current_evaporation, night_effect, water_effect, rain_effect, evaporation_effect)
-)
+    return jnp.where(
+        time % day_length <= day_light_length,
+        absorb_temp(
+            light_intensity,
+            water,
+            temperature,
+            rain_status,
+            current_evaporation,
+            water_effect,
+            rain_effect,
+            evaporation_effect,
+        ),
+        release_temp(
+            light_intensity,
+            water,
+            temperature,
+            rain_status,
+            current_evaporation,
+            night_effect,
+            water_effect,
+            rain_effect,
+            evaporation_effect,
+        )
+    )
 
 def simulate_full_weather_day(
     day_length: int,

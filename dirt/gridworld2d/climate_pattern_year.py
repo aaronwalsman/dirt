@@ -1,8 +1,12 @@
 from dirt.gridworld2d.geology import fractal_noise
 from dirt.gridworld2d.water import flow_step_twodir
 from dirt.gridworld2d.erosion import simulate_erosion_step, reset_erosion_status
-from dirt.gridworld2d.naive_weather_system import weather_step
-from dirt.gridworld2d.climate_pattern_day import temperature_step, light_step, get_day_status
+#from dirt.gridworld2d.naive_weather_system import weather_step
+from dirt.gridworld2d.climate_pattern_day import (
+    temperature_step,
+    light_step,
+    get_day_status,
+)
 import jax.random as jrng
 import jax.numpy as jnp
 import jax
