@@ -1,7 +1,9 @@
-from dirt.gridworld2d.geology import fractal_noise
 import jax.random as jrng
 import jax.numpy as jnp
 import jax
+
+from dirt.gridworld2d.geology import fractal_noise
+from dirt.gridworld2d.grid import scale_grid
 
 #from dirt.gridworld2d.visualization import visualize_height_water
 
@@ -39,7 +41,8 @@ def calculate_flow(
         raise ValueError("Invalid direction. Must be one of 'up(0)', 'down(1)', 'left(2)', 'right(3)'.")
 
     diff = total_height - neighbor
-    flow = jnp.clip(diff * flow_rate, 0, water/4)
+    diff_flow = scale_grid(diff, flow_rate)
+    flow = jnp.clip(diff_flow, 0, water/4)
     #flow = flow_rate * (diff > 0.)
     #flow = jnp.clip(flow, 0, water/4.)
     return flow

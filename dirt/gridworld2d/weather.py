@@ -59,10 +59,9 @@ class WeatherParams:
     evaporation_rate: float = 0.001
     min_evaporation_temp: float = 0.1
     max_evaporation_temp: float = 2.
-    moisture_std: float = 0.333
     
     # - rain
-    rain_per_step: float = 0.01
+    rain_per_step: float = 0.005
     moisture_start_raining: float = 0.2
     moisture_stop_raining: float = 0.05
     rain_altitude_scale: float = 0.25

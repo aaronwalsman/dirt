@@ -20,8 +20,9 @@ def make_gas(
     empty_value=0.,
     include_diffusion=True,
     include_wind=True,
+    wind_strength=1.,
     max_wind=16,
-    float_dtype=DEFAULT_FLOAT_DTYPE,
+    dtype=DEFAULT_FLOAT_DTYPE,
 ):
     
     assert world_size[0] % downsample == 0 and world_size[1] % downsample == 0
@@ -35,7 +36,7 @@ def make_gas(
         def wind_step(key, grid, wind):
             # convert the real-valued wind to a discrete_wind offset at the
             # correct grid resolution
-            wind = jnp.clip(wind, -max_wind, max_wind)
+            wind = jnp.clip(wind * wind_strength, -max_wind, max_wind)
             downsampled_wind = wind / downsample
             wind_lo = jnp.floor(downsampled_wind).astype(jnp.int32)
             wind_hi = jnp.ceil(downsampled_wind).astype(jnp.int32)
@@ -175,7 +176,7 @@ def make_gas(
                     # fill areas that should be empty
                     grid = fill_empty(grid)
             
-            jax.debug.print('sum: {s}', s=jnp.sum(grid))
+            #jax.debug.print('sum: {s}', s=jnp.sum(grid))
             return grid
     
     if include_diffusion:
@@ -183,8 +184,8 @@ def make_gas(
         # build the box filter convolution
         n = 2 * diffusion_radius + 1
         center_kernel = jnp.zeros(
-            n, dtype=float_dtype).at[diffusion_radius].set(1.)
-        box_kernel = jnp.full(n, 1./n, dtype=float_dtype)
+            n, dtype=dtype).at[diffusion_radius].set(1.)
+        box_kernel = jnp.full(n, 1./n, dtype=dtype)
         kernel = (
             box_kernel * diffusion_strength +
             center_kernel * (1. - diffusion_strength)
@@ -237,7 +238,7 @@ def make_gas(
     class Gas:
         
         def init():
-            grid = jnp.zeros(grid_size, dtype=float_dtype)
+            grid = jnp.zeros(grid_size, dtype=dtype)
             grid = grid.at[:,:].set(initial_value)
             return grid
         
