@@ -10,9 +10,10 @@ from mechagogue.commandline import commandline_interface
 from mechagogue.static import static_functions, static_data
 from mechagogue.serial import save_leaf_data
 
-from dirt.gridworld2d.landscape import LandscapeParams, make_landscape
 from dirt.constants import DEFAULT_FLOAT_DTYPE
 from dirt.visualization.viewer import Viewer
+from dirt.gridworld2d.landscape import LandscapeParams, make_landscape
+from dirt.gridworld2d.grid import grid_sum_to_mean
 
 @commandline_interface
 @static_data
@@ -24,7 +25,7 @@ class LandscapeExampleParams:
     
     landscape_params : LandscapeParams = LandscapeParams()
     
-    steps = 1000
+    steps : int = 1000
 
 @static_data
 class LandscapeExampleReport:
@@ -33,7 +34,23 @@ class LandscapeExampleReport:
     temperature : jnp.ndarray = False
     energy : jnp.ndarray = False
     biomass : jnp.ndarray = False
+    moisture : jnp.ndarray = False
+    raining : jnp.ndarray = False
     light : jnp.ndarray = False
+
+def make_report(state):
+    report = LandscapeExampleReport(
+        rock=state.rock,
+        water=state.water,
+        temperature=state.temperature,
+        energy=state.energy,
+        biomass=state.biomass,
+        moisture=state.moisture,
+        raining=state.raining,
+        light=state.light,
+    )
+    
+    return report
 
 if __name__ == '__main__':
     
@@ -41,16 +58,10 @@ if __name__ == '__main__':
     
     params = LandscapeExampleParams().from_commandline()
     landscape_params = params.landscape_params.replace(
-        #include_light=False,
-        #include_wind=False,
-        #include_temperature=False,
-        #include_rain=False,
-        #include_resources=False,
         include_smell=False,
         include_audio=False,
-        fill_water_to_sea_level=True,
-        #initial_water_per_cell=1.,
     )
+    params = params.replace(landscape_params = landscape_params)
     
     key = jrng.key(params.seed)
     
@@ -63,31 +74,54 @@ if __name__ == '__main__':
         key, init_key = jrng.split(key)
         
         def get_texture(report, texture_size, display_mode):
-            th, tw = texture_size
-            h, w = params.landscape_params.world_size
-            assert h % th == 0
-            assert w % tw == 0
             
             if display_mode == 1:
-                texture = landscape.render(report, 2)
+                texture = landscape.render_rgb(report, shape=texture_size)
             
+            elif display_mode == 2:
+                texture = landscape.render_rgb(
+                    report, shape=texture_size, use_light=False)
+            
+            elif display_mode == 3:
+                texture = landscape.render_temperature(
+                    report, shape=texture_size)
+            
+            elif display_mode == 4:
+                texture = landscape.render_weather(
+                    report, shape=texture_size)
+            
+            elif display_mode == 5:
+                texture = landscape.render_altitude(
+                    report, shape=texture_size)
+            
+            else:
+                texture = jnp.zeros((*texture_size, 3))
+            
+            texture = np.array(
+                jnp.clip(texture, min=0., max=1.) * 255).astype(np.uint8)
             return texture
         
         def get_terrain(report):
-            return (report.rock + report.water) / (
-                params.landscape_params.terrain_downsample**2)
+            return grid_sum_to_mean(
+                report.rock + report.water,
+                params.landscape_params.terrain_downsample,
+            )
+        
+        key, init_key = jrng.split(key)
+        example_state = landscape.init(init_key)
+        example_report = make_report(example_state)
         
         viewer = Viewer(
             LandscapeExampleParams(),
             params_path,
-            LandscapeExampleReport(),
+            example_report,
             [reports_path],
+            params.landscape_params.world_size,
             get_terrain_map = get_terrain,
             get_active_players = None,
             get_terrain_texture = get_texture,
             get_water_map = None,
             get_sun_direction = None,
-            downsample_heightmap = params.landscape_params.terrain_downsample,
         )
         viewer.begin()
     
@@ -95,20 +129,14 @@ if __name__ == '__main__':
         
         key, init_key = jrng.split(key)
         landscape_state = landscape.init(init_key)
+        orig_landscape_state = landscape_state
         
         def landscape_step(key_state, _):
             key, state = key_state
             key, step_key = jrng.split(key)
             
             state = landscape.step(step_key, state)
-            report = LandscapeExampleReport(
-                rock=state.rock,
-                water=state.water,
-                temperature=state.temperature,
-                energy=state.energy,
-                biomass=state.biomass,
-                light=state.light,
-            )
+            report = make_report(state)
             
             return (key, state), report
         
@@ -126,6 +154,8 @@ if __name__ == '__main__':
         (key, landscape_state), reports = run_scan(
             key, landscape_state, params.steps)
         reports.water.block_until_ready()
+        
+        landscape_state = orig_landscape_state
         
         t0 = time.time()
         (key, landscape_state), reports = run_scan(

@@ -1,6 +1,8 @@
 import jax
 import jax.numpy as jnp
 
+from dirt.constants import DEFAULT_FLOAT_DTYPE
+
 '''
 Designed to allow operations over grids of multiple sizes that represent
 float-based quantities distributed over the same fixed area.  For example a
@@ -13,6 +15,13 @@ quantities across the entire grid.
 This module does not do any interpolation, and so requires grid shapes to be
 evenly divisible by each other in order to be compatible.
 '''
+
+def downsample_grid_shape(h, w, downsample):
+    return h//downsample, w//downsample
+
+def zero_grid(h, w, downsample, cell_shape=(), dtype=DEFAULT_FLOAT_DTYPE):
+    dh, dw = downsample_grid_shape(h, w, downsample)
+    return jnp.zeros((dh, dw, *cell_shape), dtype=dtype)
 
 def grid_to_blocks(a, h, w):
     '''
@@ -30,14 +39,28 @@ def blocks_to_grid(a):
     h, dh, w, dw, *c = a.shape
     return a.reshape(h*dh, w*dw, *c)
 
-def downsample_grid(a, h, w):
+def downsample_grid(a, h, w, preserve_mass=True):
     '''
     Reduces the size of a grid by summing local blocks of values.
     '''
     a = grid_to_blocks(a, h, w)
-    return jnp.sum(a, axis=(1,3))
+    if preserve_mass:
+        return jnp.sum(a, axis=(1,3))
+    else:
+        return jnp.mean(a, axis=(1,3))
 
-def upsample_grid(a, h, w):
+def subsample_grid(a, h, w, preserve_mass=True):
+    ah, aw = a.shape[:2]
+    assert (ah % h == 0) and (aw % w == 0)
+    a = grid_to_blocks(a, h, w)
+    a = a[:,0,:,0]
+    if preserve_mass:
+        dh = h // ah
+        dw = w // aw
+        a = a * (dh * dw)
+    return a
+
+def upsample_grid(a, h, w, preserve_mass=True):
     '''
     Increases the size of a grid by repeating and dividing coarse values.
     
@@ -48,8 +71,30 @@ def upsample_grid(a, h, w):
     assert h >= ah and w >= aw
     dh = h // ah
     dw = w // aw
-    block = jnp.full((dh, dw), 1./(dh*dw))
-    return jnp.kron(a, block)
+    a = jnp.repeat(jnp.repeat(a, dh, axis=0), dw, axis=1)
+    if preserve_mass:
+        a = a / (dh*dw)
+    
+    return a
+
+def set_grid_shape(a, h, w, preserve_mass=True):
+    '''
+    Upsample or downsample depending on the existing shape
+    '''
+    if a.shape[0] > h:
+        assert a.shape[1] > w
+        return downsample_grid(a, h, w, preserve_mass=preserve_mass)
+    elif a.shape[0] < h:
+        assert a.shape[1] < w
+        return upsample_grid(a, h, w, preserve_mass=preserve_mass)
+    else:
+        return a
+
+def grid_sum_to_mean(a, downsample):
+    return a / (downsample**2)
+
+def grid_mean_to_sum(a, downsample):
+    return a * (downsample**2)
 
 def grids_to_aligned_blocks(a, b):
     '''
@@ -93,9 +138,9 @@ def add_grids(a, b, preserve_mass=True):
     a, b = grids_to_aligned_blocks(a, b)
     if preserve_mass:
         scale_factor = a.shape[1] * a.shape[3]
+        b = jnp.sum(b, axis=(1,3), keepdims=True) / scale_factor
     else:
-        scale_factor = 1.
-    b = jnp.sum(b, axis=(1,3), keepdims=True) / scale_factor
+        b = jnp.mean(b, axis=(1,3), keepdims=True)
     c = a + b
     c = blocks_to_grid(c)
     return c
@@ -156,6 +201,26 @@ def read_grid_locations(a, x, downsample):
     xd = x // downsample
     value = a[xd[...,0], xd[...,1]] / (downsample**2)
     return value
+
+def write_grid_locations(a, x, value, downsample, overwrite_all=False):
+    '''
+    Write values to specific locations (x) in a downsampled grid (a).  The
+    downsampled grid values represent the sum of quantities from a higher
+    resolution grid.  If overwrite_all is set to True, this will overwrite
+    all value in each coarse grid cell with value * (downsample**2).
+    Otherwise a portion of the existing value in each grid cell will be
+    removed before the the new value is added in.  This means that a grid
+    cell which as been downsampled by 2, and had it's value written by this
+    function will have 3/4 of its original value plus the value specified for
+    this cell after this operation. 
+    '''
+    xd = x // downsample
+    if overwrite_all:
+        a = a.at[xd].set(value * downsample**2)
+    else:
+        current_value = a[xd[...,0], xd[...,1]]
+        a = a.at[xd].add(value - current_value * (1./(downsample**2)))
+    return a
 
 def add_to_grid_locations(a, x, value, downsample):
     '''

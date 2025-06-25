@@ -28,18 +28,26 @@ from dirt.gridworld2d.water import flow_step, flow_step_twodir
 #     temperature_step, light_step, get_day_status)
 from dirt.gridworld2d.gas import make_gas
 from dirt.gridworld2d.climate_pattern_day_cont import (
-    temperature_step, light_step, get_day_status)
+    light_step, get_day_status)
 from dirt.gridworld2d.climate_pattern_year import (
     get_day_light_length, get_day_light_strength)
-from dirt.gridworld2d.spawn import poisson_grid
+from dirt.gridworld2d.spawn import unique_x, poisson_grid
 from dirt.gridworld2d.grid import (
+    downsample_grid_shape,
+    zero_grid,
     downsample_grid,
+    subsample_grid,
+    upsample_grid,
+    set_grid_shape,
+    grid_sum_to_mean,
+    grid_mean_to_sum,
     scale_grid,
     interpolate_grids,
     add_grids,
     take_grids,
     compare_grids,
     read_grid_locations,
+    write_grid_locations,
     add_to_grid_locations,
     take_from_grid_locations,
 )
@@ -86,16 +94,16 @@ class LandscapeParams:
     # terrain
     terrain_downsample : int = 4
     max_effective_altitude : float = 100.
-    min_standing_water : float = 0.1
+    min_standing_water : float = 0.01
     # - rock
     include_rock : bool = True
     rock_bias : float = 0
     rock_octaves : int = 12
-    rock_max_octaves : Optional[int] = None
+    rock_max_octaves : int = 20
     rock_lacunarity : float = 2.
     rock_persistence : float = 0.5
     rock_unit_scale : float = 0.005
-    rock_max_height : float = 250.
+    rock_max_height : float = 50.
     # -- erosion
     include_erosion : bool = False
     erosion_endurance : float = 0. #0.05
@@ -107,10 +115,15 @@ class LandscapeParams:
     initial_water_per_cell : float = 0.
     water_flow_rate : float = 0.25
     ice_flow_rate : float = 0.001
+    include_water_sources_and_sinks : bool = True
+    water_sink_density : float = 10./(128**2)
+    water_sink_flow : float = 0.1
+    water_source_density : float = 1./(128**2)
+    water_source_flow : float = 1.
     
     # light
     include_light: bool = True
-    spatial_light: bool = True
+    light_downsample : int = 8
     light_initial_strength: float = 0.35
     night_effect: float = 0.15
     cloud_shade: float = 0.25
@@ -119,8 +132,8 @@ class LandscapeParams:
     # weather
     # - wind
     include_wind : bool = True
-    wind_std : float = 3
-    wind_reversion : float = 0.1
+    wind_std : float = 5
+    wind_reversion : float = 0.05
     wind_bias : Tuple[float, float] = (0., 0.)
     # - temperature
     include_temperature : bool = True
@@ -156,10 +169,10 @@ class LandscapeParams:
     include_resources : bool = True
     resource_downsample : int = 2
     # - energy
-    initial_energy_site_density : float = (1./64.)
+    initial_energy_site_density : float = (1./16.)
     initial_energy_per_site : float = 1.
     # - biomass
-    initial_biomass_site_density : float = (1./64.)
+    initial_biomass_site_density : float = (1./16.)
     initial_biomass_per_site : float = 1.
     
     # smell
@@ -177,21 +190,56 @@ class LandscapeParams:
     audio_diffusion_radius: int=3
     audio_diffusion_strength: float = 1.
 
+    def validate(params):
+        
+        def validate_downsample(downsample, world_size):
+            downsample = min(downsample, world_size[0], world_size[1])
+            assert (
+                world_size[0] % downsample == 0 and
+                world_size[1] % downsample == 0
+            )
+            return downsample
+        
+        if params.include_erosion:
+            assert params.include_rock and params.include_water, (
+                '"include_erosion" requires "include_rock" and "include_water"')
+        
+        if params.include_rain:
+            assert params.include_temperature, (
+                '"include_rain" requires "include_temperature"')
+        
+        if params.include_light:
+            light_downsample = max(
+                params.terrain_downsample, params.light_downsample)
+        
+        if params.include_temperature:
+            assert params.include_light, (
+                '"include_temperature" requires "include_light"')
+        
+        return params.replace(
+            terrain_downsample=validate_downsample(
+                params.terrain_downsample, params.world_size),
+            light_downsample=validate_downsample(
+                light_downsample, params.world_size),
+            temperature_downsample=validate_downsample(
+                params.temperature_downsample, params.world_size),
+            rain_downsample=validate_downsample(
+                params.rain_downsample, params.world_size),
+            resource_downsample=validate_downsample(
+                params.resource_downsample, params.world_size),
+            smell_downsample=validate_downsample(
+                params.smell_downsample, params.world_size),
+            audio_downsample=validate_downsample(
+                params.audio_downsample, params.world_size),
+        )
+
 def make_landscape(
     params : LandscapeParams = LandscapeParams(),
     float_dtype : Any = DEFAULT_FLOAT_DTYPE,
 ):
     
-    # check parameters
-    if params.include_erosion:
-        assert params.include_rock and params.include_water, (
-            '"include_erosion" requires "include_rock" and "include_water"')
-    
-    if params.include_rain:
-        assert params.include_temperature, (
-            '"include_rain" requires "include_temperature"')
-    
-    # TODO: downsample checks
+    # validate parameters
+    params = params.validate()
     
     # setup the wind system
     if params.include_wind:
@@ -222,10 +270,11 @@ def make_landscape(
             dtype=float_dtype,
         )
    
-    # setup the moisture system
+    # setup the rain system
     if params.include_rain:
         evaporation_temp_range = (
             params.max_evaporation_temp - params.min_evaporation_temp)
+        # - moisture
         moisture_system = make_gas(
             params.world_size,
             downsample=params.rain_downsample,
@@ -236,6 +285,7 @@ def make_landscape(
             max_wind=max_wind,
             dtype=float_dtype,
         )
+        # - rain
         rain_system = make_gas(
             params.world_size,
             downsample=params.rain_downsample,
@@ -286,6 +336,19 @@ def make_landscape(
         params.world_size[0] * params.world_size[1]
     )
     
+    def compute_normalized_altitude(state):
+        altitude = jnp.zeros((), dtype=float_dtype)
+        if params.include_rock:
+            altitude += state.rock
+        if params.include_water:
+            altitude += state.water
+        altitude = grid_sum_to_mean(altitude, params.terrain_downsample)
+        normalized_altitude = (
+            (altitude - params.sea_level) / params.max_effective_altitude)
+        normalized_altitude = jnp.clip(normalized_altitude, 0., 1.)
+        
+        return normalized_altitude
+    
     @static_data
     class LandscapeState:
         
@@ -295,46 +358,42 @@ def make_landscape(
         # terrain
         # - rock
         if params.include_rock:
-            rock : jnp.array = None
-            terrain_normals: jnp.array = None
+            rock : jnp.ndarray = None
+            rock_normals: jnp.ndarray = None
             # -- erosion
             if params.include_erosion:
-                erosion : jnp.array = None
+                erosion : jnp.ndarray = None
         # - water
         if params.include_water:
-            water : jnp.array = None
+            water : jnp.ndarray = None
+            water_source_locations : jnp.ndarray = None
+            water_sink_locations : jnp.ndarray = None
         
         # light
         if params.include_light:
-            light: jnp.array = None
+            light: jnp.ndarray = None
         
         # weather
         # - wind
-        if params.include_wind:
-            wind : jnp.array = None
+        wind : jnp.ndarray = None
         # - temperature
-        if params.include_temperature:
-            temperature : jnp.array = None
+        temperature : jnp.ndarray = None
         # - rain
-        if params.include_rain:
-            # -- moisture
-            moisture : jnp.array = None
-            # -- rain
-            raining: jnp.array = None
+        # -- moisture
+        moisture : jnp.ndarray = None
+        # -- rain
+        raining : jnp.ndarray = None
         
         # resources
-        if params.include_resources:
-            # - energy
-            energy : jnp.array = None
-            # - biomass
-            biomass : jnp.array = None
+        # - energy
+        energy : jnp.ndarray = None
+        # - biomass
+        biomass : jnp.ndarray = None
         
         # smell
-        if params.include_smell:
-            smell: jnp.array = None
+        smell: jnp.ndarray = None
         # audio
-        if params.include_audio:
-            audio: jnp.array = None
+        audio: jnp.ndarray = None
     
     @static_functions
     class Landscape:
@@ -365,11 +424,11 @@ def make_landscape(
                     params.rock_lacunarity,
                     params.rock_persistence,
                     params.rock_max_octaves,
-                    params.rock_unit_scale,
+                    params.rock_unit_scale * params.terrain_downsample,
                     params.rock_max_height,
                     dtype=float_dtype,
                 ) + params.rock_bias
-                rock = rock * (params.terrain_downsample**2)
+                rock = grid_mean_to_sum(rock, params.terrain_downsample)
                 state = state.replace(rock=rock)
                 
                 # -- erosion
@@ -383,31 +442,73 @@ def make_landscape(
             if params.include_water:
                 water = jnp.zeros(terrain_size, dtype=float_dtype)
                 if params.fill_water_to_sea_level:
+                    downsampled_sea_level = (
+                        params.sea_level * params.terrain_downsample**2)
                     water = jnp.where(
-                        rock < params.sea_level,
+                        rock < downsampled_sea_level,
                         params.sea_level - rock,
                         water,
                     )
-                water = water + params.initial_water_per_cell * (
-                    params.terrain_downsample**2)
+                water = (
+                    water +
+                    params.initial_water_per_cell * params.terrain_downsample**2
+                )
                 state = state.replace(water=water)
+                
+                # -- water sink and sources
+                if params.include_water_sources_and_sinks:
+                    assert params.water_source_density > 0
+                    num_water_sources = jnp.ceil(
+                        params.water_source_density *
+                        params.world_size[0] * params.world_size[1]
+                    )
+                    assert params.water_sink_density > 0
+                    num_water_sinks = jnp.ceil(
+                        params.water_sink_density *
+                        params.world_size[0] * params.world_size[1]
+                    )
+                    key, water_source_key, water_sink_key = jrng.split(key, 3)
+                    water_source_locations = unique_x(
+                        water_source_key, num_water_sources, params.world_size)
+                    water_sink_locations = unique_x(
+                        water_sink_key, num_water_sinks, params.world_size)
+                    state = state.replace(
+                        water_source_locations=water_source_locations,
+                        water_sink_locations=water_sink_locations,
+                    )
             
             # light
             if params.include_light:
-                if params.spatial_light:
-                    light = jnp.zeros(terrain_size, dtype=float_dtype)
-                    terrain_normals = jnp.zeros(
-                        (*terrain_size, 3),
-                        dtype=float_dtype,
-                    )
-                    terrain_normals = terrain_normals.at[:,:,2].set(1.)
-                    # TODO: init properly
+                light_shape = downsample_grid_shape(
+                    *params.world_size, params.light_downsample)
+                if light_shape[0] == 1 or light_shape[1] == 1:
+                    rock_normals = jnp.full(
+                        (1,1,3), jnp.array([0,0,1], dtype=float_dtype))
                 else:
-                    light = jnp.zeros((1,1), dtype=float_dtype)
-                    terrain_normals = jnp.zeros((1,1,3), dtype=float_dtype)
-                    terrain_normals[:,:,2] = 1.
+                    resampled_rock = set_grid_shape(
+                        state.rock, *light_shape)
+                    resampled_rock = grid_sum_to_mean(
+                        resampled_rock, params.light_downsample)
+                    dx, dy = jnp.gradient(resampled_rock)
+                    dx /= params.light_downsample
+                    dy /= params.light_downsample
+                    rock_normals = jnp.stack(
+                        (-dx, -dy, jnp.ones_like(resampled_rock)), axis=-1)
+                    magnitude = jnp.linalg.norm(
+                        rock_normals, axis=-1, keepdims=True)
+                    magnitude = jnp.clip(magnitude, min=1e-8)
+                    rock_normals = rock_normals / magnitude
+                
+                # TODO: use the light calculation for the first step instead
+                # of zeros
+                light = zero_grid(
+                    *params.world_size,
+                    params.light_downsample,
+                    dtype=float_dtype,
+                )
+                
                 state = state.replace(
-                    light=light, terrain_normals=terrain_normals)
+                    light=light, rock_normals=rock_normals)
             
             # weather
             # - wind
@@ -422,7 +523,6 @@ def make_landscape(
             if params.include_rain:
                 moisture = moisture_system.init()
                 mh, mw = moisture.shape[:2]
-                #raining = jnp.zeros((mh, mw), dtype=jnp.bool)
                 raining = rain_system.init()
                 state = state.replace(moisture=moisture, raining=raining)
             
@@ -441,14 +541,12 @@ def make_landscape(
                     energy_key,
                     mean_energy_sites,
                     round(mean_energy_sites*2),
-                    resource_size,
+                    params.world_size,
                 )
-                #total_energy_sites = jnp.sum(energy_sites)
-                #energy_per_site = (
-                #    params.initial_total_energy / total_energy_sites)
                 energy = (
                     energy_sites * params.initial_energy_per_site
                 ).astype(float_dtype)
+                energy = downsample_grid(energy, *resource_size)
                 state = state.replace(energy=energy)
             
                 # - biomass
@@ -457,14 +555,12 @@ def make_landscape(
                     biomass_key,
                     mean_biomass_sites,
                     round(mean_biomass_sites*2),
-                    resource_size,
+                    params.world_size,
                 )
-                #total_biomass_sites = jnp.sum(biomass_sites)
-                #biomass_per_site = (
-                #    params.initial_total_biomass / total_biomass_sites)
                 biomass = (
                     biomass_sites * params.initial_biomass_per_site
                 ).astype(float_dtype)
+                biomass = downsample_grid(biomass, *resource_size)
                 state = state.replace(biomass=biomass)
             
             # smell
@@ -538,16 +634,92 @@ def make_landscape(
             
             # water
             if params.include_water:
+                # - make water flow downhill
                 if params.include_temperature:
                     flow_rate = jnp.where(
-                        state.temperature < 0.,
-                        params.ice_flow_rate,
+                        state.temperature > 0.,
                         params.water_flow_rate,
+                        params.ice_flow_rate,
                     )
                 else:
-                    flow_rate = jnp.array(
-                        params.water_flow_rate, dtype=float_dtype).reshape(1,1)
+                    flow_rate = jnp.full(
+                        (1,1), params.water_flow_rate, dtype=float_dtype)
+                flow_rate /= params.terrain_downsample
                 water = flow_step(state.rock, state.water, flow_rate)
+                
+                # - sources and sinks
+                #   The total ammount of water transferred is equal to the
+                #   minimum of the number of unfrozen sinks times the
+                #   water_sink_flow parameter and the number of unfrozen
+                #   sources times the water_source_flow parameter.  This value
+                #   is divided equally between the number of unfrozen sources
+                #   and the number of unfrozen sinks.
+                if params.include_water_sources_and_sinks:
+                    num_water_sinks = state.water_sink_locations.shape[0]
+                    num_water_sources = state.water_source_locations.shape[0]
+                    if params.include_temperature:
+                        # -- determine how many sinks and sources are frozen
+                        sinks_unfrozen = read_grid_locations(
+                            state.temperature,
+                            state.water_sink_locations,
+                            params.temperature_downsample,
+                        ) > 0.
+                        sources_unfrozen = read_grid_locations(
+                            state.temperature,
+                            state.water_source_locations,
+                            params.temperature_downsample,
+                        ) > 0.
+                        # -- determine how much to transfer between all sources
+                        #    and sinks
+                        num_sinks_unfrozen = sinks_unfrozen.sum()
+                        num_sources_unfrozen = sources_unfrozen.sum()
+                        total_source_take = jnp.minimum(
+                            num_sinks_unfrozen * params.water_sink_flow,
+                            num_sources_unfrozen * params.water_source_flow,
+                        ).astype(float_dtype)
+                        sink_take = jnp.where(
+                            sinks_unfrozen,
+                            total_source_take / num_sinks_unfrozen,
+                            0.,
+                        )
+                        active_sources = sources_unfrozen
+                        num_active_sources = num_sources_unfrozen
+                    else:
+                        total_source_take = jnp.minimum(
+                            num_water_sinks * params.water_sink_flow,
+                            num_water_sources * params.water_source_flow,
+                        )
+                        sink_take = jnp.full(
+                            (num_water_sinks,),
+                            total_source_take / num_water_sinks,
+                            dtype=float_dtype,
+                        )
+                        active_sources = jnp.ones(
+                            (num_water_sources,),
+                            dtype=jnp.bool,
+                        )
+                        num_active_sources = num_water_sources
+                    # -- take the water from the sinks
+                    water, sunk_water = take_from_grid_locations(
+                        water,
+                        state.water_sink_locations,
+                        sink_take,
+                        params.terrain_downsample,
+                    )
+                    # -- add the water to the sources
+                    total_sunk_water = jnp.sum(sunk_water)
+                    source_add = jnp.where(
+                        active_sources,
+                        total_sunk_water / num_active_sources,
+                        0.,
+                    )
+                    water = add_to_grid_locations(
+                        water,
+                        state.water_source_locations,
+                        source_add,
+                        params.terrain_downsample,
+                    )
+                
                 state = state.replace(water=water)
                 standing_water = (
                     state.water >
@@ -563,20 +735,14 @@ def make_landscape(
                     state.erosion,
                     params.water_flow_rate,
                     params.erosion_endurance,
-                    params.erosion_ratio
+                    params.erosion_ratio,
                 )
                 erosion = reset_erosion_status(rock, old_rock, erosion)
+                # - recompute normals
                 state = state.replace(rock=rock, erosion=erosion)
             
             # compute altitude
-            altitude = jnp.zeros((), dtype=float_dtype)
-            normalized_altitude = jnp.zeros((), dtype=float_dtype)
-            if params.include_rock:
-                altitude += state.rock
-            if params.include_water:
-                altitude += state.water
-            normalized_altitude = jnp.clip(
-                altitude/params.max_effective_altitude, 0., 1.)
+            normalized_altitude = compute_normalized_altitude(state)
             
             # wind
             if params.include_wind:
@@ -588,16 +754,21 @@ def make_landscape(
             if params.include_rain:
                 # compute evaporation (water -> moisture)
                 # - use the temperature to figure out how much is evaporating
+                local_temperature = grid_sum_to_mean(
+                    state.temperature, params.temperature_downsample)
                 evaporation = (
-                    (state.temperature - params.min_evaporation_temp) /
+                    (local_temperature - params.min_evaporation_temp) /
                     evaporation_temp_range
                 )
                 evaporation = jnp.clip(evaporation, min=0., max=1.)
+                evaporation *= params.evaporation_rate
                 # - turn off evaporation wherever it's raining
                 evaporation = scale_grid(
                     evaporation, jnp.logical_not(state.raining))
-                evaporation *= (
-                    params.evaporation_rate * (params.rain_downsample**2))
+                #evaporation *= (
+                #    params.evaporation_rate * (params.rain_downsample**2))
+                evaporation = grid_mean_to_sum(
+                    evaporation, params.temperature_downsample)
                 # - remove the evaporation from the water
                 water, evaporated = take_grids(state.water, evaporation)
                 # - add the evaporation to the moisture
@@ -610,11 +781,22 @@ def make_landscape(
                 water = add_grids(water, rained)
                 
                 # compute raining (where to rain next)
+                #altitude_rain_scale = (
+                #    1. - normalized_altitude + params.rain_altitude_scale)
+                #altitude_rain_scale = (
+                #    normalized_altitude +
+                #    (1 - normalized_altitude) * params.rain_altitude_scale
+                #)
                 altitude_rain_scale = (
-                    1. - normalized_altitude + params.rain_altitude_scale)
+                    params.rain_altitude_scale + 
+                    normalized_altitude * (1. - params.rain_altitude_scale)
+                )
                 # - where should it start raining
                 moisture_start_raining = (
-                    params.moisture_start_raining * altitude_rain_scale)
+                    params.moisture_start_raining *
+                    altitude_rain_scale *
+                    params.rain_downsample**2
+                )
                 start_raining = compare_grids(
                     moisture, moisture_start_raining, mode='>')
                 # - where should it stop raining
@@ -654,129 +836,204 @@ def make_landscape(
                 state = state.replace(
                     water=water, moisture=moisture, raining=raining)
             
-            # compute light change based on rotation of the sun
+            # light
             if params.include_light:
+                # - seasonal
                 light_strength = get_day_light_strength(t)
+                # - mask the terrain normals based on standing water which
+                #   is approximated to being flat everywhere in order to avoid
+                #   recomputing normals at each time step
+                standing_water_light = subsample_grid(
+                    standing_water, *state.light.shape[:2], preserve_mass=False)
+                terrain_normals = jnp.where(
+                    standing_water_light[..., None],
+                    jnp.array([0.,0.,1.], dtype=float_dtype),
+                    state.rock_normals,
+                )
+                # - light step
                 light = light_step(
                     params.steps_per_day,
-                    altitude, 
+                    terrain_normals, 
                     light_strength,
                     light_length,
                     t,
                     params.night_effect
                 )
-                light = light * (params.terrain_downsample**2)
+                light = grid_mean_to_sum(light, params.light_downsample)
+            
+                # - reduce light based on shade from clouds and rain
+                if params.include_rain:
+                    clouds = scale_grid(moisture, 1./moisture_start_raining)
+                    clouds = jnp.clip(clouds, min=0., max=1.)
+                    shade = 1. - (
+                        clouds*params.cloud_shade + raining*params.rain_shade)
+                    light = scale_grid(light, shade)
+                
                 state = state.replace(light=light)
             
-            # reduce light based on shade from clouds and rain
-            if params.include_rain:
-                clouds = scale_grid(moisture, 1./moisture_start_raining)
-                shade = 1. - (
-                    clouds*params.cloud_shade + raining*params.rain_shade)
-                light = scale_grid(light, shade)
-            
-            
+            # temperature
             if params.include_temperature:
-                # apply temperature gas dynamics
+                # - apply gas dynamics
                 key, temperature_key = jrng.split(key)
                 temperature = temperature_system.step(
                     temperature_key, state.temperature, wind=wind)
                 
-                # update the temperature based on the incoming light
-                # - compute the temperature blend
+                # - update the temperature based on the incoming light
+                # -- compute the temperature blend
                 temperature_alpha = jnp.where(
-                    standing_water,
+                    standing_water_light,
                     params.water_thermal_mass,
                     params.ground_thermal_mass,
                 )
-                # - compute the target temperature
-                a = normalized_altitude
-                temperature_baseline = (
-                    a * params.mountain_temperature_baseline +
-                    (1. - a) * params.sea_level_temperature_baseline
+                # -- compute the target temperature
+                # --- the temperature_baseline represents the temperature a
+                #     particular altitude should settle to with no incoming
+                #     light
+                light_shape = downsample_grid_shape(
+                    *params.world_size, params.light_downsample)
+                light_alpha = subsample_grid(normalized_altitude, *light_shape)
+                temperature_baseline = grid_mean_to_sum(
+                    light_alpha * params.mountain_temperature_baseline +
+                    (1. - light_alpha) * params.sea_level_temperature_baseline,
+                    params.terrain_downsample,
                 )
-                # - compute the heat absorption
+                # --- the heat_absorption represents how quickly the surface
+                #     is heated by incoming light
                 heat_absorption = jnp.where(
-                    standing_water,
+                    standing_water_light,
                     params.water_heat_absorption,
                     params.ground_heat_absorption,
                 )
-                # - correct for light not being full strength all day
+                # --- c is a correction factor due to the light not being full
+                #     strength all day
                 c = jnp.array((4./jnp.pi), dtype=float_dtype)
-                target_temperature = (
-                    temperature_baseline + c * light * heat_absorption)
+                target_temperature = add_grids(
+                    temperature_baseline,
+                    c * state.light * heat_absorption,
+                )
                 
-                # - interpolate between the current and target temperature
+                # -- interpolate between the current and target temperature
                 temperature = interpolate_grids(
                     temperature, target_temperature, temperature_alpha)
                 
-                # update state
+                # - update state
                 state = state.replace(temperature=temperature)
             
             return state
         
-        def render(state, downsample):
-            h = params.world_size[0]//downsample
-            w = params.world_size[1]//downsample
+        def render_rgb(
+            state,
+            shape,
+            spot_x=None,
+            spot_color=None,
+            use_light=True,
+        ):
+            h, w = shape
+            assert params.world_size[0] % h == 0
+            assert params.world_size[1] % w == 0
             
             # make everything rock colored
             rgb = jnp.full((h,w,3), ROCK_COLOR, dtype=float_dtype)
             
             # overlay water and ice
-            th, tw = state.temperature.shape
-            #temperature_scale = float(h/th)
-            water_color = jnp.where(
-                state.temperature[..., None] <= 0.,
-                ICE_COLOR,
-                WATER_COLOR,
-            )# * (temperature_scale**2)
-            
-            standing_water = (
-                downsample_grid(state.water[..., None], th, tw) >= (
+            if params.include_temperature:
+                th, tw = state.temperature.shape
+                water_color = jnp.where(
+                    state.temperature[..., None] <= 0.,
+                    ICE_COLOR,
+                    WATER_COLOR,
+                )
+                wh, ww = state.water.shape
+                water_color = upsample_grid(
+                    water_color, wh, ww, preserve_mass=False)
+            else:
+                water_color = jnp.full((*state.water.shape, 3), WATER_COLOR)
+            standing_water_threshold = (
                 params.min_standing_water * (params.terrain_downsample**2))
-            )
+            standing_water = (
+                state.water[..., None] >= standing_water_threshold)
             rgb = interpolate_grids(
                 rgb, water_color, ~standing_water, preserve_mass=False)
+            
             # apply the energy and biomass tint
-            # - compute resource_downsample here instead of using params
-            #   because when using this for reports, it may be downsampled
-            #   further
-            rh = state.energy.shape[0]
-            resource_downsample = params.world_size[0] // rh
-            
-            max_resource = resource_downsample**2
-            clipped_energy = jnp.clip(state.energy, min=0, max=max_resource)
-            clipped_biomass = jnp.clip(state.biomass, min=0, max=max_resource)
-            biomass_and_energy = jnp.minimum(
-                clipped_energy, clipped_biomass)
-            just_energy = clipped_energy - biomass_and_energy
-            just_biomass = clipped_biomass - biomass_and_energy
-            
+            energy = grid_sum_to_mean(
+                state.energy, params.resource_downsample)
+            energy = jnp.clip(energy, min=0, max=1)
+            biomass = grid_sum_to_mean(
+                state.biomass, params.resource_downsample)
+            biomass = jnp.clip(biomass, min=0, max=1)
+            biomass_and_energy = jnp.minimum(energy, biomass)
+            just_energy = energy - biomass_and_energy
+            just_biomass = biomass - biomass_and_energy
             rgb = add_grids(
                 rgb,
                 biomass_and_energy[..., None] * BIOMASS_AND_ENERGY_TINT,
-                #preserve_mass=False,
+                preserve_mass=False,
             )
             rgb = add_grids(
                 rgb,
                 just_energy[..., None] * ENERGY_TINT,
-                #preserve_mass=False,
+                preserve_mass=False,
             )
             rgb = add_grids(
                 rgb,
                 just_biomass[..., None] * BIOMASS_TINT,
-                #preserve_mass=False,
+                preserve_mass=False,
             )
             
-            #if object_x is not None:
-            #    rgb = rgb.at[object_x[..., 0], object_x[..., 1]].set(
-            #        object_color)
+            if spot_x is not None:
+                rgb_downsample = params.world_size[0] // h
+                rgb = write_grid_locations(
+                    rgb, spot_x, spot_color, rgb_downsample)
             
-            #light_scale = (params.world_size[0]/h)/(params.terrain_downsample)
-            #light_scale = light_scale**2
-            light_scale = 1./(params.terrain_downsample**2)
-            rgb = scale_grid(rgb, state.light[..., None]*light_scale)
-            rgb = np.array(jnp.clip(rgb, min=0., max=1.) * 255).astype(np.uint8)
+            if use_light:
+                light = grid_sum_to_mean(state.light, params.light_downsample)
+                rgb = scale_grid(rgb, light[..., None])
+            
+            return rgb
+        
+        def render_temperature(state, shape):
+            if params.include_temperature:
+                temperature = state.temperature[..., None]
+                temperature = grid_sum_to_mean(
+                    temperature, params.temperature_downsample)
+                hot = jnp.array([0.5, 0., 0.], dtype=float_dtype)
+                cold = jnp.array([0., 0., 0.5], dtype=float_dtype)
+                rgb = jnp.where(
+                    temperature >= 0.,
+                    temperature * hot,
+                    -temperature * cold,
+                )
+                rgb = set_grid_shape(rgb, *shape, preserve_mass=False)
+            else:
+                rgb = jnp.zeros((*shape, 3), dtype=float_dtype)
+            
+            return rgb
+        
+        def render_weather(state, shape):
+            if params.include_rain:
+                moisture = state.moisture[..., None]
+                moisture = grid_sum_to_mean(moisture, params.rain_downsample)
+                normalized_moisture = moisture / params.moisture_start_raining
+                normalized_moisture = jnp.clip(normalized_moisture, max=1.)
+                rain_color = jnp.array([0.25, 0.25, 1.], dtype=float_dtype)
+                rgb = jnp.where(
+                    state.raining[..., None], rain_color, normalized_moisture)
+                rgb = set_grid_shape(rgb, *shape, preserve_mass=False)
+            else:
+                rgb = jnp.zeros((*shape, 3), dtype=float_dtype)
+            
+            return rgb
+        
+        def render_altitude(state, shape):
+            normalized_altitude = compute_normalized_altitude(state)
+            normalized_altitude = set_grid_shape(
+                normalized_altitude, *shape, preserve_mass=False)
+            rgb = (
+                normalized_altitude[..., None] *
+                jnp.array([1., 1., 1.], dtype=float_dtype)
+            )
+            rgb = set_grid_shape(rgb, *shape, preserve_mass=False)
             
             return rgb
     

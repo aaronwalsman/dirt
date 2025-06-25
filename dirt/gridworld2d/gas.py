@@ -186,9 +186,10 @@ def make_gas(
         center_kernel = jnp.zeros(
             n, dtype=dtype).at[diffusion_radius].set(1.)
         box_kernel = jnp.full(n, 1./n, dtype=dtype)
+        effective_strength = diffusion_strength * (1./downsample**2)
         kernel = (
-            box_kernel * diffusion_strength +
-            center_kernel * (1. - diffusion_strength)
+            box_kernel * effective_strength +
+            center_kernel * (1. - effective_strength)
         )
         
         def diffusion_step(grid):

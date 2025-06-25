@@ -16,7 +16,8 @@ For both boundary and non-boundary terrain, water mass is the same in the test
 '''
 
 def calculate_flow(
-    total_height: jnp.ndarray, 
+    total_height: jnp.ndarray,
+    padded_height: jnp.ndarray, 
     water : jnp.ndarray, 
     direction : int,
     flow_rate : float
@@ -27,16 +28,23 @@ def calculate_flow(
     flow rate: fraction of water difference transfer between different areas 
     '''
     flow_rate = jnp.clip(flow_rate, 0., 0.25)
-    padded_height = jnp.pad(total_height, pad_width=1, mode='edge')
     
     if direction == 0:
         neighbor = padded_height[:-2, 1:-1]
+        #neighbor = jnp.roll(total_height, -1, axis=0)
+        #neighbor.at[-1].set(total_height[-1])
     elif direction == 1:
         neighbor = padded_height[2:, 1:-1]
+        #neighbor = jnp.roll(total_height, 1, axis=0)
+        #neighbor.at[0].set(total_height[0])
     elif direction == 2:
         neighbor = padded_height[1:-1, :-2]
+        #neighbor = jnp.roll(total_height, -1, axis=1)
+        #neighbor.at[:,-1].set(total_height[:,-1])
     elif direction == 3:
         neighbor = padded_height[1:-1, 2:]
+        #neighbor = jnp.roll(total_height, 1, axis=1)
+        #neighbor.at[:,0].set(total_height[:,0])
     else:
         raise ValueError("Invalid direction. Must be one of 'up(0)', 'down(1)', 'left(2)', 'right(3)'.")
 
@@ -57,15 +65,16 @@ def flow_step(
     Rate is input in the calculate function
     '''
     total_height = terrain + water
+    padded_height = jnp.pad(total_height, pad_width=1, mode='edge')
     
     # AARON NOTE: I added a divide by 4 in calculate flow above, which I THINK
     # means that we can compute the flows all at once without modifying water
     # and then update water all at once, which will remove biases based on
     # the order of directions
-    flow_up = calculate_flow(total_height, water, 0, flow_rate)
-    flow_down = calculate_flow(total_height, water, 1, flow_rate)
-    flow_left = calculate_flow(total_height, water, 2, flow_rate)
-    flow_right = calculate_flow(total_height, water, 3, flow_rate)
+    flow_up = calculate_flow(total_height, padded_height, water, 0, flow_rate)
+    flow_down = calculate_flow(total_height, padded_height, water, 1, flow_rate)
+    flow_left = calculate_flow(total_height, padded_height, water, 2, flow_rate)
+    flow_right = calculate_flow(total_height, padded_height, water, 3, flow_rate)
     water = water - flow_up + jnp.pad(flow_up, ((0, 1), (0, 0)))[1:, :]
     water = water - flow_down + jnp.pad(flow_down, ((1, 0), (0, 0)))[:-1, :]
     water = water - flow_left + jnp.pad(flow_left, ((0, 0), (0, 1)))[:, 1:]
