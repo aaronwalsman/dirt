@@ -169,11 +169,13 @@ class LandscapeParams:
     include_resources : bool = True
     resource_downsample : int = 2
     # - energy
-    initial_energy_site_density : float = (1./16.)
+    initial_energy_site_density : float = (1./4.)
     initial_energy_per_site : float = 1.
     # - biomass
-    initial_biomass_site_density : float = (1./16.)
+    initial_biomass_site_density : float = (1./4.)
     initial_biomass_per_site : float = 1.
+    biomass_photosynthesis : float = 0.001
+    photosynthesis_energy_per_biomass : float = 1.
     
     # smell
     include_smell: bool = True
@@ -260,7 +262,7 @@ def make_landscape(
         temperature_system = make_gas(
             params.world_size,
             downsample=params.temperature_downsample,
-            initial_value=initial_temperature,
+            initial_value=jnp.array(initial_temperature, dtype=float_dtype),
             diffusion_radius=params.temperature_diffusion_radius,
             diffusion_strength=params.temperature_diffusion_strength,
             boundary='edge',
@@ -278,7 +280,7 @@ def make_landscape(
         moisture_system = make_gas(
             params.world_size,
             downsample=params.rain_downsample,
-            initial_value=params.initial_moisture,
+            initial_value=jnp.array(params.initial_moisture, dtype=float_dtype),
             diffusion_radius=params.moisture_diffusion_radius,
             diffusion_strength=params.moisture_diffusion_strength,
             boundary='collect',
@@ -289,7 +291,6 @@ def make_landscape(
         rain_system = make_gas(
             params.world_size,
             downsample=params.rain_downsample,
-            initial_value=0,
             include_diffusion=False,
             boundary='clip',
             max_wind=max_wind,
@@ -302,7 +303,6 @@ def make_landscape(
             params.world_size,
             downsample=params.smell_downsample,
             cell_shape=(params.smell_channels,),
-            initial_value=0.,
             diffusion_radius=params.smell_diffusion_radius,
             diffusion_strength=params.smell_diffusion_strength,
             dissipation=params.smell_dissipation,
@@ -317,7 +317,6 @@ def make_landscape(
             params.world_size,
             downsample=params.audio_downsample,
             cell_shape=(params.audio_channels,),
-            initial_value=0.,
             diffusion_radius=params.audio_diffusion_radius,
             diffusion_strength=params.audio_diffusion_strength,
             dissipation=1.,
@@ -781,12 +780,6 @@ def make_landscape(
                 water = add_grids(water, rained)
                 
                 # compute raining (where to rain next)
-                #altitude_rain_scale = (
-                #    1. - normalized_altitude + params.rain_altitude_scale)
-                #altitude_rain_scale = (
-                #    normalized_altitude +
-                #    (1 - normalized_altitude) * params.rain_altitude_scale
-                #)
                 altitude_rain_scale = (
                     params.rain_altitude_scale + 
                     normalized_altitude * (1. - params.rain_altitude_scale)
@@ -822,8 +815,7 @@ def make_landscape(
                 raining = (
                     (raining & raining_neighbors > 3) | raining_neighbors > 6)
                 raining = raining.astype(jnp.bool)
-                
-                # apply rain gas dynamics
+                # - apply rain gas dynamics
                 key, rain_key = jrng.split(key)
                 raining = rain_system.step(rain_key, raining, wind=state.wind)
                 
@@ -918,6 +910,26 @@ def make_landscape(
                 
                 # - update state
                 state = state.replace(temperature=temperature)
+            
+            # resources
+            if params.include_resources:
+                if params.biomass_photosynthesis:
+                    add_energy_locations = (
+                        state.energy <
+                        state.biomass * params.photosynthesis_energy_per_biomass
+                    )
+                    photosynthesis_energy = scale_grid(
+                        state.biomass *
+                        params.biomass_photosynthesis,
+                        grid_sum_to_mean(state.light, params.light_downsample),
+                    )
+                    delta_energy = jnp.where(
+                        add_energy_locations,
+                        photosynthesis_energy,
+                        0.
+                    )
+                    energy = state.energy + delta_energy
+                    state = state.replace(energy=energy)
             
             return state
         

@@ -12,12 +12,13 @@ def make_gas(
     world_size,
     downsample=1,
     cell_shape=(),
-    initial_value=0.,
+    initial_value=None,
     diffusion_radius=1,
     diffusion_strength=1.,
+    downsample_diffusion_strength=False,
     dissipation=0.,
     boundary='clip',
-    empty_value=0.,
+    empty_value=None,
     include_diffusion=True,
     include_wind=True,
     wind_strength=1.,
@@ -31,6 +32,11 @@ def make_gas(
     grid_size = (*downsample_size, *cell_shape)
     
     max_wind_cells = int(math.ceil(max_wind / downsample))
+    
+    if initial_value is None:
+        initial_value = jnp.zeros((), dtype=dtype)
+    if empty_value is None:
+        empty_value = jnp.zeros((), dtype=dtype)
     
     if include_wind:
         def wind_step(key, grid, wind):
@@ -186,7 +192,10 @@ def make_gas(
         center_kernel = jnp.zeros(
             n, dtype=dtype).at[diffusion_radius].set(1.)
         box_kernel = jnp.full(n, 1./n, dtype=dtype)
-        effective_strength = diffusion_strength * (1./downsample**2)
+        if downsample_diffusion_strength:
+            effective_strength = diffusion_strength * (1./downsample**2)
+        else:
+            effective_strength = diffusion_strength
         kernel = (
             box_kernel * effective_strength +
             center_kernel * (1. - effective_strength)

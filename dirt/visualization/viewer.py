@@ -47,7 +47,7 @@ class Viewer:
         window_height=512,
         step_0 = 0,
         start_step=0,
-        terrain_texture_multiple=1,
+        terrain_texture_resolution=None,
         max_render_players=512,
         get_active_players=default_get_active_players,
         get_player_x=default_get_player_x,
@@ -103,7 +103,7 @@ class Viewer:
         )
         self._init_context_and_window(window_width, window_height)
         self._init_splendor_render()
-        self._init_landscape(terrain_texture_multiple)
+        self._init_landscape(terrain_texture_resolution)
         if self.get_active_players is not None:
             self._init_players(max_render_players)
         self._init_camera_and_lights()
@@ -156,11 +156,13 @@ class Viewer:
             [ 0, 0, 0, 1],
         ])
     
-    def _init_landscape(self, texture_multiple):
+    def _init_landscape(self, terrain_texture_resolution):
         self.terrain_map = self.get_terrain_map(self.params, self.report)
         h, w = self.terrain_map.shape
+        if terrain_texture_resolution is None:
+            terrain_texture_resolution = self.world_size
+        self.terrain_texture_resolution = terrain_texture_resolution
         self.mesh_spacing = self.world_size[0] / h
-        self.terrain_texture_size = h * texture_multiple, w * texture_multiple
         
         vertices, normals, uvs, faces = make_height_map_mesh(
             self.terrain_map, spacing=self.mesh_spacing)
@@ -180,7 +182,7 @@ class Viewer:
         self.renderer.load_texture(
             name='terrain_texture',
             texture_data=np.full(
-                (self.terrain_texture_size + (3,)),
+                (self.terrain_texture_resolution + (3,)),
                 127,
                 dtype=np.uint8,
             ),
@@ -637,7 +639,7 @@ class Viewer:
             texture = self.get_terrain_texture(
                 self.params,
                 self.report,
-                self.terrain_texture_size,
+                self.terrain_texture_resolution,
                 self.display_mode,
             )
             self.renderer.load_texture(

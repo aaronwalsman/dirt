@@ -94,7 +94,7 @@ def light_step(
     #dot_products_norm = get_normalize(dot_products)
     #light_strength = jnp.sin(time / 240 * jnp.pi) + 1
     #light_intensity = jnp.clip(dot_products_norm * light_strength, 0, 1)
-    light_intensity = dot_products
+    light_intensity = jnp.clip(dot_products, min=0.)
     return light_intensity
 
 
