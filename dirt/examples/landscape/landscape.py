@@ -1,4 +1,5 @@
 import time
+from typing import Tuple
 
 import numpy as np
 
@@ -22,6 +23,7 @@ class LandscapeExampleParams:
     
     output_directory : str = '.'
     visualize : bool = False
+    window_size : Tuple[int, int] = (512,512)
     
     landscape_params : LandscapeParams = LandscapeParams()
     
@@ -117,6 +119,7 @@ if __name__ == '__main__':
             example_report,
             [reports_path],
             params.landscape_params.world_size,
+            window_size=params.window_size,
             get_terrain_map = get_terrain,
             get_active_players = None,
             get_terrain_texture = get_texture,

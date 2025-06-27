@@ -43,8 +43,7 @@ class Viewer:
         example_report,
         report_files,
         world_size,
-        window_width=512,
-        window_height=512,
+        window_size=(512,512),
         step_0 = 0,
         start_step=0,
         terrain_texture_resolution=None,
@@ -101,7 +100,7 @@ class Viewer:
             step_0=step_0,
             start_step=start_step,
         )
-        self._init_context_and_window(window_width, window_height)
+        self._init_context_and_window(window_size[0], window_size[1])
         self._init_splendor_render()
         self._init_landscape(terrain_texture_resolution)
         if self.get_active_players is not None:

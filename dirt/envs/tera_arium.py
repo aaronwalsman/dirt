@@ -38,8 +38,6 @@ class TeraAriumParams:
     initial_players : int = 1024
     max_players : int = 16384
     
-    min_effective_water : float = 0.05
-    
     landscape : LandscapeParams = LandscapeParams()
     bugs : BugParams = BugParams()
 
@@ -64,11 +62,9 @@ class TeraAriumObservation:
     
     # single channel internal   
     health : jnp.ndarray
-    stomach : Consumable
-
-@static_data
-class TeraAriumTraits:
-    pass
+    water : jnp.ndarray
+    energy : jnp.ndarray
+    biomass : jnp.ndarray
 
 TeraAriumAction = BugAction
 TeraAriumTraits = BugTraits
@@ -78,15 +74,20 @@ def make_tera_arium(params : TeraAriumParams = TeraAriumParams()):
     landscape = make_landscape(params.landscape)
     bugs = make_bugs(params.bugs)
     
-    def init_state(
+    def init(
         key : chex.PRNGKey,
+        initial_players : int,
+        parent_traits : BugTraits,
+        bug_x : Optional[jnp.ndarray],
+        bug_r : Optional[jnp.ndarray],
     ) -> TeraAriumState :
         
         key, landscape_key = jrng.split(key)
         landscape_state = landscape.init(landscape_key)
         
         key, bug_key = jrng.split(key)
-        bug_state = init_bugs(bug_key)
+        bug_state = init_bugs(
+            bug_key, initial_players, parent_traits, x=bug_x, r=bug_r)
         
         state = TeraAriumState(landscape_state, bug_state)
         
@@ -96,6 +97,7 @@ def make_tera_arium(params : TeraAriumParams = TeraAriumParams()):
         key : chex.PRNGKey,
         state : TeraAriumState,
     ) -> TeraAriumObservation:
+        # TODO
         # player internal state
         
         # player external observation
@@ -108,10 +110,8 @@ def make_tera_arium(params : TeraAriumParams = TeraAriumParams()):
         traits : BugTraits,
     ) -> TeraAriumState :
         
-        next_state = state
-        
         # bugs
-        bug_state = next_state.bugs
+        bug_state = state.bugs
         
         max_players = state.bugs.family_tree.parents.shape[0]
         deaths = jnp.zeros(max_players, dtype=jnp.bool)
@@ -119,36 +119,45 @@ def make_tera_arium(params : TeraAriumParams = TeraAriumParams()):
         # - eat
         #   do this before anything else happens so that the food an agent
         #   observed in the last time step is still in the right location
-        # -- pull consumables out of the environment
-        next_landscape_state = next_state.landscape
-        landscape_consumable = landscape.get_consumable(
-            next_landscape_state, bug_state.x)
-        # -- eat
-        next_bug_state, leftovers = bugs.eat(
-            bug_state, landscape_consumable, action)
-        # -- put the leftovers back into the landscape
-        next_landscape_state = landscape.set_consumable(
-            next_landscape_state, bug_state.x, leftovers)
+        # -- pull resources out of the environment
+        landscape_state = state.landscape
+        landscape_state, bug_water = landscape.take_water(
+            landscape_state, bug_state.x)
+        landscape_state, bug_energy = landscape.take_energy(
+            landscape_state, bug_state.x)
+        landscape_state, bug_biomass = landscape.take_biomass(
+            landscape_state, bug_state.x)
+        # -- feed them to the bugs
+        bug_state, leftover_water, leftover_energy, leftover_biomass = bugs.eat(
+            bug_state, bug_water, bug_energy, bug_biomass)
+        # -- put the leftovers back in the environment
+        landscape_state = landscape.add_water(
+            landscape_state, bug_state.x, leftover_water)
+        landscape_state = landscape.add_energy(
+            landscape_state, bug_state.x, leftover_energy)
+        landscape_state = landscape.add_biomass(
+            landscape_state, bug_state.x, leftover_biomass)
         
         # - fight
         pass
         
         # - move bugs
-        next_bug_state = bugs.move(next_bug_state, action)
+        next_bug_state = bugs.move(bug_state, action)
         
         # - metabolize and reproduce
-        next_bug_state, expelled, expelled_locations = bug_metabolism(
+        # TODO: does this need to be all in the same place?
+        bug_state, expelled_water, expelled_energy, expelled_biomass, expelled_locations = bug_metabolism(
             bug_state,
             action,
             next_bug_state,
             traits,
-            next_landscape_state.terrain,
-            next_landscape_state.water,
-            next_landscape_state.light,
+            landscape_state.terrain,
+            landscape_state.water,
+            landscape_state.light,
         )
         # -- put the expelled resources back into the landscape
-        next_landscape_state = landscape.add_consumable(
-            next_landscape_state, expelled_locations, expelled)
+        #next_landscape_state = landscape.add_consumable(
+        #    next_landscape_state, expelled_locations, expelled)
         
         # natural landscape processes
         key, landscape_key = jrng.split(key)
