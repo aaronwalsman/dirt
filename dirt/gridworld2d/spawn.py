@@ -1,5 +1,5 @@
 import math
-from typing import Tuple, Optional
+from typing import Tuple, Optional, Union
 
 import jax
 import jax.numpy as jnp
@@ -35,7 +35,7 @@ def poisson_vector(
 
 def uniform_grid(
     key : chex.PRNGKey,
-    p_spawn : float | jnp.ndarray,
+    p_spawn : Union[float, jnp.ndarray],
     world_size : jnp.ndarray,
 ) -> jnp.ndarray :
     '''
