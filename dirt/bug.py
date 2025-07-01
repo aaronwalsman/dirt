@@ -13,6 +13,7 @@ from dirt.constants import (
     DEFAULT_FLOAT_DTYPE, DEFAULT_BUG_COLOR, PHOTOSYNTHESIS_COLOR)
 import dirt.gridworld2d.dynamics as dynamics
 import dirt.gridworld2d.spawn as spawn
+from dirt.distribution.stochastic_rounding import stochastic_rounding
 
 '''
 Rough notes:
@@ -144,60 +145,124 @@ class BugParams:
 @static_data
 class BugTraits:
     # brain
-    brain_size : float | jnp.ndarray = 0.
+    brain_size : float | jnp.ndarray
     
     # body
     #body_size : jnp.ndarray
     
     # color
-    color : Tuple[float, float, float] | jnp.ndarray = DEFAULT_BUG_COLOR
+    color : Tuple[float, float, float] | jnp.ndarray
     
     # resources
-    photosynthesis : float | jnp.ndarray = 0.
+    photosynthesis : float | jnp.ndarray
     
     # sensing
-    view_distance : int | jnp.ndarray = 5
-    view_back_distance : int | jnp.ndarray = 0
-    view_width : int | jnp.ndarray = 5
-    view_sensitivity : float | jnp.ndarray = 1.
-    audio_sensitivity : float | jnp.ndarray = 1.
-    smell_sensitivity : float | jnp.ndarray = 1.
-    internal_sensitivity : float | jnp.ndarray = 1.
+    view_distance : int | jnp.ndarray
+    view_back_distance : int | jnp.ndarray
+    view_width : int | jnp.ndarray
+    view_sensitivity : float | jnp.ndarray
+    audio_sensitivity : float | jnp.ndarray
+    smell_sensitivity : float | jnp.ndarray
+    internal_sensitivity : float | jnp.ndarray
     
     # efficiency
-    max_climb : float | jnp.ndarray = 2.
-    climb_efficiency : float | jnp.ndarray = 1.
-    move_effciency : float | jnp.ndarray = 1.
+    max_climb : float | jnp.ndarray
+    climb_efficiency : float | jnp.ndarray
+    move_effciency : float | jnp.ndarray
     
     # stomach
-    max_water : float | jnp.ndarray = 1.
-    water_gulp : float | jnp.ndarray = 0.5
-    max_energy : float | jnp.ndarray = 2.
-    energy_gulp : float | jnp.ndarray = 0.5
-    max_biomass : float | jnp.ndarray = 5.
-    biomass_gulp : float | jnp.ndarray = 0.5
+    max_water : float | jnp.ndarray
+    water_gulp : float | jnp.ndarray
+    max_energy : float | jnp.ndarray
+    energy_gulp : float | jnp.ndarray
+    max_biomass : float | jnp.ndarray
+    biomass_gulp : float | jnp.ndarray
     
     # climate
-    insulation : float | jnp.ndarray = 0.
+    insulation : float | jnp.ndarray
     
     # armor
-    armor : float | jnp.ndarray = 0.
+    armor : float | jnp.ndarray
     
     # age
-    senescence : float | jnp.ndarray = 0.999
+    senescence : float | jnp.ndarray
     
     # health
-    healing_rate : float | jnp.ndarray = 0.1
+    healing_rate : float | jnp.ndarray
     
     # reproduction
-    newborn_energy : float | jnp.ndarray = 1.0
-    newborn_biomass : float | jnp.ndarray = 1.0
-    newborn_water : float | jnp.ndarray = 0.5
-    newborn_color : Tuple[float, float, float] | jnp.ndarray = DEFAULT_BUG_COLOR
+    newborn_energy : float | jnp.ndarray
+    newborn_biomass : float | jnp.ndarray
+    newborn_water : float | jnp.ndarray
+    newborn_color : Tuple[float, float, float] | jnp.ndarray
     
     # actions
     movement_primitives : jnp.ndarray
     attack_primitives : jnp.ndarray
+    
+    @staticmethod
+    def default():
+        return BugTraits(
+            # brain
+            brain_size = 0.,
+            
+            # color
+            color = DEFAULT_BUG_COLOR,
+            
+            # resources
+            photosynthesis = 0.,
+            
+            # sensing
+            view_distance = 5,
+            view_back_distance = 0,
+            view_width = 5,
+            view_sensitivity = 1.,
+            audio_sensitivity = 1.,
+            smell_sensitivity = 1.,
+            internal_sensitivity = 1.,
+            
+            # efficiency
+            max_climb = 2.,
+            climb_efficiency = 1.,
+            move_effciency = 1.,
+            
+            # stomach
+            max_water = 1.,
+            water_gulp = 0.5,
+            max_energy = 2.,
+            energy_gulp = 0.5,
+            max_biomass = 5.,
+            biomass_gulp = 0.5,
+            
+            # climate
+            insulation = 0.,
+            
+            # armor
+            armor = 0.,
+            
+            # age
+            senescence = 0.999,
+            
+            # health
+            healing_rate = 0.1,
+            
+            # reproduction
+            newborn_energy = 1.0,
+            newborn_biomass = 1.0,
+            newborn_water = 0.5,
+            newborn_color = DEFAULT_BUG_COLOR,
+            
+            # actions
+            movement_primitives = jnp.array([
+                [1, 0, 0],
+                [0, 0,-1],
+                [0, 0, 1],
+            ], dtype=DEFAULT_FLOAT_DTYPE),
+            attack_primitives = jnp.zeros(
+                (),
+                dtype=DEFAULT_FLOAT_DTYPE,
+            ),
+        )
 
 '''
 @static_data
@@ -300,17 +365,17 @@ def make_bugs(
                 primitive_to_action_map.at[action_type, j].set(action_index))
             action_index += 1
     
-    # eat primitives
-    eat_primitive = 0
+    # resource primitives
+    resource_primitive = 0
     if params.include_water:
-        DRINK_WATER_PRIMITIVE = eat_primitive
-        eat_primitive += 1
+        WATER_PRIMITIVE = resource_primitive
+        resource_primitive += 1
     if params.include_energy:
-        EAT_ENERGY_PRIMITIVE = eat_primitive
-        eat_primitive += 1
+        ENERGY_PRIMITIVE = resource_primitive
+        resource_primitive += 1
     if params.include_biomass:
-        EAT_BIOMASS_PRIMITIVE = eat_primitive
-        eat_primitive += 1
+        BIOMASS_PRIMITIVE = resource_primitive
+        resource_primitive += 1
     
     @static_functions
     class Bugs:
@@ -387,20 +452,38 @@ def make_bugs(
             )
         
         def move(
+            key : chex.PRNGKey,
             state : BugState,
             action : int,
             traits : BugTraits,
         ):
+            # validate
+            assert (
+                params.movement_primitives ==
+                traits.movement_primitives.shape[0]
+            )
             
+            # compute the movement offset (dxr) for all bugs
+            action_type = action_to_primitive_map[action, 0]
+            action_primitive = action_to_primitive_map[action, 1]
+            move = action_type == MOVE_ACTION_TYPE
+            direction = jnp.where(
+                move[..., 1], traits.movement_primitives[action_primitive], 0)
+            dxr = stochastic_rounding(key, direction)
+            
+            # move the bugs
             active_bugs = family_tree.active(state.family_tree)
+            
             x, r, _, object_grid = dynamics.movement_step(
                 state.x,
                 state.r,
-                action.move,
+                dxr,
                 active=active_bugs,
                 check_collisions=True,
                 object_grid=state.object_grid,
             )
+            
+            # update state
             state = state.replace(x=x, r=r, object_grid=object_grid)
             
             return state
@@ -423,18 +506,23 @@ def make_bugs(
             
             # compute which bugs are eating anything
             eat = action_type == EAT_ACTION_TYPE
+            expell = action_type == EXPELL_ACTION_TYPE
             
             # water
             if params.include_water:
                 # - compute which bugs are drinking water
-                drink_water = eat & (action_primitive == DRINK_WATER_PRIMITIVE)
+                drink_water = eat & (action_primitive == WATER_PRIMITIVE)
+                expell_water = expell & (action_primitive == WATER_PRIMITIVE)
                 # - compute how much water each bug will consume
                 desired_water = drink_water * jnp.minimum(
                     traits.water_gulp, traits.max_water - state.water)
                 consumed_water = jnp.minimum(desired_water, water)
+                # - compute how much water each bug will expell
+                expelled_water = expell_water * jnp.minimum(
+                    traits.water_gulp, state.water)
                 # - compute the lefover water and the bugs' new water
-                leftover_water = water - consumed_water
-                new_water = state.water + consumed_water
+                leftover_water = water - consumed_water + expelled_water
+                new_water = state.water + consumed_water - expelled_water
                 # - update state
                 state = state.replace(water=new_water)
             else:
@@ -443,14 +531,18 @@ def make_bugs(
             # energy
             if params.include_energy:
                 # - compute which bugs are eating energy
-                eat_energy = eat & (action_primitive == EAT_ENERGY_PRIMITIVE)
+                eat_energy = eat & (action_primitive == ENERGY_PRIMITIVE)
+                expell_energy = expell & (action_primitive == ENERGY_PRIMITIVE)
                 # - compute how much energy each bug will consume
                 desired_energy = eat_energy * jnp.minimum(
                     traits.energy_gulp, traits.max_energy - state.energy)
-                consumed_energy = jnp.min(desired_energy, energy)
+                consumed_energy = jnp.minimum(desired_energy, energy)
+                # - compute how much energy each bug will expell
+                expelled_energy = expell_energy * jnp.minimum(
+                    traits.energy_gulp, state.energy)
                 # - compute the leftover energy and the bugs' new energy
-                leftover_energy = energy - consumed_energy
-                new_energy = state.energy + consumed_energy
+                leftover_energy = energy - consumed_energy + expelled_energy
+                new_energy = state.energy + consumed_energy - expelled_energy
                 # - update state
                 state = state.replace(energy=new_energy)
             else:
@@ -459,20 +551,32 @@ def make_bugs(
             # biomass
             if params.include_biomass:
                 # - compute which bugs are eating biomass
-                eat_biomass = eat & (action_primitive == EAT_BIOMASS_PRIMITIVE)
+                eat_biomass = eat & (action_primitive == BIOMASS_PRIMITIVE)
                 # - compute how much biomass each bug will consume
                 desired_biomass = eat_biomass * jnp.minimum(
                     traits.biomass_gulp, traits.max_biomass - state.biomass)
-                consumed_biomass = jnp.min(desired_biomass, biomass)
+                consumed_biomass = jnp.minimum(desired_biomass, biomass)
+                # - compute how much biomass each bug will expell
+                expelled_biomass = expell_biomass * jnp.minimum(
+                    traits.biomass_gulp, state.biomass)
                 # - compute the leftover biomass and the bugs' new energy
-                leftover_biomass = biomass - consumed_biomass
-                new_biomass = state.biomass + consumed_biomass
+                leftover_biomass = biomass - consumed_biomass + expelled_biomass
+                new_biomass = state.biomass + consumed_biomass -expelled_biomass
                 # - update state
                 state = state.replace(biomass=new_biomass)
             else:
                 leftover_biomass = None
             
             return state, leftover_water, leftover_energy, leftover_biomass
+        
+        def fight(
+            state : BugState,
+            action : int,
+            traits : BugTraits,
+        ):
+            # TODO
+            return state
+        
         '''
         def eat(
             state : BugState,
