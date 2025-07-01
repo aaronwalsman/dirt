@@ -190,6 +190,12 @@ if __name__ == '__main__':
         # - temporary random model
         init_population = lambda max_population_size : jnp.ones(
             max_population_size)
+        movement_primitives = jnp.array([
+            [1, 0, 0],
+            [0, 0, 0],
+            [0, 0, -1],
+            [0, 0, 1]
+        ], dtype=DEFAULT_FLOAT_DTYPE)
         model_traits = lambda state : TeraAriumTraits(
             body_size = jnp.ones(state.shape[0]),
             brain_size = jnp.ones(state.shape[0]),
@@ -199,15 +205,14 @@ if __name__ == '__main__':
                 dtype=DEFAULT_FLOAT_DTYPE
             ),
             photosynthesis = jnp.ones(state.shape[0]),
+            movement_primitives = movement_primitives
         )
         def model(key):
-            forward_key, rotate_key, eat_key = jrng.split(key, 3)
-            forward = jrng.choice(forward_key, jnp.array([0,1]))
-            rotate = jrng.choice(rotate_key, jnp.array([-1,0,1]))
+            move_key, eat_key = jrng.split(key, 2)
+            move = jrng.choice(move_key, model_traits.movement_primitives)
             eat = jrng.choice(eat_key, jnp.array([0,1]))
             return TeraAriumAction(
-                forward=forward,
-                rotate=rotate,
+                move=move,
                 bite=0,
                 eat=1,
                 reproduce=1,
