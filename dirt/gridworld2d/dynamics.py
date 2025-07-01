@@ -34,7 +34,7 @@ inverse_rotations = jnp.array([0,3,2,1])
 def rotate(
     x : jnp.ndarray,
     r : jnp.ndarray,
-    pivot : jnp.ndarray | int = 0,
+    pivot : Union[jnp.ndarray, int] = 0 # update this on my end since I have python 3.9
 ) -> jnp.ndarray :
     '''
     Rotates a position or direction x by a discrete rotation r about a pivot.
