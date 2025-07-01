@@ -188,6 +188,13 @@ Kinds of Actions:
 '''
 
 @static_data
+class BugAction:
+    move : jnp.ndarray
+    bite : jnp.ndarray
+    eat : jnp.ndarray
+    reproduce : jnp.ndarray
+
+@static_data
 class BugState:
     # location
     x : jnp.ndarray
@@ -338,12 +345,10 @@ def make_bugs(
         ):
             
             active_bugs = family_tree.active(state.family_tree)
-            x, r, _, object_grid = dynamics.forward_rotate_step(
+            x, r, _, object_grid = dynamics.movement_step(
                 state.x,
                 state.r,
-                #action.forward,
-                #action.rotate,
-                # REPLACE WITH ACTION PRIMITIVES
+                action.move,
                 active=active_bugs,
                 check_collisions=True,
                 object_grid=state.object_grid,

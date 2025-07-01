@@ -280,6 +280,19 @@ def forward_rotate_step(
     dx = jnp.stack((forward, jnp.zeros_like(forward)), axis=-1)
     return step(x0, r0, dx, rotate, space='local', **kwargs)
 
+def movement_step(
+    x0 : jnp.ndarray,
+    r0 : jnp.ndarray,
+    move : jnp.ndarray,
+    **kwargs
+) -> Tuple[jnp.ndarray, jnp.ndarray] :
+    forward = move[..., 0]
+    side = move[..., 1]
+    rotate = move[..., 2]
+    dx = jnp.stack((forward, side), axis=-1)
+    return step(x0, r0, dx, rotate, space='local', **kwargs)
+
+
 if __name__ == '__main__':
     x0 = jnp.array([
         [ 0, 1],
