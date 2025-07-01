@@ -1,4 +1,4 @@
-from typing import Tuple
+from typing import Tuple, Optional
 
 import jax
 import jax.numpy as jnp
@@ -6,7 +6,7 @@ import jax.random as jrng
 
 import chex
 
-from mechagogue.static import static_data
+from mechagogue.static import static_data, static_functions
 from mechagogue.dp.poeg import make_poeg
 
 from dirt.constants import (
@@ -16,15 +16,15 @@ from dirt.constants import (
     ENERGY_TINT,
     BIOMASS_TINT,
     BIOMASS_AND_ENERGY_TINT,
+    DEFAULT_FLOAT_DTYPE,
 )
-from dirt.envs.landscape import (
+from dirt.gridworld2d.landscape import (
     LandscapeParams,
     LandscapeState,
     make_landscape,
 )
 from dirt.bug import (
     BugParams,
-    BugAction,
     BugTraits,
     BugState,
     make_bugs,
@@ -37,6 +37,10 @@ class TeraAriumParams:
     
     initial_players : int = 1024
     max_players : int = 16384
+    
+    include_water : bool = True
+    include_energy : bool = True
+    include_biomass : bool = True
     
     landscape : LandscapeParams = LandscapeParams()
     bugs : BugParams = BugParams()
@@ -66,28 +70,26 @@ class TeraAriumObservation:
     energy : jnp.ndarray
     biomass : jnp.ndarray
 
-TeraAriumAction = BugAction
+#TeraAriumAction = BugAction
 TeraAriumTraits = BugTraits
 
-def make_tera_arium(params : TeraAriumParams = TeraAriumParams()):
+def make_tera_arium(
+    params : TeraAriumParams = TeraAriumParams(),
+    float_dtype=DEFAULT_FLOAT_DTYPE,
+):
     
-    landscape = make_landscape(params.landscape)
-    bugs = make_bugs(params.bugs)
+    landscape = make_landscape(params.landscape, float_dtype=float_dtype)
+    bugs = make_bugs(params.bugs, float_dtype=float_dtype)
     
-    def init(
+    def init_state(
         key : chex.PRNGKey,
-        initial_players : int,
-        parent_traits : BugTraits,
-        bug_x : Optional[jnp.ndarray],
-        bug_r : Optional[jnp.ndarray],
     ) -> TeraAriumState :
         
         key, landscape_key = jrng.split(key)
         landscape_state = landscape.init(landscape_key)
         
         key, bug_key = jrng.split(key)
-        bug_state = init_bugs(
-            bug_key, initial_players, parent_traits, x=bug_x, r=bug_r)
+        bug_state = bugs.init(bug_key)
         
         state = TeraAriumState(landscape_state, bug_state)
         
@@ -106,43 +108,61 @@ def make_tera_arium(params : TeraAriumParams = TeraAriumParams()):
     def transition(
         key : chex.PRNGKey,
         state : TeraAriumState,
-        action : BugAction,
+        action : int,
         traits : BugTraits,
     ) -> TeraAriumState :
         
         # bugs
         bug_state = state.bugs
         
-        max_players = state.bugs.family_tree.parents.shape[0]
-        deaths = jnp.zeros(max_players, dtype=jnp.bool)
+        #max_players = bugs_state.family_tree.parents.shape[0]
+        deaths = jnp.zeros(params.bugs.max_players, dtype=jnp.bool)
         
         # - eat
         #   do this before anything else happens so that the food an agent
         #   observed in the last time step is still in the right location
         # -- pull resources out of the environment
         landscape_state = state.landscape
-        landscape_state, bug_water = landscape.take_water(
-            landscape_state, bug_state.x)
-        landscape_state, bug_energy = landscape.take_energy(
-            landscape_state, bug_state.x)
-        landscape_state, bug_biomass = landscape.take_biomass(
-            landscape_state, bug_state.x)
+        if params.include_water:
+            landscape_state, bug_water = landscape.take_water(
+                landscape_state, bug_state.x)
+        else:
+            bug_water = None
+        if params.include_energy:
+            landscape_state, bug_energy = landscape.take_energy(
+                landscape_state, bug_state.x)
+        else:
+            bug_energy = None
+        if params.include_biomass:
+            landscape_state, bug_biomass = landscape.take_biomass(
+                landscape_state, bug_state.x)
+        else:
+            bug_biomass = None
         # -- feed them to the bugs
         bug_state, leftover_water, leftover_energy, leftover_biomass = bugs.eat(
-            bug_state, bug_water, bug_energy, bug_biomass)
+            bug_state,
+            action,
+            traits,
+            water=bug_water,
+            energy=bug_energy,
+            biomass=bug_biomass,
+        )
         # -- put the leftovers back in the environment
-        landscape_state = landscape.add_water(
-            landscape_state, bug_state.x, leftover_water)
-        landscape_state = landscape.add_energy(
-            landscape_state, bug_state.x, leftover_energy)
-        landscape_state = landscape.add_biomass(
-            landscape_state, bug_state.x, leftover_biomass)
+        if params.include_water:
+            landscape_state = landscape.add_water(
+                landscape_state, bug_state.x, leftover_water)
+        if params.include_energy:
+            landscape_state = landscape.add_energy(
+                landscape_state, bug_state.x, leftover_energy)
+        if params.include_biomass:
+            landscape_state = landscape.add_biomass(
+                landscape_state, bug_state.x, leftover_biomass)
         
         # - fight
-        pass
+        bug_state = bugs.fight(bug_state, action)
         
         # - move bugs
-        next_bug_state = bugs.move(bug_state, action)
+        next_bug_state = bugs.move(bug_state, action, traits)
         
         # - metabolize and reproduce
         # TODO: does this need to be all in the same place?
@@ -166,13 +186,13 @@ def make_tera_arium(params : TeraAriumParams = TeraAriumParams()):
         
         next_state = next_state.replace(
             landscape=next_landscape_state,
-            bugs=next_bug_state
+            bugs_state=next_bug_state
         )
         
         return next_state
     
     def active_players(state):
-        return active_bugs(state.bugs)
+        return bugs.active_players(state.bugs)
     
     def family_info(state):
         return bug_family_info(state.bugs)
@@ -234,5 +254,6 @@ def make_tera_arium(params : TeraAriumParams = TeraAriumParams()):
         init_state, transition, observe, active_players, family_info)
     
     game.render = staticmethod(render)
+    game.num_actions = bugs.num_actions
     
     return game

@@ -235,6 +235,48 @@ class LandscapeParams:
                 params.audio_downsample, params.world_size),
         )
 
+@static_data
+class LandscapeState:
+    
+    # time
+    time : int = 0
+    
+    # terrain
+    # - rock
+    rock : jnp.ndarray = None
+    rock_normals: jnp.ndarray = None
+    # -- erosion
+    erosion : jnp.ndarray = None
+    # - water
+    water : jnp.ndarray = None
+    water_source_locations : jnp.ndarray = None
+    water_sink_locations : jnp.ndarray = None
+    
+    # light
+    light: jnp.ndarray = None
+    
+    # weather
+    # - wind
+    wind : jnp.ndarray = None
+    # - temperature
+    temperature : jnp.ndarray = None
+    # - rain
+    # -- moisture
+    moisture : jnp.ndarray = None
+    # -- rain
+    raining : jnp.ndarray = None
+    
+    # resources
+    # - energy
+    energy : jnp.ndarray = None
+    # - biomass
+    biomass : jnp.ndarray = None
+    
+    # smell
+    smell: jnp.ndarray = None
+    # audio
+    audio: jnp.ndarray = None
+
 def make_landscape(
     params : LandscapeParams = LandscapeParams(),
     float_dtype : Any = DEFAULT_FLOAT_DTYPE,
@@ -347,52 +389,6 @@ def make_landscape(
         normalized_altitude = jnp.clip(normalized_altitude, 0., 1.)
         
         return normalized_altitude
-    
-    @static_data
-    class LandscapeState:
-        
-        # time
-        time : int = 0
-        
-        # terrain
-        # - rock
-        if params.include_rock:
-            rock : jnp.ndarray = None
-            rock_normals: jnp.ndarray = None
-            # -- erosion
-            if params.include_erosion:
-                erosion : jnp.ndarray = None
-        # - water
-        if params.include_water:
-            water : jnp.ndarray = None
-            water_source_locations : jnp.ndarray = None
-            water_sink_locations : jnp.ndarray = None
-        
-        # light
-        if params.include_light:
-            light: jnp.ndarray = None
-        
-        # weather
-        # - wind
-        wind : jnp.ndarray = None
-        # - temperature
-        temperature : jnp.ndarray = None
-        # - rain
-        # -- moisture
-        moisture : jnp.ndarray = None
-        # -- rain
-        raining : jnp.ndarray = None
-        
-        # resources
-        # - energy
-        energy : jnp.ndarray = None
-        # - biomass
-        biomass : jnp.ndarray = None
-        
-        # smell
-        smell: jnp.ndarray = None
-        # audio
-        audio: jnp.ndarray = None
     
     @static_functions
     class Landscape:
