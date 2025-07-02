@@ -24,15 +24,17 @@ class GasParams:
     visualize : bool = False
     
     world_size = (1024,1024)
-    downsample = 1
+    downsample = 4
     steps = 1000
     
     wind_std = 3
     wind_reversion = 0.1
     wind_bias = (0,0)
     
-    source_location = (1000,1000)
+    source_location = (100,100)
     source_rate = 1.
+    
+    boundary : str = 'clip'
 
 if __name__ == '__main__':
     
@@ -49,11 +51,14 @@ if __name__ == '__main__':
         jnp.array(params.wind_bias, dtype=float_dtype),
         dtype=float_dtype
     )
+    max_wind = int(params.wind_std * 3)
     
     gas = make_gas(
         world_size=params.world_size,
         downsample=params.downsample,
-        boundary='collect',
+        boundary=params.boundary,
+        cell_shape=(),
+        max_wind=max_wind,
     )
         
     params_path = f'{params.output_directory}/params.state'
@@ -61,8 +66,10 @@ if __name__ == '__main__':
     
     if params.visualize:
         example_gas_state = gas.init()
+        h,w = example_gas_state.shape[:2]
         
         def get_texture(report):
+            report = report.reshape(h,w,-1)[:,:,0]
             texture = jnp.stack((report, report, report), axis=-1)
             texture = np.array(jnp.clip(texture, 0, 1) * 255).astype(np.uint8)
             return texture
@@ -72,7 +79,7 @@ if __name__ == '__main__':
             params_path,
             example_gas_state,
             [reports_path],
-            get_terrain_map = lambda : jnp.zeros_like(example_gas_state),
+            get_terrain_map = lambda : jnp.zeros((h,w), dtype=float_dtype),
             get_active_players = None,
             get_terrain_texture = get_texture,
             get_water_map = None,

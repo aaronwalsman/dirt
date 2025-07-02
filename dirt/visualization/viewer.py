@@ -42,12 +42,11 @@ class Viewer:
         params_file,
         example_report,
         report_files,
-        window_width=512,
-        window_height=512,
+        world_size,
+        window_size=(512,512),
         step_0 = 0,
         start_step=0,
-        terrain_texture_multiple=1,
-        downsample_heightmap=1,
+        terrain_texture_resolution=None,
         max_render_players=512,
         get_active_players=default_get_active_players,
         get_player_x=default_get_player_x,
@@ -91,6 +90,8 @@ class Viewer:
             self.get_sun_direction = standardize_args(
                 get_sun_direction, ('params', 'report'))
         
+        self.world_size = world_size
+        
         self._init_params_and_reports(
             example_params,
             params_file,
@@ -98,11 +99,10 @@ class Viewer:
             report_files,
             step_0=step_0,
             start_step=start_step,
-            downsample_heightmap=downsample_heightmap,
         )
-        self._init_context_and_window(window_width, window_height)
+        self._init_context_and_window(window_size[0], window_size[1])
         self._init_splendor_render()
-        self._init_landscape(terrain_texture_multiple, downsample_heightmap)
+        self._init_landscape(terrain_texture_resolution)
         if self.get_active_players is not None:
             self._init_players(max_render_players)
         self._init_camera_and_lights()
@@ -122,7 +122,6 @@ class Viewer:
         report_files,
         step_0,
         start_step,
-        downsample_heightmap,
     ):
         self.step_0 = step_0
         self.current_step = start_step
@@ -137,8 +136,6 @@ class Viewer:
         self.reports_per_block = tree_len(self.current_report_block)
         
         self.step_N = step_0 + len(report_files) * self.reports_per_block
-        
-        self.downsample_heightmap = downsample_heightmap
     
     def _init_context_and_window(self, window_width, window_height):
         glfw_context.initialize()
@@ -158,14 +155,16 @@ class Viewer:
             [ 0, 0, 0, 1],
         ])
     
-    def _init_landscape(self, texture_multiple, downsample_heightmap):
+    def _init_landscape(self, terrain_texture_resolution):
         self.terrain_map = self.get_terrain_map(self.params, self.report)
         h, w = self.terrain_map.shape
-        self.world_size = (h*downsample_heightmap, w*downsample_heightmap)
-        self.terrain_texture_size = h * texture_multiple, w * texture_multiple
+        if terrain_texture_resolution is None:
+            terrain_texture_resolution = self.world_size
+        self.terrain_texture_resolution = terrain_texture_resolution
+        self.mesh_spacing = self.world_size[0] / h
         
         vertices, normals, uvs, faces = make_height_map_mesh(
-            self.terrain_map, spacing=self.downsample_heightmap)
+            self.terrain_map, spacing=self.mesh_spacing)
         self.terrain_uvs = uvs
         self.terrain_faces = faces
         self.renderer.load_mesh(
@@ -182,7 +181,7 @@ class Viewer:
         self.renderer.load_texture(
             name='terrain_texture',
             texture_data=np.full(
-                (self.terrain_texture_size + (3,)),
+                (self.terrain_texture_resolution + (3,)),
                 127,
                 dtype=np.uint8,
             ),
@@ -211,7 +210,7 @@ class Viewer:
                 self.water_uvs,
                 self.water_faces,
             ) = make_height_map_mesh(
-                self.total_height_map, spacing=self.downsample_heightmap)
+                self.total_height_map, spacing=mesh_spacing)
             self.renderer.load_mesh(
                 name='water_mesh',
                 mesh_data={
@@ -639,7 +638,7 @@ class Viewer:
             texture = self.get_terrain_texture(
                 self.params,
                 self.report,
-                self.terrain_texture_size,
+                self.terrain_texture_resolution,
                 self.display_mode,
             )
             self.renderer.load_texture(
@@ -653,7 +652,7 @@ class Viewer:
                 terrain_vertices,
                 terrain_normals,
             ) = make_height_map_vertices_and_normals(
-                self.terrain_map, spacing=self.downsample_heightmap)
+                self.terrain_map, spacing=self.mesh_spacing)
             self.renderer.load_mesh(
                 name='terrain_mesh',
                 mesh_data={
@@ -671,7 +670,7 @@ class Viewer:
                 water_vertices,
                 water_normals,
             ) = make_height_map_vertices_and_normals(
-                self.total_height_map, spacing=self.downsample_heightmap)
+                self.total_height_map, spacing=self.mesh_spacing)
             self.renderer.load_mesh(
                 name='water_mesh',
                 mesh_data={
@@ -688,8 +687,8 @@ class Viewer:
     
     def _player_transform(self, player_x, player_r):
         height, width = self.world_size
-        zy = player_x[..., 0] // self.downsample_heightmap
-        zx = player_x[..., 1] // self.downsample_heightmap
+        zy = player_x[..., 0] // self.mesh_spacing
+        zx = player_x[..., 1] // self.mesh_spacing
         z = self.total_height_map[zy, zx] + PLAYER_RADIUS
         y = player_x[..., 0] - height/2.  #y - height/2.
         x = player_x[..., 1] - width/2. #x - width/2.

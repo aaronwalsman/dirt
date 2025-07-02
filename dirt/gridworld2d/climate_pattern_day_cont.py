@@ -71,7 +71,8 @@ def get_normalize(
 
 def light_step(
     day_length: int,
-    altitude: jnp.array,
+    #altitude: jnp.array,
+    normals : jnp.array,
     light_strength: float,
     day_light_length: int,
     time: int,
@@ -85,13 +86,15 @@ def light_step(
     Get the Idea from website: https://learnopengl.com/Lighting/Basic-Lighting
     '''
     angle = get_angle(day_length, day_light_length, time)
-    light_direction = jnp.array([jnp.cos(angle), jnp.sin(angle), 0.0])
-    normals = terrain_gradient(altitude)
+    #light_direction = jnp.array([jnp.cos(angle), jnp.sin(angle), 0.0])
+    light_direction = jnp.array([jnp.cos(angle), 0., jnp.sin(angle)])
+    #normals = terrain_gradient(altitude)
     light_direction = light_direction.reshape(1, 1, 3)
     dot_products = jnp.einsum('ijk,ijk->ij', normals, light_direction)
-    dot_products_norm = get_normalize(dot_products)
-    light_strength = jnp.sin(time / 240 * jnp.pi) + 1
-    light_intensity = jnp.clip(dot_products_norm * light_strength, 0, 1)
+    #dot_products_norm = get_normalize(dot_products)
+    #light_strength = jnp.sin(time / 240 * jnp.pi) + 1
+    #light_intensity = jnp.clip(dot_products_norm * light_strength, 0, 1)
+    light_intensity = jnp.clip(dot_products, min=0.)
     return light_intensity
 
 
