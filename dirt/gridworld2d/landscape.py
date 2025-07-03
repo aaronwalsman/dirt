@@ -209,6 +209,8 @@ class LandscapeParams:
         if params.include_rain:
             assert params.include_temperature, (
                 '"include_rain" requires "include_temperature"')
+            assert params.include_water, (
+                '"include_rain" requires "include_water"')
         
         if params.include_light:
             light_downsample = max(
@@ -377,6 +379,7 @@ def make_landscape(
         params.world_size[0] * params.world_size[1]
     )
     
+    '''
     def compute_normalized_altitude(state):
         altitude = jnp.zeros((), dtype=float_dtype)
         if params.include_rock:
@@ -389,6 +392,7 @@ def make_landscape(
         normalized_altitude = jnp.clip(normalized_altitude, 0., 1.)
         
         return normalized_altitude
+    '''
     
     @static_functions
     class Landscape:
@@ -539,8 +543,9 @@ def make_landscape(
                     params.world_size,
                 )
                 energy = (
-                    energy_sites * params.initial_energy_per_site
-                ).astype(float_dtype)
+                    energy_sites *
+                    jnp.array(params.initial_energy_per_site, dtype=float_dtype)
+                )
                 energy = downsample_grid(energy, *resource_size)
                 state = state.replace(energy=energy)
             
@@ -553,8 +558,9 @@ def make_landscape(
                     params.world_size,
                 )
                 biomass = (
-                    biomass_sites * params.initial_biomass_per_site
-                ).astype(float_dtype)
+                    biomass_sites *
+                    jnp.array(params.initial_biomass_per_site,dtype=float_dtype)
+                )
                 biomass = downsample_grid(biomass, *resource_size)
                 state = state.replace(biomass=biomass)
             
@@ -584,6 +590,21 @@ def make_landscape(
             water, value = take_from_grid_locations(
                 state.water, x, take, params.terrain_downsample)
             return state.replace(water=water), value
+        
+        # get/add/take moisture
+        def get_moisture(state, x):
+            return read_grid_locations(
+                state.moisture, x, params.rain_downsample)
+        
+        def add_moisture(state, x, value):
+            moisture = add_to_grid_locations(
+                state.moisture, x, value, params.rain_downsample)
+            return state.replace(moisture=moisture)
+        
+        def take_moisture(state, x, take=None):
+            moisture, value = take_from_grid_locations(
+                state.moisture, x, take, params.rain_downsample)
+            return state.replace(moisture=moisture),  value
         
         # get/add/take energy
         def get_energy(state, x):
@@ -615,6 +636,25 @@ def make_landscape(
                 state.biomass, x, take, params.resource_downsample)
             return state.replace(biomass=biomass), value
         
+        # get altitude
+        def get_altitude(state):
+            altitude = jnp.zeros((), dtype=float_dtype)
+            if params.include_rock:
+                altitude += state.rock
+            if params.include_water:
+                altitude += state.water
+            altitude = grid_sum_to_mean(altitude, params.terrain_downsample)
+            
+            return altitude
+        
+        def get_normalized_altitude(state):
+            altitude = Landscape.get_altitude(state)
+            normalized_altitude = (
+                (altitude - params.sea_level) / params.max_effective_altitude)
+            normalized_altitude = jnp.clip(normalized_altitude, 0., 1.)
+            
+            return normalized_altitude
+        
         def step(
             key : chex.PRNGKey,
             state : LandscapeState,
@@ -624,7 +664,7 @@ def make_landscape(
             t = state.time + 1
             state = state.replace(time=t)
             
-            light_length = get_day_light_length(t)
+            light_length = get_day_light_length(t).astype(float_dtype)
             day_status = get_day_status(params.steps_per_day, light_length, t)
             
             # water
@@ -633,8 +673,8 @@ def make_landscape(
                 if params.include_temperature:
                     flow_rate = jnp.where(
                         state.temperature > 0.,
-                        params.water_flow_rate,
-                        params.ice_flow_rate,
+                        jnp.array(params.water_flow_rate, dtype=float_dtype),
+                        jnp.array(params.ice_flow_rate, dtype=float_dtype),
                     )
                 else:
                     flow_rate = jnp.full(
@@ -668,10 +708,14 @@ def make_landscape(
                         #    and sinks
                         num_sinks_unfrozen = sinks_unfrozen.sum()
                         num_sources_unfrozen = sources_unfrozen.sum()
+                        water_sink_flow = jnp.array(
+                            params.water_sink_flow, dtype=float_dtype)
+                        water_source_flow = jnp.array(
+                            params.water_source_flow, dtype=float_dtype)
                         total_source_take = jnp.minimum(
-                            num_sinks_unfrozen * params.water_sink_flow,
-                            num_sources_unfrozen * params.water_source_flow,
-                        ).astype(float_dtype)
+                            num_sinks_unfrozen * water_sink_flow,
+                            num_sources_unfrozen * water_source_flow,
+                        )
                         sink_take = jnp.where(
                             sinks_unfrozen,
                             total_source_take / num_sinks_unfrozen,
@@ -737,7 +781,7 @@ def make_landscape(
                 state = state.replace(rock=rock, erosion=erosion)
             
             # compute altitude
-            normalized_altitude = compute_normalized_altitude(state)
+            normalized_altitude = Landscape.get_normalized_altitude(state)
             
             # wind
             if params.include_wind:
@@ -771,7 +815,10 @@ def make_landscape(
                 
                 # compute rain (moisture -> water)
                 rain_ammount = jnp.where(
-                    state.raining, params.rain_per_step, 0.)
+                    state.raining,
+                    jnp.array(params.rain_per_step, dtype=float_dtype),
+                    jnp.array(0., dtype=float_dtype),
+                )
                 moisture, rained = take_grids(moisture, rain_ammount)
                 water = add_grids(water, rained)
                 
@@ -827,7 +874,7 @@ def make_landscape(
             # light
             if params.include_light:
                 # - seasonal
-                light_strength = get_day_light_strength(t)
+                light_strength = get_day_light_strength(t).astype(float_dtype)
                 # - mask the terrain normals based on standing water which
                 #   is approximated to being flat everywhere in order to avoid
                 #   recomputing normals at each time step
@@ -889,8 +936,8 @@ def make_landscape(
                 #     is heated by incoming light
                 heat_absorption = jnp.where(
                     standing_water_light,
-                    params.water_heat_absorption,
-                    params.ground_heat_absorption,
+                    jnp.array(params.water_heat_absorption, dtype=float_dtype),
+                    jnp.array(params.ground_heat_absorption, dtype=float_dtype),
                 )
                 # --- c is a correction factor due to the light not being full
                 #     strength all day
@@ -921,8 +968,8 @@ def make_landscape(
                     )
                     delta_energy = jnp.where(
                         add_energy_locations,
-                        photosynthesis_energy,
-                        0.
+                        jnp.array(photosynthesis_energy, dtype=float_dtype),
+                        jnp.array(0., dtype=float_dtype)
                     )
                     energy = state.energy + delta_energy
                     state = state.replace(energy=energy)
@@ -1034,7 +1081,7 @@ def make_landscape(
             return rgb
         
         def render_altitude(state, shape):
-            normalized_altitude = compute_normalized_altitude(state)
+            normalized_altitude = Landscape.get_normalized_altitude(state)
             normalized_altitude = set_grid_shape(
                 normalized_altitude, *shape, preserve_mass=False)
             rgb = (

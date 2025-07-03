@@ -5,6 +5,7 @@ import jax.numpy as jnp
 import jax.random as jrng
 
 from dirt.constants import DEFAULT_FLOAT_DTYPE
+from dirt.distribution.stochastic_rounding import stochastic_rounding
 
 from mechagogue.static import static_data, static_functions
 
@@ -44,10 +45,11 @@ def make_gas(
             # correct grid resolution
             wind = jnp.clip(wind * wind_strength, -max_wind, max_wind)
             downsampled_wind = wind / downsample
-            wind_lo = jnp.floor(downsampled_wind).astype(jnp.int32)
-            wind_hi = jnp.ceil(downsampled_wind).astype(jnp.int32)
-            rounding = jrng.bernoulli(key, downsampled_wind-wind_lo)
-            discrete_wind = jnp.where(rounding, wind_hi, wind_lo)
+            #wind_lo = jnp.floor(downsampled_wind).astype(jnp.int32)
+            #wind_hi = jnp.ceil(downsampled_wind).astype(jnp.int32)
+            #rounding = jrng.bernoulli(key, downsampled_wind-wind_lo)
+            #discrete_wind = jnp.where(rounding, wind_hi, wind_lo)
+            discrete_wind = stochastic_rounding(key, downsampled_wind)
             
             # apply the discrete_wind offset
             if boundary == 'roll':

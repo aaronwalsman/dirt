@@ -115,9 +115,6 @@ def make_tera_arium(
         # bugs
         bug_state = state.bugs
         
-        #max_players = bugs_state.family_tree.parents.shape[0]
-        deaths = jnp.zeros(params.bugs.max_players, dtype=jnp.bool)
-        
         # - eat
         #   do this before anything else happens so that the food an agent
         #   observed in the last time step is still in the right location
@@ -138,7 +135,7 @@ def make_tera_arium(
                 landscape_state, bug_state.x)
         else:
             bug_biomass = None
-        # -- feed them to the bugs
+        # -- feed the resources to the bugs
         bug_state, leftover_water, leftover_energy, leftover_biomass = bugs.eat(
             bug_state,
             action,
@@ -158,16 +155,46 @@ def make_tera_arium(
             landscape_state = landscape.add_biomass(
                 landscape_state, bug_state.x, leftover_biomass)
         
+        # - photosynthesis
+        bug_light = grid.read_grid_locations(
+            state.landscape.light,
+            bug_state.x,
+            params.landscape.light_downsample,
+        )
+        bug_state = bugs.photosynthesis(bug_state, traits, bug_light)
+        
+        # - heal
+        bug_state = bugs.heal(bug_state, traits)
+        
+        # - metabolism
+        bug_state = bugs.metabolism(bug_state, traits)
+        
         # - fight
-        bug_state = bugs.fight(bug_state, action)
+        bug_state = bugs.fight(bug_state, action, traits)
         
         # - move bugs
-        next_bug_state = bugs.move(bug_state, action, traits)
+        key, move_key = jrng.split(key)
+        altitude = landscape.get_altitude(landscape_state)
+        next_bug_state, evaporated_water = bugs.move(
+            move_key,
+            bug_state,
+            action,
+            traits,
+            altitude,
+            params.landscape.terrain_downsample,
+        )
+        # -- add evaporated water to the atmosphere
+        if params.landscape.include_rain:
+            landscape_state = landscape.add_moisture(
+                landscape_state, bug_state.x, evaporated_water)
+        elif params.landscape.include_water:
+            landscape_state = landscape.add_water(
+                landscape_state, bug_state.x, evaporated_water)
         
         # - metabolize and reproduce
         # TODO: does this need to be all in the same place?
         bug_state, expelled_water, expelled_energy, expelled_biomass, expelled_locations = bug_metabolism(
-            bug_state,
+            state.bugs,
             action,
             next_bug_state,
             traits,

@@ -1,6 +1,6 @@
 import jax.numpy as jnp
 
-DEFAULT_FLOAT_DTYPE = jnp.float32
+DEFAULT_FLOAT_DTYPE = jnp.float16
 
 ROCK_COLOR = jnp.array(
     [0.5, 0.5, 0.5], dtype=DEFAULT_FLOAT_DTYPE)
@@ -17,4 +17,5 @@ DEFAULT_BUG_COLOR = jnp.array(
 
 ENERGY_TINT = jnp.array([0.25, 0.25, 0.], dtype=DEFAULT_FLOAT_DTYPE)
 BIOMASS_TINT = jnp.array([0, -0.125, -0.25], dtype=DEFAULT_FLOAT_DTYPE)
-BIOMASS_AND_ENERGY_TINT = jnp.array([-0.125, 0.125, -0.125], dtype=DEFAULT_FLOAT_DTYPE)
+BIOMASS_AND_ENERGY_TINT = jnp.array(
+    [-0.125, 0.125, -0.125], dtype=DEFAULT_FLOAT_DTYPE)

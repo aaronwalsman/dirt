@@ -191,7 +191,7 @@ def compare_grids(a, b, mode='<'):
     
     return blocks_to_grid(result)
 
-def read_grid_locations(a, x, downsample):
+def read_grid_locations(a, x, downsample, downsample_scale=True):
     '''
     Read values from specific locations (x) in a downsampled grid (a). The
     downsampled grid values represent the sum of quantities from a higher
@@ -199,7 +199,9 @@ def read_grid_locations(a, x, downsample):
     downsample ratio.
     '''
     xd = x // downsample
-    value = a[xd[...,0], xd[...,1]] / (downsample**2)
+    value = a[xd[...,0], xd[...,1]]
+    if downsample_scale:
+        value /= (downsample**2)
     return value
 
 def write_grid_locations(a, x, value, downsample, overwrite_all=False):

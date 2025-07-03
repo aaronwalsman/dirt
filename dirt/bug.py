@@ -13,6 +13,7 @@ from dirt.constants import (
     DEFAULT_FLOAT_DTYPE, DEFAULT_BUG_COLOR, PHOTOSYNTHESIS_COLOR)
 import dirt.gridworld2d.dynamics as dynamics
 import dirt.gridworld2d.spawn as spawn
+import dirt.gridworld2d.grid as grid
 from dirt.distribution.stochastic_rounding import stochastic_rounding
 
 '''
@@ -105,15 +106,24 @@ class BugParams:
     zero_water_damage : float = 0.1
     
     # energy costs
-    body_size_energy_cost : float = 0.01
+    # - resting
+    resting_energy_cost : float = 0.01
+    # - brain
     brain_size_energy_cost : float = 0.01
+    # - movement
     move_energy_cost : float = 0.01
     climb_energy_cost : float = 0.01
+    # - reproduction
     birth_energy_cost : float = 0.01
+    # - color
     color_change_energy_cost : float = 0.01
     
+    # water costs
+    move_water_cost : float = 0.01
+    climb_water_cost : float = 0.01
+    
     # biomass requirements
-    # TODO
+    # TODO (Vincent) : biomass requirements for various traits goes here
     
     # mass
     biomass_mass : float = 1.
@@ -127,8 +137,14 @@ class BugParams:
     odor_primitives : int = 1
     audio_primitives : int = 1
     
+    # health
+    #max_hp_per_mass : float = 10.
+    hp_per_armor : float = 10.
+    hp_healed_per_energy : float = 10.
+    energy_underpayment_damage : float = 10.
+    
     # initialization
-    initial_health : float = 1.
+    initial_hp : float = 10.
     initial_water : float = 0.1
     initial_energy : float = 1.
     initial_biomass : float = 1.0
@@ -188,6 +204,7 @@ class BugTraits:
     senescence : float | jnp.ndarray
     
     # health
+    max_hp : float | jnp.ndarray
     healing_rate : float | jnp.ndarray
     
     # reproduction
@@ -244,7 +261,8 @@ class BugTraits:
             senescence = 0.999,
             
             # health
-            healing_rate = 0.1,
+            max_hp = 10.
+            healing_rate = 1.,
             
             # reproduction
             newborn_energy = 1.0,
@@ -258,31 +276,30 @@ class BugTraits:
                 [0, 0,-1],
                 [0, 0, 1],
             ], dtype=DEFAULT_FLOAT_DTYPE),
+            # TODO (Chase) : Come up with good defaults here
             attack_primitives = jnp.zeros(
                 (),
                 dtype=DEFAULT_FLOAT_DTYPE,
             ),
         )
 
-'''
-@static_data
-class BugAction:
-    forward : jnp.ndarray
-    rotate : jnp.ndarray
-    bite : jnp.ndarray
-    eat : jnp.ndarray
-    reproduce : jnp.ndarray
-
-Kinds of Actions:
-    Movement
-    Attack
-    Eat
-    Expell
-    Scent-mark
-    Call
-    Change Level
-    Reproduce
-'''
+#@static_data
+#class BugAction:
+#    forward : jnp.ndarray
+#    rotate : jnp.ndarray
+#    bite : jnp.ndarray
+#    eat : jnp.ndarray
+#    reproduce : jnp.ndarray
+#
+#Kinds of Actions:
+#    Movement
+#    Attack
+#    Eat
+#    Expell
+#    Scent-mark
+#    Call
+#    Change Level
+#    Reproduce
 
 @static_data
 class BugAction:
@@ -301,8 +318,10 @@ class BugState:
     # age
     age : jnp.ndarray
     
+    # health
+    hp : jnp.ndarray
+    
     # resources
-    health : jnp.ndarray
     water : jnp.ndarray
     energy : jnp.ndarray
     biomass : jnp.ndarray
@@ -415,9 +434,9 @@ def make_bugs(
             #if params.levels:
             #    parent_traits = tree_getitem(parent_traits, 0)
             
-            # initialize health, water, energy, and biomass
-            health = (
-                active_players*params.initial_health).astype(float_dtype)
+            # initialize hp, water, energy, and biomass
+            hp = (
+                active_players*params.initial_hp).astype(float_dtype)
             water = (
                 active_players*params.initial_water).astype(float_dtype)
             energy = (
@@ -439,7 +458,8 @@ def make_bugs(
                 object_grid=object_grid,
                 age=age,
                 
-                health=health,
+                hp=hp,
+                
                 energy=energy,
                 biomass=biomass,
                 water=water,
@@ -451,11 +471,25 @@ def make_bugs(
                 family_tree=family_tree_state,
             )
         
+        def get_mass(state):
+            if params.include_biomass or params.include_water:
+                mass = jnp.zeros((), dtype=float_dtype)
+                if params.include_biomass:
+                    mass += state.biomass * params.biomass_mass
+                if params.include_water:
+                    mass += state.water * params.water_mass
+            else:
+                mass = jnp.ones((params.max_population,), dtype=float_dtype)
+            
+            return mass
+        
         def move(
             key : chex.PRNGKey,
             state : BugState,
             action : int,
             traits : BugTraits,
+            altitude : jnp.ndarray,
+            altitude_downsample : int,
         ):
             # validate
             assert (
@@ -463,30 +497,78 @@ def make_bugs(
                 traits.movement_primitives.shape[0]
             )
             
+            # starting position and rotation
+            x0 = state.x
+            r0 = state.r
+            g0 = state.object_grid
+            
             # compute the movement offset (dxr) for all bugs
             action_type = action_to_primitive_map[action, 0]
             action_primitive = action_to_primitive_map[action, 1]
-            move = action_type == MOVE_ACTION_TYPE
+            move = (action_type == MOVE_ACTION_TYPE)
             direction = jnp.where(
                 move[..., 1], traits.movement_primitives[action_primitive], 0)
             dxr = stochastic_rounding(key, direction)
             
             # move the bugs
             active_bugs = family_tree.active(state.family_tree)
-            
-            x, r, _, object_grid = dynamics.movement_step(
-                state.x,
-                state.r,
+            x1, r1, _, g1 = dynamics.movement_step(
+                x0,
+                r0,
                 dxr,
                 active=active_bugs,
                 check_collisions=True,
-                object_grid=state.object_grid,
+                object_grid=g0,
             )
             
-            # update state
-            state = state.replace(x=x, r=r, object_grid=object_grid)
+            # compute the energy and water costs
+            dx = dynamics.distance_x(x1, x0)
+            dr = dynamics.distance_r(r1, r0)
+            y0 = grid.read_grid_locations(
+                altitude, x0, altitude_downsample, downsample_scale=False)
+            y1 = grid.read_grid_locations(
+                altitude, x1, altitude_downsample, downsample_scale=False)
+            dy = y1 - y0
+            uphill = jnp.where(dy > 0., dy, 0.)
+            can_move = uphill <= traits.max_climb
+            mass = Bugs.get_mass(state)
+            if params.include_energy:
+                energy_cost = mass * (
+                    params.move_energy_cost * (dx + dr) +
+                    params.climb_energy_cost * uphill
+                )
+                can_move &= energy_cost <= state.energy
+            if params.include_water:
+                water_cost = mass * (
+                    params.move_water_cost * (dx + dr) +
+                    params.climb_water_cost * uphill
+                )
+                can_move &= water_cost <= state.water
             
-            return state
+            # undo the motion of any bugs that can not pay the necessary costs
+            # or cannot climb well enough
+            x2 = jnp.where(can_move[...,None], x1, x0)
+            r2 = jnp.where(can_move, r1, r0)
+            g2 = dynamics.move_objects(x1, x2, g1)
+            
+            # update state position/rotation
+            state = state.replace(
+                x=x2,
+                r=r2,
+                object_grid=g2,
+            )
+            
+            # charge the energy and water for each bug appropriately
+            if params.include_energy:
+                energy_cost = energy_cost * can_move * active_bugs
+                energy = state.energy - energy_cost
+                state = state.replace(energy=energy)
+            if params.include_water:
+                water_cost = water_cost * can_move * active_bugs
+                water = state.water - water_cost
+                state = state.replace(water=water)
+            
+            return state, water_cost
         
         def eat(
             state : BugState,
@@ -552,6 +634,7 @@ def make_bugs(
             if params.include_biomass:
                 # - compute which bugs are eating biomass
                 eat_biomass = eat & (action_primitive == BIOMASS_PRIMITIVE)
+                expell_biomass = expell & (action_primitive ==BIOMASS_PRIMITIVE)
                 # - compute how much biomass each bug will consume
                 desired_biomass = eat_biomass * jnp.minimum(
                     traits.biomass_gulp, traits.max_biomass - state.biomass)
@@ -569,128 +652,97 @@ def make_bugs(
             
             return state, leftover_water, leftover_energy, leftover_biomass
         
+        
+        def photosynthesis(
+            state : BugState,
+            traits : BugTraits,
+            light : jnp.ndarray,
+        )
+            energy_gain = (
+                traits.photosynthesis *
+                params.photosynthesis_energy_gain *
+                light
+            )
+            state = state.replace(energy=energy)
+            return state
+        
+        def heal(
+            state : BugState,
+            traits : BugTraits,
+        ):
+            healable_hp = traits.max_hp - state.hp
+            healing_energy_cost = healable_hp / params.hp_per_energy
+            usable_energy_cost = jnp.minimum(healing_energy_cost, state.energy)
+            hp_to_heal = usable_energy_cost * params.hp_per_energy
+            state = state.replace(
+                hp = state.hp + hp_to_heal
+                energy = state.energy - usable_energy_cost,
+            )
+            return state
+        
         def fight(
             state : BugState,
             action : int,
             traits : BugTraits,
         ):
-            # TODO
+            # TODO (Chase) : First pass here
             return state
-        
-        '''
-        def eat(
-            state : BugState,
-            consumable : Consumable,
-            action : BugAction,
-        ):
-            live_eaters = active_players(state) * action.eat
-            
-            # figure out who eats what, and transfer into state
-            # then return state and leftovers
-            max_water = jnp.clip(
-                params.max_stomach_water - state.stomach.water,
-                max=params.max_water_gulp,
-            )
-            drunk_water = jnp.clip(
-                consumable.water * live_eaters,
-                max=max_water,
-            )
-            
-            eaten_energy = consumable.energy * live_eaters
-            max_biomass = jnp.clip(
-                params.max_stomach_biomass - state.stomach.biomass,
-                max=params.max_biomass_gulp,
-            )
-            eaten_biomass = jnp.clip(
-                consumable.biomass * live_eaters,
-                max=max_biomass,
-            )
-            
-            next_stomach = state.stomach.replace(
-                water = state.stomach.water + drunk_water,
-                energy = state.stomach.energy + eaten_energy,
-                biomass = state.stomach.biomass + eaten_biomass,
-            )
-            next_state = state.replace(stomach=next_stomach)
-            
-            leftovers = consumable.replace(
-                water=consumable.water - drunk_water,
-                energy=consumable.energy - eaten_energy,
-                biomass=consumable.biomass - eaten_biomass,
-            )
-            
-            return next_state, leftovers
-        '''
         
         def metabolism(
             state : BugState,
-            action : int,
-            next_state : BugState,
             traits : BugTraits,
-            terrain : jnp.ndarray,
-            water : jnp.ndarray,
-            light : jnp.ndarray,
+        ):
+            # determine the energy cost for resting and brain_size
+            alive = Bugs.active_players(state)
+            mass = Bugs.get_mass(state)
+            energy_cost = (
+                params.resting_energy_cost * mass +
+                params.brain_size_energy_cost * traits.brain_size
+            ) * alive
+            
+            energy_paid = jnp.minimum(state.energy, energy_cost)
+            energy_underpayment = energy_cost - energy_paid
+            hp_cost = energy_underpayment * params.energy_underpayment_damage
+            
+            # TODO (Vincent) : check biomass requirements
+                       
+            state = state.replace(
+                hp=state.hp - hp_cost,
+                energy=state.energy - energy_cost,
+            )
+        
+        def metabolism_old(
+            state : BugState,
+            action : int,
+            #next_state : BugState,
+            traits : BugTraits,
+            #water : jnp.ndarray,
+            #light : jnp.ndarray,
         ):
         
-            mass = (
-                biomass * params.biomass_mass +
-                state.water * params.water_mass
-            )
+            mass = Bugs.get_mass(state)
             alive = active_players(next_state)
             
-            # compute energy expenditure
-            energy_offset = jnp.zeros(params.max_players, dtype=float_dtype)
-            water_offset = jnp.zeros(params.max_players, dtype=float_dtype)
-            biomass_offset = jnp.zeros(params.max_players, dtype=float_dtype)
-            health_offset = jnp.zeros(params.max_players, dtype=float_dtype)
-            
-            # - healing
-            #   add health if less than 1 at the expense of energy
-            heal_ammount = jnp.clip(
-                (1. - next_state.health), min=0, max=params.healing_rate)
-            health_offset += heal_ammount
-            energy_offset -= heal_ammount
-            
-            # - size energy tax
-            energy_offset -= params.base_size_metabolism * mass
-            
-            # - brain energy tax
-            energy_offset -= params.base_brain_metabolism * traits.brain_size
-            
-            # - movement energy tax
-            x0 = state.x
-            r0 = state.r
-            x1 = next_state.x
-            r1 = next_state.r
-            dx = jnp.abs(x1-x0).sum(axis=-1)
-            dr = dynamics.distance_r(r1, r0)
-            energy_offset -= params.base_move_metabolism * volume * (dx + dr)
-            
-            # - climbing energy tax
-            height = terrain + water
-            dy = height[x1[...,0], x1[...,1]] - height[x0[...,0], x0[...,1]]
-            uphill = jnp.where(dy > 0., dy, 0.)
-            energy_offset -= uphill * volume * params.base_climb_metabolism
-            
-            # - photosynthesis
-            energy_offset += (
-                traits.photosynthesis *
-                params.photosynthesis_energy_gain *
-                light[x0[...,0], x0[...,1]]
-            )
+            # compute energy costs
+            energy_cost = jnp.zeros(params.max_players, dtype=float_dtype)
+            # - resting energy cost
+            energy_cost += params.resting_energy_cost * mass
+            # - brain energy cost
+            energy_cost += params.brain_size_energy_cost * traits.brain_size
             
             # - compute the updated energy
             #   (do no more energy changes after this point)
-            next_energy = next_stomach.energy + energy_offset
+            next_energy = state.energy - energy_cost
             next_energy_clipped = jnp.where(next_energy < 0., 0., next_energy)
             
             # - compute the updated water
             #   (no no more water changes after this point)
-            next_water = next_stomach.water + water_offset
-            next_water_clipped = jnp.where(next_water < 0., 0., next_water)
+            #next_water = next_stomach.water + water_offset
+            #next_water_clipped = jnp.where(next_water < 0., 0., next_water)
             
             # - damage due to using more energy than is available
-            health_offset += jnp.where(next_energy < 0., next_energy, 0.)
+            health_offset += jnp.where(
+                next_energy < 0., next_energy, 0.)
             
             # - damage due to using more water than is available
             health_offset += jnp.where(next_water < 0., next_water, 0.)

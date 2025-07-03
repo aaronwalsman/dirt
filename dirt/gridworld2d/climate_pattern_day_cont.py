@@ -89,7 +89,7 @@ def light_step(
     #light_direction = jnp.array([jnp.cos(angle), jnp.sin(angle), 0.0])
     light_direction = jnp.array([jnp.cos(angle), 0., jnp.sin(angle)])
     #normals = terrain_gradient(altitude)
-    light_direction = light_direction.reshape(1, 1, 3)
+    light_direction = light_direction.reshape(1, 1, 3).astype(normals.dtype)
     dot_products = jnp.einsum('ijk,ijk->ij', normals, light_direction)
     #dot_products_norm = get_normalize(dot_products)
     #light_strength = jnp.sin(time / 240 * jnp.pi) + 1

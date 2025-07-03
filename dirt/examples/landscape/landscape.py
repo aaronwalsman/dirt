@@ -16,7 +16,7 @@ from dirt.visualization.viewer import Viewer
 from dirt.gridworld2d.landscape import LandscapeParams, make_landscape
 from dirt.gridworld2d.grid import grid_sum_to_mean
 
-@commandline_interface
+@commandline_interface()
 @static_data
 class LandscapeExampleParams:
     seed : int = 1234
@@ -140,6 +140,8 @@ if __name__ == '__main__':
             
             state = landscape.step(step_key, state)
             report = make_report(state)
+            
+            #breakpoint()
             
             return (key, state), report
         

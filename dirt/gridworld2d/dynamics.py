@@ -82,6 +82,9 @@ def wrap_r(
     '''
     return r % 4
 
+def distance_x(x0, x1):
+    return jnp.abs(x1-x0).sum(axis=-1)
+
 def distance_r(r0, r1):
     distance_matrix = jnp.array([
         [0,1,2,1],
@@ -247,6 +250,8 @@ def step(
     else:
         raise NotImplementedError
     
+    r1 = wrap_r(r0 + dr)
+    
     if out_of_bounds == 'clip':
         assert world_size is not None
         x1 = clip_x(x1, world_size)
@@ -255,8 +260,6 @@ def step(
         x1 = wrap_x(x1, world_size)
     elif out_of_bounds == 'none':
         pass
-    
-    r1 = wrap_r(r0 + dr)
     
     if object_grid is not None:
         if check_collisions:
@@ -286,11 +289,12 @@ def movement_step(
     move : jnp.ndarray,
     **kwargs
 ) -> Tuple[jnp.ndarray, jnp.ndarray] :
-    forward = move[..., 0]
-    side = move[..., 1]
-    rotate = move[..., 2]
-    dx = jnp.stack((forward, side), axis=-1)
-    return step(x0, r0, dx, rotate, space='local', **kwargs)
+    #forward = move[..., 0]
+    #side = move[..., 1]
+    dr = move[..., 2]
+    #dx = jnp.stack((forward, side), axis=-1)
+    dx = move[..., :2]
+    return step(x0, r0, dx, dr, space='local', **kwargs)
 
 
 if __name__ == '__main__':
