@@ -3,6 +3,53 @@
 ## Overview
 Dirt is a set of tools for building large dynamic gridworlds.
 
+## Setup
+
+Clone the repo:
+```
+git clone https://github.com/aaronwalsman/dirt.git
+```
+
+Create a conda env:
+```
+conda create --name dirt python=3.12 pip
+```
+
+Activate the environment and install `dirt` dependencies:
+```
+cd dirt
+conda activate dirt
+pip install --upgrade pip
+pip install -e .
+```
+
+Keep the conda env active for the remainder of setup and development.
+
+Clone the `macos` branch of our 3D renderer, `splendor-render`, and install the package:
+```
+cd ..
+git clone --branch macos https://github.com/aaronwalsman/splendor-render.git
+cd splendor-render
+pip install -e .
+```
+
+Clone and install the `mechagogue` package:
+```
+cd ..
+git clone https://github.com/aaronwalsman/mechagogue.git
+cd mechagogue
+pip install -e .
+```
+
+Ensure you have a CUDA-compatible GPU available to JAX.
+
+Test your setup with the `landscape` simulation example (the output is execution time):
+```
+cd ../dirt/dirt/examples/landscape
+python landscape.py
+```
+
+
 ## Landscape
 ### Rock
 The rock layer makes up the baseline height of each grid cell in the system.  Rock is not modified, except by erosion, which is usually only used to initialize more complex starting terrain, but not used during simulation.  The rock is initialized using Perlin noise.  The units of rock are such that a rock value of is as tall as a single grid cell is wide.  It's resolution is determined by the `rock_downsample` parameter.
