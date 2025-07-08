@@ -18,6 +18,7 @@ from dirt.constants import (
     BIOMASS_AND_ENERGY_TINT,
     DEFAULT_FLOAT_DTYPE,
 )
+import dirt.gridworld2d.grid as grid
 from dirt.gridworld2d.landscape import (
     LandscapeParams,
     LandscapeState,
@@ -167,7 +168,7 @@ def make_tera_arium(
         bug_state = bugs.heal(bug_state, traits)
         
         # - metabolism
-        bug_state = bugs.metabolism(bug_state, traits)
+        bug_state, evaporated_metabolism = bugs.metabolism(bug_state, traits)
         
         # - fight
         bug_state = bugs.fight(bug_state, action, traits)
@@ -175,7 +176,7 @@ def make_tera_arium(
         # - move bugs
         key, move_key = jrng.split(key)
         altitude = landscape.get_altitude(landscape_state)
-        next_bug_state, evaporated_water = bugs.move(
+        bug_state, evaporated_move = bugs.move(
             move_key,
             bug_state,
             action,
@@ -183,14 +184,36 @@ def make_tera_arium(
             altitude,
             params.landscape.terrain_downsample,
         )
-        # -- add evaporated water to the atmosphere
+        
+        # - birth and death
+        (
+            bug_state,
+            evaporated_birth,
+            expelled_water,
+            expelled_energy,
+            expelled_biomass,
+        ) = bugs.birth_and_death(bug_state, action, traits)
+        
+        # - add evaporated water to the atmosphere/ground
+        evaporated_moisture = (
+            evaporated_move + evaporated_metabolism + evaporated_birth)
         if params.landscape.include_rain:
             landscape_state = landscape.add_moisture(
-                landscape_state, bug_state.x, evaporated_water)
-        elif params.landscape.include_water:
+                landscape_state, bug_state.x, evaporated_moisture)
+        elif params.include_water:
             landscape_state = landscape.add_water(
-                landscape_state, bug_state.x, evaporated_water)
+                landscape_state, bug_state.x, evaporated_moisture)
+        if params.include_water:
+            landscape_state = landscape.add_water(
+                landscape_state, bug_state.x, expelled_water)
+        if params.include_energy:
+            landscape_state = landscape.add_energy(
+                landscape_state, bug_state.x, expelled_energy)
+        if params.include_biomass:
+            landscape_state = landscape.add_biomass(
+                landscape_state, bug_state.x, expelled_biomass)
         
+        '''
         # - metabolize and reproduce
         # TODO: does this need to be all in the same place?
         bug_state, expelled_water, expelled_energy, expelled_biomass, expelled_locations = bug_metabolism(
@@ -205,24 +228,25 @@ def make_tera_arium(
         # -- put the expelled resources back into the landscape
         #next_landscape_state = landscape.add_consumable(
         #    next_landscape_state, expelled_locations, expelled)
+        '''
         
         # natural landscape processes
         key, landscape_key = jrng.split(key)
-        next_landscape_state = landscape.step(
-            landscape_key, next_landscape_state)
+        landscape_state = landscape.step(
+            landscape_key, landscape_state)
         
-        next_state = next_state.replace(
-            landscape=next_landscape_state,
-            bugs_state=next_bug_state
+        state = state.replace(
+            landscape=landscape_state,
+            bugs=bug_state
         )
         
-        return next_state
+        return state
     
     def active_players(state):
         return bugs.active_players(state.bugs)
     
     def family_info(state):
-        return bug_family_info(state.bugs)
+        return bugs.family_info(state.bugs)
     
     def render(
         water,
