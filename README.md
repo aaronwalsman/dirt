@@ -10,7 +10,7 @@ Clone the repo:
 git clone https://github.com/aaronwalsman/dirt.git
 ```
 
-Create a conda env:
+Create a conda env with Python >= 3.11:
 ```
 conda create --name dirt python=3.12 pip
 ```
@@ -33,7 +33,7 @@ cd splendor-render
 pip install -e .
 ```
 
-Clone and install the `mechagogue` package:
+Clone `mechagogue` and install the package:
 ```
 cd ..
 git clone https://github.com/aaronwalsman/mechagogue.git
