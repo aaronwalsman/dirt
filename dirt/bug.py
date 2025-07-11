@@ -105,22 +105,24 @@ class BugParams:
     
     zero_water_damage : float = 0.1
     
-    # energy costs
+    # costs
     # - resting
+    resting_water_cost : float = 0.01
     resting_energy_cost : float = 0.01
     # - brain
+    brain_size_water_cost : float = 0.01
     brain_size_energy_cost : float = 0.01
     # - movement
+    move_water_cost : float = 0.01
     move_energy_cost : float = 0.01
+    climb_water_cost : float = 0.01
     climb_energy_cost : float = 0.01
     # - reproduction
     birth_energy_cost : float = 0.01
+    birth_water_cost : float = 0.01
+    birth_damage : float = 1.
     # - color
     color_change_energy_cost : float = 0.01
-    
-    # water costs
-    move_water_cost : float = 0.01
-    climb_water_cost : float = 0.01
     
     # biomass requirements
     # TODO (Vincent) : biomass requirements for various traits goes here
@@ -141,6 +143,7 @@ class BugParams:
     #max_hp_per_mass : float = 10.
     hp_per_armor : float = 10.
     hp_healed_per_energy : float = 10.
+    water_underpayment_damage : float = 10.
     energy_underpayment_damage : float = 10.
     
     # initialization
@@ -163,9 +166,6 @@ class BugTraits:
     # brain
     brain_size : float | jnp.ndarray
     
-    # body
-    #body_size : jnp.ndarray
-    
     # color
     color : Tuple[float, float, float] | jnp.ndarray
     
@@ -173,13 +173,28 @@ class BugTraits:
     photosynthesis : float | jnp.ndarray
     
     # sensing
+    # - visual
     view_distance : int | jnp.ndarray
     view_back_distance : int | jnp.ndarray
     view_width : int | jnp.ndarray
-    view_sensitivity : float | jnp.ndarray
-    audio_sensitivity : float | jnp.ndarray
-    smell_sensitivity : float | jnp.ndarray
-    internal_sensitivity : float | jnp.ndarray
+    max_altitude_observation : float | jnp.ndarray
+    visual_sensor_noise : float | jnp.ndarray
+    # - audio/smell
+    audio_sensor_noise : float | jnp.ndarray
+    smell_sensor_noise : float | jnp.ndarray
+    # - external resources
+    max_water_observation : float | jnp.ndarray
+    max_energy_observation : float | jnp.ndarray
+    max_biomass_observation : float | jnp.ndarray
+    external_resource_sensor_noise : float | jnp.ndarray
+    # - wind
+    wind_sensor_noise : float | jnp.ndarray
+    # - temperature
+    min_temperature_observation : float | jnp.ndarray
+    max_temperature_observaiton : float | jnp.ndarray
+    temperature_sensor_noise : float | jnp.ndarray
+    # - internal resources
+    internal_sensor_noise : float | jnp.ndarray
     
     # efficiency
     max_climb : float | jnp.ndarray
@@ -201,81 +216,90 @@ class BugTraits:
     armor : float | jnp.ndarray
     
     # age
-    senescence : float | jnp.ndarray
+    senescence_damage : float | jnp.ndarray
     
     # health
     max_hp : float | jnp.ndarray
     healing_rate : float | jnp.ndarray
     
     # reproduction
-    newborn_energy : float | jnp.ndarray
-    newborn_biomass : float | jnp.ndarray
-    newborn_water : float | jnp.ndarray
-    newborn_color : Tuple[float, float, float] | jnp.ndarray
+    child_water : float | jnp.ndarray
+    child_energy : float | jnp.ndarray
+    child_biomass : float | jnp.ndarray
+    child_color : Tuple[float, float, float] | jnp.ndarray
     
     # actions
     movement_primitives : jnp.ndarray
     attack_primitives : jnp.ndarray
     
     @staticmethod
-    def default():
+    def default(n):
+        def float_vector(v):
+            return jnp.full((n,), v, dtype=DEFAULT_FLOAT_DTYPE)
+        
+        def int_vector(v):
+            return jnp.full((n,), v, dtype=jnp.int32)
+        
         return BugTraits(
             # brain
-            brain_size = 0.,
+            brain_size = float_vector(0.),
             
             # color
-            color = DEFAULT_BUG_COLOR,
+            color = jnp.full(
+                (n,3), DEFAULT_BUG_COLOR, dtype=DEFAULT_FLOAT_DTYPE),
             
             # resources
-            photosynthesis = 0.,
+            photosynthesis = float_vector(0.),
             
             # sensing
-            view_distance = 5,
-            view_back_distance = 0,
-            view_width = 5,
-            view_sensitivity = 1.,
-            audio_sensitivity = 1.,
-            smell_sensitivity = 1.,
-            internal_sensitivity = 1.,
+            view_distance = int_vector(5),
+            view_back_distance = int_vector(0),
+            view_width = int_vector(5),
+            view_sensitivity = float_vector(1.),
+            max_altitude_observation = float_vector(5.),
+            audio_sensitivity = float_vector(1.),
+            smell_sensitivity = float_vector(1.),
+            internal_sensitivity = float_vector(1.),
             
             # efficiency
-            max_climb = 2.,
-            climb_efficiency = 1.,
-            move_effciency = 1.,
+            max_climb = float_vector(2.),
+            climb_efficiency = float_vector(1.),
+            move_effciency = float_vector(1.),
             
             # stomach
-            max_water = 1.,
-            water_gulp = 0.5,
-            max_energy = 2.,
-            energy_gulp = 0.5,
-            max_biomass = 5.,
-            biomass_gulp = 0.5,
+            max_water = float_vector(1.),
+            water_gulp = float_vector(0.5),
+            max_energy = float_vector(2.),
+            energy_gulp = float_vector(0.5),
+            max_biomass = float_vector(5.),
+            biomass_gulp = float_vector(0.5),
             
             # climate
-            insulation = 0.,
+            insulation = float_vector(0.),
             
             # armor
-            armor = 0.,
+            armor = float_vector(0.),
             
             # age
-            senescence = 0.999,
+            senescence_damage = float_vector(0.00001),
             
             # health
-            max_hp = 10.
-            healing_rate = 1.,
+            max_hp = float_vector(10.),
+            healing_rate = float_vector(1.),
             
             # reproduction
-            newborn_energy = 1.0,
-            newborn_biomass = 1.0,
-            newborn_water = 0.5,
-            newborn_color = DEFAULT_BUG_COLOR,
+            child_energy = float_vector(1.0),
+            child_biomass = float_vector(1.0),
+            child_water = float_vector(0.5),
+            child_color = jnp.full(
+                (n,3), DEFAULT_BUG_COLOR, dtype=DEFAULT_FLOAT_DTYPE),
             
             # actions
-            movement_primitives = jnp.array([
+            movement_primitives = jnp.full((n,3,3), jnp.array([
                 [1, 0, 0],
                 [0, 0,-1],
                 [0, 0, 1],
-            ], dtype=DEFAULT_FLOAT_DTYPE),
+            ], dtype=DEFAULT_FLOAT_DTYPE)),
             # TODO (Chase) : Come up with good defaults here
             attack_primitives = jnp.zeros(
                 (),
@@ -302,11 +326,36 @@ class BugTraits:
 #    Reproduce
 
 @static_data
-class BugAction:
-    move : jnp.ndarray
-    bite : jnp.ndarray
-    eat : jnp.ndarray
-    reproduce : jnp.ndarray
+class BugObservation:
+    # grid external
+    rgb : jnp.ndarray
+    relative_altitude : jnp.ndarray
+
+    # single channel external
+    # - sensory
+    audio : jnp.ndarray
+    smell : jnp.ndarray
+    # - resources
+    external_water : jnp.ndarray
+    external_energy : jnp.ndarray
+    external_biomass : jnp.ndarray                   
+    wind : jnp.ndarray                                                   
+    temperature : jnp.ndarray
+             
+    # single channel internal   
+    health : jnp.ndarray                       
+    internal_water : jnp.ndarray    
+    internal_energy : jnp.ndarray
+    internal_biomass : jnp.ndarray
+    
+    born : jnp.ndarray
+
+#@static_data
+#class BugAction:
+#    move : jnp.ndarray
+#    bite : jnp.ndarray
+#    eat : jnp.ndarray
+#    reproduce : jnp.ndarray
 
 @static_data
 class BugState:
@@ -319,6 +368,7 @@ class BugState:
     age : jnp.ndarray
     
     # health
+    max_hp : jnp.ndarray
     hp : jnp.ndarray
     
     # resources
@@ -331,6 +381,29 @@ class BugState:
     
     # level
     level : jnp.ndarray
+    
+    '''
+    # sensing
+    # - visual
+    rgb_sensor_noise : jnp.ndarray
+    max_altitude_observation : jnp.ndarray
+    altitude_sensor_noise : jnp.ndarray
+    # - audio/smell
+    audio_sensor_noise : jnp.ndarray
+    smell_sensor_noise : jnp.ndarray
+    # - external resources
+    max_water_observation : jnp.ndarray
+    max_energy_observation : jnp.ndarray
+    max_biomass_obsevation : jnp.ndarray
+    external_resource_sensor_noise : jnp.ndarray
+    # - wind
+    wind_sensor_noise : jnp.ndarray
+    min_temperature_observation : jnp.ndarray
+    max_temperature_observaiton : jnp.ndarray
+    temperature_sensor_noise : jnp.ndarray
+    # - internal resources
+    internal_sensor_noise : jnp.ndarray
+    '''
     
     # tracking
     family_tree : Any
@@ -402,10 +475,6 @@ def make_bugs(
         
         def init(
             key : chex.PRNGKey,
-            #initial_players,
-            #parent_traits : BugTraits,
-            #x : Optional[jnp.ndarray] = None,
-            #r : Optional[jnp.ndarray] = None,
         ) -> BugState :
             
             # initialize the family tree
@@ -413,9 +482,6 @@ def make_bugs(
             active_players = family_tree.active(family_tree_state)
             
             # initialize map positions and rotations
-            #assert (x is None) == (r is None), (
-            #    'must specify either both x and r or neither')
-            #if x is None:
             key, xr_key = jrng.split(key)
             x, r = spawn.unique_xr(
                 xr_key,
@@ -429,10 +495,6 @@ def make_bugs(
             
             # initialize the player age
             age = jnp.zeros((params.max_players,), dtype=jnp.int32)
-            
-            # when using levels, select the first level of the parent_traits
-            #if params.levels:
-            #    parent_traits = tree_getitem(parent_traits, 0)
             
             # initialize hp, water, energy, and biomass
             hp = (
@@ -471,17 +533,47 @@ def make_bugs(
                 family_tree=family_tree_state,
             )
         
-        def get_mass(state):
+        def get_mass(water, biomass):
             if params.include_biomass or params.include_water:
                 mass = jnp.zeros((), dtype=float_dtype)
                 if params.include_biomass:
-                    mass += state.biomass * params.biomass_mass
+                    mass += biomass * params.biomass_mass
                 if params.include_water:
-                    mass += state.water * params.water_mass
+                    mass += water * params.water_mass
             else:
                 mass = jnp.ones((params.max_population,), dtype=float_dtype)
             
             return mass
+        
+        '''
+        def update_state_traits(
+            state : BugState,
+            traits : BugTraits,
+        ):
+            return = state.replace(
+                # hp
+                max_hp=traits.max_hp,
+                # sensing
+                # - visual
+                max_altitude_observation = traits.max_altitude_observation
+                rgb_sensor_noise = traits.visual_sensor_noise
+                # - audio/smell
+                audio_sensor_noise = traits.audio_sensor_noise
+                smell_sensor_noise = traits.smell_sensor_noise
+                # - external resources
+                max_water_observation = traits.max_water_observation
+                max_energy_observation = traits.max_energy_observaiton
+                max_biomass_observation = traits.max_biomass_observation
+                external_resource_sensor_noise : jnp.ndarray
+                # - wind
+                wind_sensor_noise = traits.wind_sensor_noise
+                min_temperature_observation = traits.min_temperature_observation
+                max_temperature_observaiton = traits.max_temperature_observation
+                temperature_sensor_noise = traits.temperature_sensor_noise
+                # - internal resources
+                internal_sensor_noise = traits.internal_sensor_noise
+            )
+        '''
         
         def move(
             key : chex.PRNGKey,
@@ -494,7 +586,7 @@ def make_bugs(
             # validate
             assert (
                 params.movement_primitives ==
-                traits.movement_primitives.shape[0]
+                traits.movement_primitives.shape[1]
             )
             
             # starting position and rotation
@@ -506,8 +598,10 @@ def make_bugs(
             action_type = action_to_primitive_map[action, 0]
             action_primitive = action_to_primitive_map[action, 1]
             move = (action_type == MOVE_ACTION_TYPE)
-            direction = jnp.where(
-                move[..., 1], traits.movement_primitives[action_primitive], 0)
+            all_players = jnp.arange(params.max_players)
+            player_movement_primitives = (
+                traits.movement_primitives[all_players, action_primitive])
+            direction = jnp.where(move[..., None], player_movement_primitives,0)
             dxr = stochastic_rounding(key, direction)
             
             # move the bugs
@@ -531,7 +625,7 @@ def make_bugs(
             dy = y1 - y0
             uphill = jnp.where(dy > 0., dy, 0.)
             can_move = uphill <= traits.max_climb
-            mass = Bugs.get_mass(state)
+            mass = Bugs.get_mass(state.water, state.biomass)
             if params.include_energy:
                 energy_cost = mass * (
                     params.move_energy_cost * (dx + dr) +
@@ -652,30 +746,29 @@ def make_bugs(
             
             return state, leftover_water, leftover_energy, leftover_biomass
         
-        
         def photosynthesis(
             state : BugState,
             traits : BugTraits,
             light : jnp.ndarray,
-        )
+        ):
             energy_gain = (
                 traits.photosynthesis *
                 params.photosynthesis_energy_gain *
                 light
             )
-            state = state.replace(energy=energy)
+            state = state.replace(energy=state.energy + energy_gain)
             return state
         
         def heal(
             state : BugState,
             traits : BugTraits,
         ):
-            healable_hp = traits.max_hp - state.hp
-            healing_energy_cost = healable_hp / params.hp_per_energy
+            healable_hp = state.max_hp - state.hp
+            healing_energy_cost = healable_hp / params.hp_healed_per_energy
             usable_energy_cost = jnp.minimum(healing_energy_cost, state.energy)
-            hp_to_heal = usable_energy_cost * params.hp_per_energy
+            hp_to_heal = usable_energy_cost * params.hp_healed_per_energy
             state = state.replace(
-                hp = state.hp + hp_to_heal
+                hp = state.hp + hp_to_heal,
                 energy = state.energy - usable_energy_cost,
             )
             return state
@@ -692,24 +785,337 @@ def make_bugs(
             state : BugState,
             traits : BugTraits,
         ):
-            # determine the energy cost for resting and brain_size
-            alive = Bugs.active_players(state)
-            mass = Bugs.get_mass(state)
-            energy_cost = (
-                params.resting_energy_cost * mass +
-                params.brain_size_energy_cost * traits.brain_size
-            ) * alive
+            damage = jnp.zeros((params.max_players,), dtype=float_dtype)
             
-            energy_paid = jnp.minimum(state.energy, energy_cost)
-            energy_underpayment = energy_cost - energy_paid
-            hp_cost = energy_underpayment * params.energy_underpayment_damage
+            # energy cost
+            if params.include_energy:
+                alive = Bugs.active_players(state)
+                mass = Bugs.get_mass(state.water, state.biomass)
+                energy_cost = (
+                    params.resting_energy_cost * mass +
+                    params.brain_size_energy_cost * traits.brain_size
+                ) * alive
+                energy_paid = jnp.minimum(state.energy, energy_cost)
+                energy = state.energy - energy_paid
+                energy_underpayment = energy_cost - energy_paid
+                damage += (
+                    energy_underpayment * params.energy_underpayment_damage)
+            else:
+                energy = None
+            
+            # water cost
+            if params.include_water:
+                water_cost = (
+                    params.resting_water_cost * mass +
+                    params.brain_size_water_cost * traits.brain_size
+                ) * alive
+                water_paid = jnp.minimum(state.water, water_cost)
+                water = state.water - water_paid
+                water_underpayment = water_cost - water_paid
+                damage += water_underpayment * params.water_underpayment_damage
+            else:
+                water = None
+                water_paid = None
+            
+            # senescence (aging)
+            damage += traits.senescence_damage * state.age
             
             # TODO (Vincent) : check biomass requirements
                        
             state = state.replace(
-                hp=state.hp - hp_cost,
-                energy=state.energy - energy_cost,
+                hp=state.hp - damage,
+                energy=energy,
+                water=water,
             )
+            
+            return state, water_paid
+        
+        def birth_and_death(
+            state : BugState,
+            action : int,
+            traits : BugTraits,
+        ):
+            # determine who is active and alive
+            active = Bugs.active_players(state)
+            alive = state.hp > 0
+            
+            # compute which bugs will reproduce
+            # - compute which bugs want to reproduce
+            # -- break the action integers into action types and primitives
+            action_type = action_to_primitive_map[action, 0]
+            action_primitive = action_to_primitive_map[action, 1]
+            # -- filter by those taking the reproduce action
+            wants_to_reproduce = action_type == REPRODUCE_ACTION_TYPE
+            # - compute the parents' birth resource requirements
+            child_mass = Bugs.get_mass(
+                traits.child_water, traits.child_biomass)
+            birth_water_cost = child_mass * params.birth_water_cost
+            birth_energy_cost = child_mass * params.birth_energy_cost
+            birth_damage = child_mass * params.birth_damage
+            birth_required_water = birth_water_cost + traits.child_water
+            birth_required_energy = birth_energy_cost + traits.child_energy
+            birth_required_biomass = traits.child_biomass
+            # - compute which bugs are able to reproduce
+            #   (those that can satisfy the birth costs)
+            able_to_reproduce = (
+                (state.water >= birth_required_water) &
+                (state.energy >= birth_required_energy) &
+                (state.biomass >= birth_required_biomass)
+            )
+            # - compute which bugs will actually reproduce
+            will_reproduce = alive & wants_to_reproduce & able_to_reproduce
+            # - compute new positions and rotations for the children and
+            #   make sure those new positions and rotations are unoccupied
+            will_reproduce, child_x, child_r = spawn.spawn_from_parents(
+                will_reproduce,
+                state.x,
+                state.r,
+                object_grid=state.object_grid,
+            )
+            
+            # charge the parents for the required birth resources
+            paid_hp = birth_damage * will_reproduce
+            paid_water = birth_required_water * will_reproduce
+            paid_energy = birth_required_energy * will_reproduce
+            paid_biomass = birth_required_biomass * will_reproduce
+            state = state.replace(
+                hp = state.hp - paid_hp,
+                water = state.water - paid_water,
+                energy = state.energy - paid_energy,
+                biomass = state.biomass - paid_biomass,
+            )
+            
+            # update the family tree
+            # - get the locations of the new parents
+            parent_locations, = jnp.nonzero(
+                will_reproduce,
+                size=params.max_players,
+                fill_value=params.max_players,
+            )
+            # - compute recent deaths
+            #   (the parent dying from birth damage does not prevent birth)
+            alive = state.hp > 0
+            recent_deaths = active & ~alive
+            # - increment the age of alive bugs and zero the age of dead bugs
+            age = (state.age+1) * alive
+            # - step the family tree
+            family_tree_state, child_locations, _ = family_tree.step(
+                state.family_tree,
+                recent_deaths,
+                parent_locations[..., None],
+            )
+            active = family_tree.active(family_tree_state)
+            # - update state
+            state = state.replace(
+                age = age,
+                family_tree = family_tree_state,
+            )
+            
+            # update the bug physical positions and rotations
+            # - move the dead bugs off the map and set 0 rotation
+            x = jnp.where(
+                recent_deaths[:,None],
+                jnp.array(params.world_size, dtype=jnp.int32),
+                state.x,
+            )
+            r = state.r * active
+            # - insert the child positions and rotations
+            # -- get the child_x and child_r that were actually produced
+            child_x = child_x[parent_locations]
+            child_r = child_r[parent_locations]
+            # -- insert these child_x and child_r values into the position
+            #    and rotation vectors
+            x = x.at[child_locations].set(child_x)
+            r = r.at[child_locations].set(child_r)
+            # - update the object grid
+            object_grid = state.object_grid.at[x[...,0], x[...,1]].set(
+                jnp.where(active, jnp.arange(params.max_players), -1))
+            # - update the state
+            state = state.replace(x=x, r=r, object_grid=object_grid)
+            
+            # everybody gets older
+            # moved this earlier so that new bugs still have age=0
+            #state = state.replace(age=(state.age + 1) * active)
+            
+            # get the resources of the dead bugs, and the resources expended
+            # in birth to return to the landscape
+            expelled_moisture = paid_water
+            expelled_water = state.water * ~active
+            expelled_energy = state.energy * ~active
+            expelled_biomass = state.energy * ~active
+            state = state.replace(
+                water = state.water * active,
+                energy = state.energy * active,
+                biomass = state.biomass * active,
+            )
+            
+            # update the child hp and resources
+            child_hp = traits.max_hp[parent_locations]
+            child_water = traits.child_water[parent_locations]
+            child_energy = traits.child_energy[parent_locations]
+            child_biomass = traits.child_biomass[parent_locations]
+            # - update the state
+            state = state.replace(
+                hp = state.hp.at[child_locations].set(child_hp),
+                water = state.water.at[child_locations].set(child_water),
+                energy = state.energy.at[child_locations].set(child_energy),
+                biomass = state.biomass.at[child_locations].set(child_biomass),
+            )
+            
+            return (
+                state,
+                expelled_moisture,
+                expelled_water,
+                expelled_energy,
+                expelled_biomass,
+            )
+        
+        def observe(
+            key : chex.PRNGKey,
+            state : BugState,
+            traits : BugTraits,
+            rgb : jnp.ndarray,
+            relative_altitude : jnp.ndarray,
+            audio : jnp.ndarray,
+            smell : jnp.ndarray,
+            wind : jnp.ndarray,
+            temperature : jnp.ndarray,
+            external_water : jnp.ndarray,
+            external_energy : jnp.ndarray,
+            external_biomass : jnp.ndarray,
+        ):
+            # the observations for all new bugs will be zeroed out
+            # because the traits for them have not been computed yet
+            positive_age = state.age > 0
+            
+            # vision
+            # - rgb
+            key, rgb_key = jrng.split(key)
+            sensor_rgb = noisy_sensor(rgb_key, rgb, traits.visual_sensor_noise)
+            sensor_rgb *= positive_age[:,None,None]
+            
+            # - altitude
+            sensor_relative_altitude = jnp.clip(
+                relative_altitude / traits.max_altitude_observation,
+                min=-1.,
+                max=1.,
+            )
+            key, altitude_key = jrng.split(key)
+            sensor_relative_altitude = noisy_sensor(
+                altitude_key,
+                relative_altitude,
+                state.visual_sensor_noise,
+                minval=-1.,
+                maxval=1.,
+            )
+            sensor_relative_altitude *= positive_age[:,None,None]
+            
+            # audio
+            key, audio_key = jrng.split(key)
+            sensor_audio = noisy_sensor(
+                audio_key, audio, traits.audio_sensor_noise)
+            sensor_audio *= positive_age[:,None]
+            
+            # smell
+            key, smell_key = jrng.split(key)
+            sensor_smell = noisy_sensor(
+                smell_key, smell, traits.smell_sensor_noise)
+            sensor_smell *= positive_age[:,None]
+            
+            # weather
+            key, wind_key, temperature_key = jrng.split(key)
+            # - wind
+            sensor_wind = noisy_sensor(
+                wind_key, wind, state.wind_sensor_noise)
+            # - temperature
+            temperature_range = (
+                state.max_temperature_observation -
+                state.min_temperature_observation
+            )
+            sensor_temperature = jnp.clip(
+                (temperature - state.min_temperature_observation) /
+                temperature_range,
+                min=0.,
+                max=1.,
+            )
+            sensor_temperature = noisy_sensor(
+                temperature_key,
+                sensor_temperature,
+                state.temperature_sensor_noise,
+            )
+            
+            # external resources
+            key, water_key, energy_key, biomass_key = jrng.split(key, 4)
+            # - water
+            sensor_external_water = jnp.clip(
+                external_water/state.max_water_observation, min=0., max=1.)
+            sensor_external_water = noisy_sensor(
+                water_key,
+                sensor_external_water,
+                state.external_resource_sensor_noise,
+            )
+            # - energy
+            sensor_external_energy = jnp.clip(
+                external_energy/state.max_energy_observation, min=0., max=1.)
+            sensor_external_energy = noisy_sensor(
+                energy_key,
+                sensor_external_energy,
+                state.external_resource_sensor_noise,
+            )
+            # - biomass
+            sensor_external_biomass = jnp.clip(
+                external_biomass/state.max_biomass_observation, min=0., max=1.)
+            sensor_external_biomass = noisy_sensor(
+                biomass_key,
+                sensor_external_biomass,
+                state.external_resource_sensor_noise,
+            )
+            
+            # health and internal resources
+            key, health_key, water_key, energy_key, biomass_key = jrng.split(
+                key, 5)
+            # - health
+            sensor_health = state.hp / state.max_hp
+            sensor_health = noisy_sensor(
+                health_key, sensor_health, state.internal_resource_sensor_noise)
+            # - water
+            sensor_internal_water = state.water/state.max_internal_water
+            sensor_internal_water = noisy_sensor(
+                water_key,
+                sensor_internal_water,
+                state.internal_resource_sensor_noise,
+            )
+            # - energy
+            sensor_internal_energy = state.energy/state.max_internal_energy
+            sensor_internal_energy = noisy_sensor(
+                energy_key,
+                sensor_internal_energy,
+                state.internal_resource_sensor_noise,
+            )
+            # - biomass
+            sensor_internal_biomass = state.biomass/state.max_internal_biomass
+            sensor_internal_biomass = noisy_sensor(
+                biomass_key,
+                sensor_internal_biomass,
+                state.internal_resource_sensor_noise,
+            )
+            
+            return BugObservation(
+                rgb=sensor_rgb,
+                relative_altitude=sensor_relative_altitude,
+                audio=sensor_audio,
+                smell=sensor_smell,
+                external_water=sensor_external_water,
+                external_energy=sensor_external_energy,
+                external_biomass=sensor_external_biomass,
+                wind=sensor_wind,
+                temperature=sensor_temperature,
+                health=sensor_health,
+                internal_water=sensor_internal_water,
+                internal_energy=sensor_internal_energy,
+                internal_biomass=sensor_internal_biomass,
+            )
+        
         
         def metabolism_old(
             state : BugState,
@@ -720,7 +1126,7 @@ def make_bugs(
             #light : jnp.ndarray,
         ):
         
-            mass = Bugs.get_mass(state)
+            mass = Bugs.get_mass(state.water, state.biomass)
             alive = active_players(next_state)
             
             # compute energy costs
@@ -741,18 +1147,19 @@ def make_bugs(
             #next_water_clipped = jnp.where(next_water < 0., 0., next_water)
             
             # - damage due to using more energy than is available
-            health_offset += jnp.where(
-                next_energy < 0., next_energy, 0.)
+            #health_offset += jnp.where(
+            #    next_energy < 0., next_energy, 0.)
             
             # - damage due to using more water than is available
-            health_offset += jnp.where(next_water < 0., next_water, 0.)
+            #health_offset += jnp.where(next_water < 0., next_water, 0.)
             
             # - damage due to having zero water
-            health_offset += jnp.where(
-                next_water <= 0., -params.zero_water_damage, 0)
+            #health_offset += jnp.where(
+            #    next_water <= 0., -params.zero_water_damage, 0)
             
             # reproduce
             # - compute which agents are able to reproduce
+            '''
             has_enough_energy_to_reproduce = (
                 next_stomach.energy >=
                 params.starting_energy + params.birth_energy
@@ -771,6 +1178,7 @@ def make_bugs(
                 has_enough_biomass_to_reproduce &
                 has_enough_water_to_reproduce 
             )
+            '''
             
             # - compute the reproduce positions and rotations
             reproduce, child_x, child_r = spawn.spawn_from_parents(
@@ -896,8 +1304,8 @@ def make_bugs(
         def family_info(
             next_state : BugState,
         ):
-            birthdays = next_state.family_tree.player_list.players[...,0]
-            current_time = next_state.family_tree.player_list.current_time
+            birthdays = next_state.family_tree.player_state.players[...,0]
+            current_time = next_state.family_tree.player_state.current_time
             child_locations, = jnp.nonzero(
                 birthdays == current_time,
                 size=params.max_players,
