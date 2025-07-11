@@ -37,6 +37,8 @@ Biomass requirements:
     biomass_required_for_attack_primitives (maybe area * abs(damage) + distance)
         (ooh! do we allow damage to be negative so agents can heal others?)
     
+    Vincent: Why not! Think won't hurt the logic as a whole but will make the world more interesting
+    
 If biomass requirement not met (agent is born too small):
     lose health? can't do things?  Is there a way we can make it so that the
     babies can start small and grow big without dying right away?  They would
@@ -122,8 +124,27 @@ class BugParams:
     birth_damage : float = 1.
     
     # biomass requirements
-    # TODO (Vincent) : biomass requirements for various traits goes here
-    
+    # Vincent first pass for biomass requirements of various traits, random put some parameters here
+    min_biomass_constant : float = 0.1
+    biomass_per_brain_size : float = 0.05
+    biomass_per_movement_primitive : float = 0.02
+    # biomass_per_attack_primitive : float = 0.03
+
+    biomass_per_photosynthesis : float = 0.01
+    biomass_per_max_climb : float = 0.01
+
+    biomass_per_max_water : float = 0.01
+    biomass_per_water_gulp : float = 0.01
+    biomass_per_max_energy : float = 0.01
+    biomass_per_energy_gulp : float = 0.01
+    biomass_per_max_biomass: float = 0.01
+    biomass_per_biomass_gulp : float = 0.01
+
+    biomass_per_max_hp : float = 0.01
+
+    # damage paramters
+    lack_biomass_damage: float = 10.0
+
     # mass
     biomass_mass : float = 1.
     water_mass : float = 1.
@@ -329,6 +350,29 @@ class BugTraits:
                 dtype=DEFAULT_FLOAT_DTYPE,
             ),
         )
+    
+    def biomass_requirement(self, params: "BugParams"):
+        """
+        Calculate the biomass requirement for this bug's traits.
+        """
+        n_move = self.movement_primitives.shape[0] if hasattr(self.movement_primitives, "shape") else 0
+        # n_attack = self.attack_primitives.shape[0] if hasattr(self.attack_primitives, "shape") else 0
+        req = (
+            params.min_biomass_constant
+            + self.brain_size * params.biomass_per_brain_size
+            + n_move * params.biomass_per_movement_primitive
+            # + n_attack * params.biomass_per_attack_primitive
+            + self.photosynthesis * params.biomass_per_photosynthesis
+            + self.max_climb * params.biomass_per_max_climb
+            + self.max_water * params.biomass_per_max_water
+            + self.water_gulp * params.biomass_per_water_gulp
+            + self.max_energy * params.biomass_per_max_energy
+            + self.energy_gulp * params.biomass_per_energy_gulp
+            + self.max_biomass * params.biomass_per_max_biomass
+            + self.biomass_gulp * params.biomass_per_biomass_gulp
+            + self.max_hp * params.biomass_per_max_hp
+        )
+        return req
 
 @static_data
 class BugObservation:
@@ -791,7 +835,12 @@ def make_bugs(
             # senescence (aging)
             damage += traits.senescence_damage * state.age
             
-            # TODO (Vincent) : check biomass requirements
+            # Vincent's pass to check biomass requirements
+            biomass_req = traits.biomass_requirement(params)
+            # check if the biomass requirement is met
+            lack_biomass = state.biomass < biomass_req
+            # if not, apply damage
+            hp_cost += lack_biomass * params.lack_biomass_damage
                        
             state = state.replace(
                 hp=state.hp - damage,
