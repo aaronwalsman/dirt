@@ -46,9 +46,9 @@ class TeraAriumParams:
     include_biomass : bool = True
     
     # observations
-    max_view_width : int = 19
-    max_view_distance : int = 9
-    max_view_back_distance : int = 9 
+    max_view_width : int = 11
+    max_view_distance : int = 5
+    max_view_back_distance : int = 5
     
     landscape : LandscapeParams = LandscapeParams()
     bugs : BugParams = BugParams()
@@ -102,7 +102,7 @@ def make_tera_arium(
         
         key, bug_key = jrng.split(key)
         bug_state = bugs.init(bug_key)
-        bug_traits = BugTraigs.default(params.max_players)
+        bug_traits = BugTraits.default(params.max_players)
         
         state = TeraAriumState(landscape_state, bug_state, bug_traits)
         
@@ -117,6 +117,16 @@ def make_tera_arium(
         
         # bugs
         bug_state = state.bugs
+        
+        biomass_landscape = state.landscape.biomass.astype(jnp.float32).sum()
+        biomass_bugs = state.bugs.biomass.astype(jnp.float32).sum()
+        biomass_sum = biomass_landscape + biomass_bugs
+        jax.debug.print(
+            'pre  eat biomass: {s} ({l}+{b})',
+            s=biomass_sum,
+            l=biomass_landscape,
+            b=biomass_bugs,
+        )
         
         # - eat
         #   do this before anything else happens so that the food an agent
@@ -157,6 +167,16 @@ def make_tera_arium(
         if params.include_biomass:
             landscape_state = landscape.add_biomass(
                 landscape_state, bug_state.x, leftover_biomass)
+        
+        biomass_landscape = landscape_state.biomass.astype(jnp.float32).sum()
+        biomass_bugs = bug_state.biomass.astype(jnp.float32).sum()
+        biomass_sum = biomass_landscape + biomass_bugs
+        jax.debug.print(
+            'post eat biomass: {s} ({l}+{b})',
+            s=biomass_sum,
+            l=biomass_landscape,
+            b=biomass_bugs,
+        )
         
         # - photosynthesis
         bug_light = grid.read_grid_locations(
@@ -215,6 +235,18 @@ def make_tera_arium(
             landscape_state = landscape.add_biomass(
                 landscape_state, bug_state.x, expelled_biomass)
         
+        jax.debug.print('expelled water {ew}', ew=jnp.sum(expelled_water))
+        
+        biomass_landscape = landscape_state.biomass.astype(jnp.float32).sum()
+        biomass_bugs = bug_state.biomass.astype(jnp.float32).sum()
+        biomass_sum = biomass_landscape + biomass_bugs
+        jax.debug.print(
+            'post l/d biomass: {s} ({l}+{b})',
+            s=biomass_sum,
+            l=biomass_landscape,
+            b=biomass_bugs,
+        )
+        
         # natural landscape processes
         key, landscape_key = jrng.split(key)
         landscape_state = landscape.step(
@@ -223,7 +255,17 @@ def make_tera_arium(
         state = state.replace(
             landscape=landscape_state,
             bugs=bug_state,
-            traits=bug_traits,
+            bug_traits=traits,
+        )
+        
+        biomass_landscape = state.landscape.biomass.astype(jnp.float32).sum()
+        biomass_bugs = state.bugs.biomass.astype(jnp.float32).sum()
+        biomass_sum = biomass_landscape + biomass_bugs
+        jax.debug.print(
+            'post lnd biomass: {s} ({l}+{b})',
+            s=biomass_sum,
+            l=biomass_landscape,
+            b=biomass_bugs,
         )
         
         return state
@@ -231,7 +273,6 @@ def make_tera_arium(
     def observe(
         key : chex.PRNGKey,
         state : TeraAriumState,
-        traits : BugTraits,
     ) -> BugObservation:
         # visual
         # - rgb
@@ -268,12 +309,12 @@ def make_tera_arium(
         # audio/smell
         audio = read_grid_locations(
             state.landscape.audio,
-            state.bug.x,
+            state.bugs.x,
             params.landscape.audio_downsample,
         )
         smell = read_grid_locations(
             state.landscape.smell,
-            state.bug.x,
+            state.bugs.x,
             params.landscape.smell_downsample,
         )
         
@@ -282,7 +323,7 @@ def make_tera_arium(
         wind = jnp.repeat(wind[None,...], repeats=params.max_players, axis=0)
         temperature = read_grid_locations(
             state.landscape.temperature,
-            state.x,
+            state.bugs.x,
             params.landscape.temperature_downsample,
         )
         

@@ -59,14 +59,10 @@ if __name__ == '__main__':
     float_dtype = DEFAULT_FLOAT_DTYPE
     
     params = LandscapeExampleParams().from_commandline()
-    landscape_params = params.landscape_params.replace(
-        include_smell=False,
-        include_audio=False,
-    )
-    params = params.replace(landscape_params = landscape_params)
     
     key = jrng.key(params.seed)
     
+    # make the landscape
     landscape = make_landscape(landscape_params, float_dtype=float_dtype)
     
     params_path = f'{params.output_directory}/params.state'
@@ -114,19 +110,19 @@ if __name__ == '__main__':
         example_report = make_report(example_state)
         
         viewer = Viewer(
-            LandscapeExampleParams(),
-            params_path,
+            #LandscapeExampleParams(),
+            #params_path,
             example_report,
             [reports_path],
             params.landscape_params.world_size,
             window_size=params.window_size,
             get_terrain_map = get_terrain,
             get_active_players = None,
-            get_terrain_texture = get_texture,
+            get_terrain_texture = landscape.render_display_mode,
             get_water_map = None,
             get_sun_direction = None,
         )
-        viewer.begin()
+        viewer.start()
     
     else:
         

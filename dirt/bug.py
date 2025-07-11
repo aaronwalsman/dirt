@@ -14,6 +14,7 @@ from dirt.constants import (
 import dirt.gridworld2d.dynamics as dynamics
 import dirt.gridworld2d.spawn as spawn
 import dirt.gridworld2d.grid as grid
+from dirt.gridworld2d.observations import noisy_sensor
 from dirt.distribution.stochastic_rounding import stochastic_rounding
 
 '''
@@ -103,26 +104,22 @@ class BugParams:
     
     levels : int = 0
     
-    zero_water_damage : float = 0.1
-    
     # costs
     # - resting
-    resting_water_cost : float = 0.01
-    resting_energy_cost : float = 0.01
+    resting_water_cost : float = 0.0001
+    resting_energy_cost : float = 0.001
     # - brain
-    brain_size_water_cost : float = 0.01
-    brain_size_energy_cost : float = 0.01
+    brain_size_water_cost : float = 0.0001
+    brain_size_energy_cost : float = 0.001
     # - movement
-    move_water_cost : float = 0.01
-    move_energy_cost : float = 0.01
-    climb_water_cost : float = 0.01
-    climb_energy_cost : float = 0.01
+    move_water_cost : float = 0.0001
+    move_energy_cost : float = 0.001
+    climb_water_cost : float = 0.0001
+    climb_energy_cost : float = 0.001
     # - reproduction
-    birth_energy_cost : float = 0.01
-    birth_water_cost : float = 0.01
+    birth_energy_cost : float = 0.001
+    birth_water_cost : float = 0.0001
     birth_damage : float = 1.
-    # - color
-    color_change_energy_cost : float = 0.01
     
     # biomass requirements
     # TODO (Vincent) : biomass requirements for various traits goes here
@@ -143,8 +140,8 @@ class BugParams:
     #max_hp_per_mass : float = 10.
     hp_per_armor : float = 10.
     hp_healed_per_energy : float = 10.
-    water_underpayment_damage : float = 10.
-    energy_underpayment_damage : float = 10.
+    water_underpayment_damage : float = 10000.
+    energy_underpayment_damage : float = 1000.
     
     # initialization
     initial_hp : float = 10.
@@ -173,14 +170,18 @@ class BugTraits:
     photosynthesis : float | jnp.ndarray
     
     # sensing
+    # - age
+    max_age_observation : float | jnp.ndarray
+    age_sensor_noise : float | jnp.ndarray
     # - visual
     view_distance : int | jnp.ndarray
     view_back_distance : int | jnp.ndarray
     view_width : int | jnp.ndarray
     max_altitude_observation : float | jnp.ndarray
     visual_sensor_noise : float | jnp.ndarray
-    # - audio/smell
+    # - audio
     audio_sensor_noise : float | jnp.ndarray
+    # - smell
     smell_sensor_noise : float | jnp.ndarray
     # - external resources
     max_water_observation : float | jnp.ndarray
@@ -191,10 +192,11 @@ class BugTraits:
     wind_sensor_noise : float | jnp.ndarray
     # - temperature
     min_temperature_observation : float | jnp.ndarray
-    max_temperature_observaiton : float | jnp.ndarray
+    max_temperature_observation : float | jnp.ndarray
     temperature_sensor_noise : float | jnp.ndarray
-    # - internal resources
-    internal_sensor_noise : float | jnp.ndarray
+    # - health and internal resources
+    health_sensor_noise : float | jnp.ndarray
+    internal_resource_sensor_noise : float | jnp.ndarray
     
     # efficiency
     max_climb : float | jnp.ndarray
@@ -223,6 +225,7 @@ class BugTraits:
     healing_rate : float | jnp.ndarray
     
     # reproduction
+    child_hp : float | jnp.ndarray
     child_water : float | jnp.ndarray
     child_energy : float | jnp.ndarray
     child_biomass : float | jnp.ndarray
@@ -252,14 +255,33 @@ class BugTraits:
             photosynthesis = float_vector(0.),
             
             # sensing
+            # - age
+            max_age_observation = float_vector(1000.),
+            age_sensor_noise = float_vector(0.),
+            # - visual
             view_distance = int_vector(5),
             view_back_distance = int_vector(0),
             view_width = int_vector(5),
-            view_sensitivity = float_vector(1.),
             max_altitude_observation = float_vector(5.),
-            audio_sensitivity = float_vector(1.),
-            smell_sensitivity = float_vector(1.),
-            internal_sensitivity = float_vector(1.),
+            visual_sensor_noise = float_vector(0.),
+            # - audio
+            audio_sensor_noise = float_vector(0.),
+            # - smell
+            smell_sensor_noise = float_vector(0.),
+            # - external resources
+            max_water_observation = float_vector(1.),
+            max_energy_observation = float_vector(1.),
+            max_biomass_observation = float_vector(1.),
+            external_resource_sensor_noise = float_vector(0.),
+            # - wind
+            wind_sensor_noise = float_vector(0.),
+            # - temperature
+            min_temperature_observation = float_vector(-3.),
+            max_temperature_observation = float_vector(3.),
+            temperature_sensor_noise = float_vector(0.),
+            # internal resources
+            health_sensor_noise = float_vector(0.),
+            internal_resource_sensor_noise = float_vector(0.),
             
             # efficiency
             max_climb = float_vector(2.),
@@ -288,6 +310,7 @@ class BugTraits:
             healing_rate = float_vector(1.),
             
             # reproduction
+            child_hp = float_vector(5.),
             child_energy = float_vector(1.0),
             child_biomass = float_vector(1.0),
             child_water = float_vector(0.5),
@@ -307,48 +330,37 @@ class BugTraits:
             ),
         )
 
-#@static_data
-#class BugAction:
-#    forward : jnp.ndarray
-#    rotate : jnp.ndarray
-#    bite : jnp.ndarray
-#    eat : jnp.ndarray
-#    reproduce : jnp.ndarray
-#
-#Kinds of Actions:
-#    Movement
-#    Attack
-#    Eat
-#    Expell
-#    Scent-mark
-#    Call
-#    Change Level
-#    Reproduce
-
 @static_data
 class BugObservation:
-    # grid external
+    
+    # age
+    age : jnp.ndarray
+    newborn : jnp.ndarray
+    
+    # visual
     rgb : jnp.ndarray
     relative_altitude : jnp.ndarray
 
-    # single channel external
-    # - sensory
+    # audio
     audio : jnp.ndarray
+    
+    # smell
     smell : jnp.ndarray
-    # - resources
+    
+    # weather
+    wind : jnp.ndarray
+    temperature : jnp.ndarray
+    
+    # external resources
     external_water : jnp.ndarray
     external_energy : jnp.ndarray
-    external_biomass : jnp.ndarray                   
-    wind : jnp.ndarray                                                   
-    temperature : jnp.ndarray
+    external_biomass : jnp.ndarray
              
-    # single channel internal   
-    health : jnp.ndarray                       
-    internal_water : jnp.ndarray    
+    # health and internal resources
+    health : jnp.ndarray
+    internal_water : jnp.ndarray
     internal_energy : jnp.ndarray
     internal_biomass : jnp.ndarray
-    
-    born : jnp.ndarray
 
 #@static_data
 #class BugAction:
@@ -368,7 +380,6 @@ class BugState:
     age : jnp.ndarray
     
     # health
-    max_hp : jnp.ndarray
     hp : jnp.ndarray
     
     # resources
@@ -381,29 +392,6 @@ class BugState:
     
     # level
     level : jnp.ndarray
-    
-    '''
-    # sensing
-    # - visual
-    rgb_sensor_noise : jnp.ndarray
-    max_altitude_observation : jnp.ndarray
-    altitude_sensor_noise : jnp.ndarray
-    # - audio/smell
-    audio_sensor_noise : jnp.ndarray
-    smell_sensor_noise : jnp.ndarray
-    # - external resources
-    max_water_observation : jnp.ndarray
-    max_energy_observation : jnp.ndarray
-    max_biomass_obsevation : jnp.ndarray
-    external_resource_sensor_noise : jnp.ndarray
-    # - wind
-    wind_sensor_noise : jnp.ndarray
-    min_temperature_observation : jnp.ndarray
-    max_temperature_observaiton : jnp.ndarray
-    temperature_sensor_noise : jnp.ndarray
-    # - internal resources
-    internal_sensor_noise : jnp.ndarray
-    '''
     
     # tracking
     family_tree : Any
@@ -545,36 +533,6 @@ def make_bugs(
             
             return mass
         
-        '''
-        def update_state_traits(
-            state : BugState,
-            traits : BugTraits,
-        ):
-            return = state.replace(
-                # hp
-                max_hp=traits.max_hp,
-                # sensing
-                # - visual
-                max_altitude_observation = traits.max_altitude_observation
-                rgb_sensor_noise = traits.visual_sensor_noise
-                # - audio/smell
-                audio_sensor_noise = traits.audio_sensor_noise
-                smell_sensor_noise = traits.smell_sensor_noise
-                # - external resources
-                max_water_observation = traits.max_water_observation
-                max_energy_observation = traits.max_energy_observaiton
-                max_biomass_observation = traits.max_biomass_observation
-                external_resource_sensor_noise : jnp.ndarray
-                # - wind
-                wind_sensor_noise = traits.wind_sensor_noise
-                min_temperature_observation = traits.min_temperature_observation
-                max_temperature_observaiton = traits.max_temperature_observation
-                temperature_sensor_noise = traits.temperature_sensor_noise
-                # - internal resources
-                internal_sensor_noise = traits.internal_sensor_noise
-            )
-        '''
-        
         def move(
             key : chex.PRNGKey,
             state : BugState,
@@ -583,6 +541,7 @@ def make_bugs(
             altitude : jnp.ndarray,
             altitude_downsample : int,
         ):
+            
             # validate
             assert (
                 params.movement_primitives ==
@@ -603,6 +562,17 @@ def make_bugs(
                 traits.movement_primitives[all_players, action_primitive])
             direction = jnp.where(move[..., None], player_movement_primitives,0)
             dxr = stochastic_rounding(key, direction)
+            
+            #jax.debug.print(
+            #    'energy: {e}\n'
+            #    'water: {w}\n'
+            #    'hp: {h}\n'
+            #    'dxr: {dxr}\n',
+            #    e=state.energy[:4],
+            #    w=state.water[:4],
+            #    h=state.hp[:4],
+            #    dxr=dxr[:4],
+            #)
             
             # move the bugs
             active_bugs = family_tree.active(state.family_tree)
@@ -681,8 +651,9 @@ def make_bugs(
             action_primitive = action_to_primitive_map[action, 1]
             
             # compute which bugs are eating anything
-            eat = action_type == EAT_ACTION_TYPE
-            expell = action_type == EXPELL_ACTION_TYPE
+            active = Bugs.active_players(state)
+            eat = (action_type == EAT_ACTION_TYPE) & active
+            expell = (action_type == EXPELL_ACTION_TYPE) & active
             
             # water
             if params.include_water:
@@ -728,7 +699,7 @@ def make_bugs(
             if params.include_biomass:
                 # - compute which bugs are eating biomass
                 eat_biomass = eat & (action_primitive == BIOMASS_PRIMITIVE)
-                expell_biomass = expell & (action_primitive ==BIOMASS_PRIMITIVE)
+                expell_biomass = expell&(action_primitive == BIOMASS_PRIMITIVE)
                 # - compute how much biomass each bug will consume
                 desired_biomass = eat_biomass * jnp.minimum(
                     traits.biomass_gulp, traits.max_biomass - state.biomass)
@@ -763,7 +734,7 @@ def make_bugs(
             state : BugState,
             traits : BugTraits,
         ):
-            healable_hp = state.max_hp - state.hp
+            healable_hp = traits.max_hp - state.hp
             healing_energy_cost = healable_hp / params.hp_healed_per_energy
             usable_energy_cost = jnp.minimum(healing_energy_cost, state.energy)
             hp_to_heal = usable_energy_cost * params.hp_healed_per_energy
@@ -878,11 +849,21 @@ def make_bugs(
             paid_water = birth_required_water * will_reproduce
             paid_energy = birth_required_energy * will_reproduce
             paid_biomass = birth_required_biomass * will_reproduce
+            
+            # DELETE
+            sb = state.biomass
+            
             state = state.replace(
                 hp = state.hp - paid_hp,
                 water = state.water - paid_water,
                 energy = state.energy - paid_energy,
                 biomass = state.biomass - paid_biomass,
+            )
+            
+            jax.debug.print('huh {sb} {pb} {nb}',
+                sb=jnp.sum(sb.astype(jnp.float32)),
+                pb=jnp.sum(paid_biomass.astype(jnp.float32)),
+                nb=jnp.sum(state.biomass.astype(jnp.float32)),
             )
             
             # update the family tree
@@ -896,6 +877,8 @@ def make_bugs(
             #   (the parent dying from birth damage does not prevent birth)
             alive = state.hp > 0
             recent_deaths = active & ~alive
+            jax.debug.print('deaths {d}', d=jnp.sum(recent_deaths))
+            
             # - increment the age of alive bugs and zero the age of dead bugs
             age = (state.age+1) * alive
             # - step the family tree
@@ -940,17 +923,23 @@ def make_bugs(
             # get the resources of the dead bugs, and the resources expended
             # in birth to return to the landscape
             expelled_moisture = paid_water
-            expelled_water = state.water * ~active
-            expelled_energy = state.energy * ~active
-            expelled_biomass = state.energy * ~active
+            dead_water = state.water * recent_deaths
+            dead_energy = state.energy * recent_deaths
+            dead_biomass = state.biomass * recent_deaths
             state = state.replace(
-                water = state.water * active,
-                energy = state.energy * active,
-                biomass = state.biomass * active,
+                water = state.water * ~recent_deaths,
+                energy = state.energy * ~recent_deaths,
+                biomass = state.biomass * ~recent_deaths,
+            )
+            
+            jax.debug.print('dead water {dw}', dw=jnp.sum(dead_water))
+            jax.debug.print('oh  {sb} {db}',
+                sb=jnp.sum(state.biomass.astype(jnp.float32)),
+                db=jnp.sum(dead_biomass.astype(jnp.float32)),
             )
             
             # update the child hp and resources
-            child_hp = traits.max_hp[parent_locations]
+            child_hp = traits.child_hp[parent_locations]
             child_water = traits.child_water[parent_locations]
             child_energy = traits.child_energy[parent_locations]
             child_biomass = traits.child_biomass[parent_locations]
@@ -962,12 +951,21 @@ def make_bugs(
                 biomass = state.biomass.at[child_locations].set(child_biomass),
             )
             
+            # zero negative hp
+            state = state.replace(hp = jnp.clip(state.hp, min=0.))
+            
+            jax.debug.print('hah {sb} {db}',
+                sb=jnp.sum(state.biomass.astype(jnp.float32)),
+                db=jnp.sum(dead_biomass.astype(jnp.float32)),
+            )
+            
             return (
                 state,
+                #expelled_x,
                 expelled_moisture,
-                expelled_water,
-                expelled_energy,
-                expelled_biomass,
+                dead_water,
+                dead_energy,
+                dead_biomass,
             )
         
         def observe(
@@ -984,19 +982,28 @@ def make_bugs(
             external_energy : jnp.ndarray,
             external_biomass : jnp.ndarray,
         ):
-            # the observations for all new bugs will be zeroed out
-            # because the traits for them have not been computed yet
-            positive_age = state.age > 0
+            
+            # age
+            key, age_key = jrng.split(key)
+            sensor_age = jnp.clip(
+                state.age/traits.max_age_observation, min=0., max=1.)
+            sensor_age = noisy_sensor(
+                age_key, sensor_age, traits.age_sensor_noise)
+            newborn = state.age == 0
+            
+            # for all observation variables below, the values for newborns
+            # will be zeroed out because the traits for them have not been
+            # provided yet
             
             # vision
             # - rgb
             key, rgb_key = jrng.split(key)
             sensor_rgb = noisy_sensor(rgb_key, rgb, traits.visual_sensor_noise)
-            sensor_rgb *= positive_age[:,None,None]
+            sensor_rgb *= ~newborn[:,None,None,None]
             
             # - altitude
             sensor_relative_altitude = jnp.clip(
-                relative_altitude / traits.max_altitude_observation,
+                relative_altitude/traits.max_altitude_observation[:,None,None],
                 min=-1.,
                 max=1.,
             )
@@ -1004,36 +1011,36 @@ def make_bugs(
             sensor_relative_altitude = noisy_sensor(
                 altitude_key,
                 relative_altitude,
-                state.visual_sensor_noise,
+                traits.visual_sensor_noise,
                 minval=-1.,
                 maxval=1.,
             )
-            sensor_relative_altitude *= positive_age[:,None,None]
+            sensor_relative_altitude *= ~newborn[:,None,None]
             
             # audio
             key, audio_key = jrng.split(key)
             sensor_audio = noisy_sensor(
                 audio_key, audio, traits.audio_sensor_noise)
-            sensor_audio *= positive_age[:,None]
+            sensor_audio *= ~newborn[:,None]
             
             # smell
             key, smell_key = jrng.split(key)
             sensor_smell = noisy_sensor(
                 smell_key, smell, traits.smell_sensor_noise)
-            sensor_smell *= positive_age[:,None]
+            sensor_smell *= ~newborn[:,None]
             
             # weather
-            key, wind_key, temperature_key = jrng.split(key)
+            key, wind_key, temperature_key = jrng.split(key, 3)
             # - wind
             sensor_wind = noisy_sensor(
-                wind_key, wind, state.wind_sensor_noise)
+                wind_key, wind, traits.wind_sensor_noise) * ~newborn[:,None]
             # - temperature
             temperature_range = (
-                state.max_temperature_observation -
-                state.min_temperature_observation
+                traits.max_temperature_observation -
+                traits.min_temperature_observation
             )
             sensor_temperature = jnp.clip(
-                (temperature - state.min_temperature_observation) /
+                (temperature - traits.min_temperature_observation) /
                 temperature_range,
                 min=0.,
                 max=1.,
@@ -1041,66 +1048,72 @@ def make_bugs(
             sensor_temperature = noisy_sensor(
                 temperature_key,
                 sensor_temperature,
-                state.temperature_sensor_noise,
-            )
+                traits.temperature_sensor_noise,
+            ) * ~newborn
             
             # external resources
             key, water_key, energy_key, biomass_key = jrng.split(key, 4)
             # - water
             sensor_external_water = jnp.clip(
-                external_water/state.max_water_observation, min=0., max=1.)
+                external_water/traits.max_water_observation, min=0., max=1.)
             sensor_external_water = noisy_sensor(
                 water_key,
                 sensor_external_water,
-                state.external_resource_sensor_noise,
-            )
+                traits.external_resource_sensor_noise,
+            ) * ~newborn
             # - energy
             sensor_external_energy = jnp.clip(
-                external_energy/state.max_energy_observation, min=0., max=1.)
+                external_energy/traits.max_energy_observation, min=0., max=1.)
             sensor_external_energy = noisy_sensor(
                 energy_key,
                 sensor_external_energy,
-                state.external_resource_sensor_noise,
-            )
+                traits.external_resource_sensor_noise,
+            ) * ~newborn
             # - biomass
             sensor_external_biomass = jnp.clip(
-                external_biomass/state.max_biomass_observation, min=0., max=1.)
+                external_biomass/traits.max_biomass_observation, min=0., max=1.)
             sensor_external_biomass = noisy_sensor(
                 biomass_key,
                 sensor_external_biomass,
-                state.external_resource_sensor_noise,
-            )
+                traits.external_resource_sensor_noise,
+            ) * ~newborn
             
             # health and internal resources
             key, health_key, water_key, energy_key, biomass_key = jrng.split(
                 key, 5)
             # - health
-            sensor_health = state.hp / state.max_hp
+            sensor_health = state.hp / traits.max_hp
             sensor_health = noisy_sensor(
-                health_key, sensor_health, state.internal_resource_sensor_noise)
+                health_key,
+                sensor_health,
+                traits.health_sensor_noise,
+            )
+            sensor_health *= ~newborn
             # - water
-            sensor_internal_water = state.water/state.max_internal_water
+            sensor_internal_water = state.water/traits.max_water
             sensor_internal_water = noisy_sensor(
                 water_key,
                 sensor_internal_water,
-                state.internal_resource_sensor_noise,
-            )
+                traits.internal_resource_sensor_noise,
+            ) * ~newborn
             # - energy
-            sensor_internal_energy = state.energy/state.max_internal_energy
+            sensor_internal_energy = state.energy/traits.max_energy
             sensor_internal_energy = noisy_sensor(
                 energy_key,
                 sensor_internal_energy,
-                state.internal_resource_sensor_noise,
-            )
+                traits.internal_resource_sensor_noise,
+            ) * ~newborn
             # - biomass
-            sensor_internal_biomass = state.biomass/state.max_internal_biomass
+            sensor_internal_biomass = state.biomass/traits.max_biomass
             sensor_internal_biomass = noisy_sensor(
                 biomass_key,
                 sensor_internal_biomass,
-                state.internal_resource_sensor_noise,
-            )
+                traits.internal_resource_sensor_noise,
+            ) * ~newborn
             
             return BugObservation(
+                age=sensor_age,
+                newborn=newborn,
                 rgb=sensor_rgb,
                 relative_altitude=sensor_relative_altitude,
                 audio=sensor_audio,

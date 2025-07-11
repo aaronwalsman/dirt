@@ -14,3 +14,15 @@ def make_uniform_discrete_policy(num_actions):
             return action
     
     return UniformDiscretePolicy
+
+def make_random_discrete_policy(p_actions):
+    @static_functions
+    class RandomDiscretePolicy:
+        def init():
+            return p_actions
+        
+        def act(key, state):
+            action = jrng.choice(key, p_actions.shape[0], (), p=p_actions)
+            return action
+    
+    return RandomDiscretePolicy

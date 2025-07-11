@@ -69,6 +69,7 @@ def upsample_grid(a, h, w, preserve_mass=True):
     '''
     ah, aw, *c = a.shape
     assert h >= ah and w >= aw
+    assert h % ah == 0 and w % aw == 0
     dh = h // ah
     dw = w // aw
     a = jnp.repeat(jnp.repeat(a, dh, axis=0), dw, axis=1)
@@ -204,7 +205,8 @@ def read_grid_locations(a, x, downsample, downsample_scale=True):
         value /= (downsample**2)
     return value
 
-def write_grid_locations(a, x, value, downsample, overwrite_all=False):
+def write_grid_locations(
+    a, x, value, downsample, overwrite_all=False):
     '''
     Write values to specific locations (x) in a downsampled grid (a).  The
     downsampled grid values represent the sum of quantities from a higher
@@ -217,11 +219,15 @@ def write_grid_locations(a, x, value, downsample, overwrite_all=False):
     this cell after this operation. 
     '''
     xd = x // downsample
+    xd0 = xd[...,0]
+    xd1 = xd[...,1]
     if overwrite_all:
-        a = a.at[xd].set(value * downsample**2)
+        a = a.at[xd0, xd1].set(value * downsample**2)
     else:
-        current_value = a[xd[...,0], xd[...,1]]
-        a = a.at[xd].add(value - current_value * (1./(downsample**2)))
+        current_value = a[xd0, xd1]
+        a = a.at[xd0, xd1].add(
+            value - current_value * (1./(downsample**2)))
+    
     return a
 
 def add_to_grid_locations(a, x, value, downsample):
@@ -240,6 +246,7 @@ def take_from_grid_locations(a, x, take, downsample):
     is taken from each location.
     '''
     taken = read_grid_locations(a, x, downsample)
-    taken = jnp.clip(taken, max=take)
+    if take is None:
+        taken = jnp.clip(taken, max=take)
     a = add_to_grid_locations(a, x, -taken, downsample)
     return a, taken
