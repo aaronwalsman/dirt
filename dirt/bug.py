@@ -840,7 +840,7 @@ def make_bugs(
             # check if the biomass requirement is met
             lack_biomass = state.biomass < biomass_req
             # if not, apply damage
-            hp_cost += lack_biomass * params.lack_biomass_damage
+            damage += lack_biomass * params.lack_biomass_damage
                        
             state = state.replace(
                 hp=state.hp - damage,
