@@ -177,7 +177,7 @@ class LandscapeParams:
     # - biomass
     initial_biomass_site_density : float = (1./4.)
     initial_biomass_per_site : float = 1.
-    biomass_photosynthesis : float = 0.001
+    biomass_photosynthesis : float = 0.01
     photosynthesis_energy_per_biomass : float = 1.
     
     # smell

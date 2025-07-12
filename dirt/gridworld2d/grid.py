@@ -246,7 +246,7 @@ def take_from_grid_locations(a, x, take, downsample):
     is taken from each location.
     '''
     taken = read_grid_locations(a, x, downsample)
-    if take is None:
+    if take is not None:
         taken = jnp.clip(taken, max=take)
     a = add_to_grid_locations(a, x, -taken, downsample)
     return a, taken

@@ -118,16 +118,6 @@ def make_tera_arium(
         # bugs
         bug_state = state.bugs
         
-        biomass_landscape = state.landscape.biomass.astype(jnp.float32).sum()
-        biomass_bugs = state.bugs.biomass.astype(jnp.float32).sum()
-        biomass_sum = biomass_landscape + biomass_bugs
-        jax.debug.print(
-            'pre  eat biomass: {s} ({l}+{b})',
-            s=biomass_sum,
-            l=biomass_landscape,
-            b=biomass_bugs,
-        )
-        
         # - eat
         #   do this before anything else happens so that the food an agent
         #   observed in the last time step is still in the right location
@@ -168,16 +158,6 @@ def make_tera_arium(
             landscape_state = landscape.add_biomass(
                 landscape_state, bug_state.x, leftover_biomass)
         
-        biomass_landscape = landscape_state.biomass.astype(jnp.float32).sum()
-        biomass_bugs = bug_state.biomass.astype(jnp.float32).sum()
-        biomass_sum = biomass_landscape + biomass_bugs
-        jax.debug.print(
-            'post eat biomass: {s} ({l}+{b})',
-            s=biomass_sum,
-            l=biomass_landscape,
-            b=biomass_bugs,
-        )
-        
         # - photosynthesis
         bug_light = grid.read_grid_locations(
             state.landscape.light,
@@ -210,6 +190,7 @@ def make_tera_arium(
         # - birth and death
         (
             bug_state,
+            expelled_x,
             evaporated_birth,
             expelled_water,
             expelled_energy,
@@ -221,31 +202,19 @@ def make_tera_arium(
             evaporated_move + evaporated_metabolism + evaporated_birth)
         if params.landscape.include_rain:
             landscape_state = landscape.add_moisture(
-                landscape_state, bug_state.x, evaporated_moisture)
+                landscape_state, expelled_x, evaporated_moisture)
         elif params.include_water:
             landscape_state = landscape.add_water(
-                landscape_state, bug_state.x, evaporated_moisture)
+                landscape_state, expelled_x, evaporated_moisture)
         if params.include_water:
             landscape_state = landscape.add_water(
-                landscape_state, bug_state.x, expelled_water)
+                landscape_state, expelled_x, expelled_water)
         if params.include_energy:
             landscape_state = landscape.add_energy(
-                landscape_state, bug_state.x, expelled_energy)
+                landscape_state, expelled_x, expelled_energy)
         if params.include_biomass:
             landscape_state = landscape.add_biomass(
-                landscape_state, bug_state.x, expelled_biomass)
-        
-        jax.debug.print('expelled water {ew}', ew=jnp.sum(expelled_water))
-        
-        biomass_landscape = landscape_state.biomass.astype(jnp.float32).sum()
-        biomass_bugs = bug_state.biomass.astype(jnp.float32).sum()
-        biomass_sum = biomass_landscape + biomass_bugs
-        jax.debug.print(
-            'post l/d biomass: {s} ({l}+{b})',
-            s=biomass_sum,
-            l=biomass_landscape,
-            b=biomass_bugs,
-        )
+                landscape_state, expelled_x, expelled_biomass)
         
         # natural landscape processes
         key, landscape_key = jrng.split(key)
@@ -256,16 +225,6 @@ def make_tera_arium(
             landscape=landscape_state,
             bugs=bug_state,
             bug_traits=traits,
-        )
-        
-        biomass_landscape = state.landscape.biomass.astype(jnp.float32).sum()
-        biomass_bugs = state.bugs.biomass.astype(jnp.float32).sum()
-        biomass_sum = biomass_landscape + biomass_bugs
-        jax.debug.print(
-            'post lnd biomass: {s} ({l}+{b})',
-            s=biomass_sum,
-            l=biomass_landscape,
-            b=biomass_bugs,
         )
         
         return state

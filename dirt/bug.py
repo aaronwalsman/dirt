@@ -607,17 +607,6 @@ def make_bugs(
             direction = jnp.where(move[..., None], player_movement_primitives,0)
             dxr = stochastic_rounding(key, direction)
             
-            #jax.debug.print(
-            #    'energy: {e}\n'
-            #    'water: {w}\n'
-            #    'hp: {h}\n'
-            #    'dxr: {dxr}\n',
-            #    e=state.energy[:4],
-            #    w=state.water[:4],
-            #    h=state.hp[:4],
-            #    dxr=dxr[:4],
-            #)
-            
             # move the bugs
             active_bugs = family_tree.active(state.family_tree)
             x1, r1, _, g1 = dynamics.movement_step(
@@ -840,7 +829,8 @@ def make_bugs(
             # check if the biomass requirement is met
             lack_biomass = state.biomass < biomass_req
             # if not, apply damage
-            damage += lack_biomass * params.lack_biomass_damage
+            # turning this off momentarily until we tune the parameters
+            #damage += lack_biomass * params.lack_biomass_damage
                        
             state = state.replace(
                 hp=state.hp - damage,
@@ -858,6 +848,9 @@ def make_bugs(
             # determine who is active and alive
             active = Bugs.active_players(state)
             alive = state.hp > 0
+            
+            # pre-register locations where expelled resources will be placed
+            expelled_x = state.x
             
             # compute which bugs will reproduce
             # - compute which bugs want to reproduce
@@ -899,20 +892,11 @@ def make_bugs(
             paid_energy = birth_required_energy * will_reproduce
             paid_biomass = birth_required_biomass * will_reproduce
             
-            # DELETE
-            sb = state.biomass
-            
             state = state.replace(
                 hp = state.hp - paid_hp,
                 water = state.water - paid_water,
                 energy = state.energy - paid_energy,
                 biomass = state.biomass - paid_biomass,
-            )
-            
-            jax.debug.print('huh {sb} {pb} {nb}',
-                sb=jnp.sum(sb.astype(jnp.float32)),
-                pb=jnp.sum(paid_biomass.astype(jnp.float32)),
-                nb=jnp.sum(state.biomass.astype(jnp.float32)),
             )
             
             # update the family tree
@@ -926,7 +910,6 @@ def make_bugs(
             #   (the parent dying from birth damage does not prevent birth)
             alive = state.hp > 0
             recent_deaths = active & ~alive
-            jax.debug.print('deaths {d}', d=jnp.sum(recent_deaths))
             
             # - increment the age of alive bugs and zero the age of dead bugs
             age = (state.age+1) * alive
@@ -981,12 +964,6 @@ def make_bugs(
                 biomass = state.biomass * ~recent_deaths,
             )
             
-            jax.debug.print('dead water {dw}', dw=jnp.sum(dead_water))
-            jax.debug.print('oh  {sb} {db}',
-                sb=jnp.sum(state.biomass.astype(jnp.float32)),
-                db=jnp.sum(dead_biomass.astype(jnp.float32)),
-            )
-            
             # update the child hp and resources
             child_hp = traits.child_hp[parent_locations]
             child_water = traits.child_water[parent_locations]
@@ -1003,14 +980,9 @@ def make_bugs(
             # zero negative hp
             state = state.replace(hp = jnp.clip(state.hp, min=0.))
             
-            jax.debug.print('hah {sb} {db}',
-                sb=jnp.sum(state.biomass.astype(jnp.float32)),
-                db=jnp.sum(dead_biomass.astype(jnp.float32)),
-            )
-            
             return (
                 state,
-                #expelled_x,
+                expelled_x,
                 expelled_moisture,
                 dead_water,
                 dead_energy,
