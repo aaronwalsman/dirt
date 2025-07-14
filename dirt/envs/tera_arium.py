@@ -44,6 +44,8 @@ class TeraAriumParams:
     include_water : bool = True
     include_energy : bool = True
     include_biomass : bool = True
+    include_temperature : bool = True
+    include_rain : bool = True
     
     # observations
     max_view_width : int = 11

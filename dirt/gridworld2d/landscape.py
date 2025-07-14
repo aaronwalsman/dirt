@@ -1179,7 +1179,7 @@ def make_landscape(
                     state, shape=shape, convert_to_image=convert_to_image)
             
             else:
-                rgb = jnp.zeros((*texture_size, 3))
+                rgb = jnp.zeros((*shape, 3))
                 if convert_to_image:
                     rgb = jax_to_image(rgb)
             
