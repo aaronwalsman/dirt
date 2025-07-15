@@ -94,6 +94,18 @@ LEVEL_ACTION_TYPE = 7
 REPRODUCE_ACTION_TYPE = 8
 NUM_ACTION_TYPES = 9
 
+action_type_names = {
+    0 : 'no action',
+    1 : 'move',
+    2 : 'attack',
+    3 : 'eat',
+    4 : 'expell',
+    5 : 'emit smell',
+    6 : 'emit audio',
+    7 : 'change level',
+    8 : 'reproduce',
+}
+
 @static_data
 class BugParams:
     world_size : Tuple[int,int] = (1024,1024)
@@ -531,12 +543,21 @@ def make_bugs(
             # initialize hp, water, energy, and biomass
             hp = (
                 active_players*params.initial_hp).astype(float_dtype)
-            water = (
-                active_players*params.initial_water).astype(float_dtype)
-            energy = (
-                active_players*params.initial_energy).astype(float_dtype)
-            biomass = (
-                active_players*params.initial_biomass).astype(float_dtype)
+            if params.include_water:
+                water = (
+                    active_players*params.initial_water).astype(float_dtype)
+            else:
+                water = None
+            if params.include_energy:
+                energy = (
+                    active_players*params.initial_energy).astype(float_dtype)
+            else:
+                energy = None
+            if params.include_biomass:
+                biomass = (
+                    active_players*params.initial_biomass).astype(float_dtype)
+            else:
+                biomass = None
             
             # initialize color
             n = active_players.shape[0]
@@ -664,6 +685,8 @@ def make_bugs(
                 water_cost = water_cost * can_move * active_bugs
                 water = state.water - water_cost
                 state = state.replace(water=water)
+            else:
+                water_cost = None
             
             return state, water_cost
         
@@ -870,11 +893,13 @@ def make_bugs(
             birth_required_biomass = traits.child_biomass
             # - compute which bugs are able to reproduce
             #   (those that can satisfy the birth costs)
-            able_to_reproduce = (
-                (state.water >= birth_required_water) &
-                (state.energy >= birth_required_energy) &
-                (state.biomass >= birth_required_biomass)
-            )
+            able_to_reproduce = jnp.ones((params.max_players,), dtype=jnp.bool)
+            if params.include_water:
+                able_to_reproduce &= (state.water >= birth_required_water)
+            if params.include_energy:
+                able_to_reproduce &= (state.energy >= birth_required_energy)
+            if params.include_biomass:
+                able_to_reproduce &= (state.biomass >= birth_required_biomass)
             # - compute which bugs will actually reproduce
             will_reproduce = alive & wants_to_reproduce & able_to_reproduce
             # - compute new positions and rotations for the children and
@@ -888,16 +913,16 @@ def make_bugs(
             
             # charge the parents for the required birth resources
             paid_hp = birth_damage * will_reproduce
-            paid_water = birth_required_water * will_reproduce
-            paid_energy = birth_required_energy * will_reproduce
-            paid_biomass = birth_required_biomass * will_reproduce
-            
-            state = state.replace(
-                hp = state.hp - paid_hp,
-                water = state.water - paid_water,
-                energy = state.energy - paid_energy,
-                biomass = state.biomass - paid_biomass,
-            )
+            state = state.replace(hp = state.hp - paid_hp)
+            if params.include_water:
+                paid_water = birth_required_water * will_reproduce
+                state = state.replace(water = state.water - paid_water)
+            if params.include_energy:
+                paid_energy = birth_required_energy * will_reproduce
+                state = state.replace(energy = state.energy - paid_energy)
+            if params.include_biomass:
+                paid_biomass = birth_required_biomass * will_reproduce
+                state = state.replace(biomass = state.biomass - paid_biomass)
             
             # update the family tree
             # - get the locations of the new parents
@@ -952,30 +977,47 @@ def make_bugs(
             # moved this earlier so that new bugs still have age=0
             #state = state.replace(age=(state.age + 1) * active)
             
+            # compute the child hp and resources
+            child_hp = traits.child_hp[parent_locations]
+            state = state.replace(
+                hp = state.hp.at[child_locations].set(child_hp))
+            
+            # update the resources
             # get the resources of the dead bugs, and the resources expended
             # in birth to return to the landscape
-            expelled_moisture = paid_water
-            dead_water = state.water * recent_deaths
-            dead_energy = state.energy * recent_deaths
-            dead_biomass = state.biomass * recent_deaths
-            state = state.replace(
-                water = state.water * ~recent_deaths,
-                energy = state.energy * ~recent_deaths,
-                biomass = state.biomass * ~recent_deaths,
-            )
+            if params.include_water:
+                expelled_moisture = paid_water
+                dead_water = state.water * recent_deaths
+                child_water = traits.child_water[parent_locations]
+                water = state.water * ~recent_deaths
+                water = water.at[child_locations].set(child_water)
+                #state = state.replace(water = state.water * ~recent_deaths)
+                state = state.replace(water=water)
+            else:
+                expelled_moisture = None
+                dead_water = None
+            if params.include_energy:
+                dead_energy = state.energy * recent_deaths
+                child_energy = traits.child_energy[parent_locations]
+                energy = state.energy * ~recent_deaths
+                energy = energy.at[child_locations].set(child_energy)
+                #state = state.replace(energy = state.energy * ~recent_deaths)
+                state = state.replace(energy=energy)
+            else:
+                dead_energy = None
+            if params.include_biomass:
+                dead_biomass = state.biomass * recent_deaths
+                child_biomass = traits.child_biomass[parent_locations]
+                biomass = state.biomass * ~recent_deaths
+                biomass = biomass.at[child_locations].set(child_biomass)
+                #state = state.replace(biomass = state.biomass * ~recent_deaths)
+                state = state.replace(biomass=biomass)
             
-            # update the child hp and resources
-            child_hp = traits.child_hp[parent_locations]
-            child_water = traits.child_water[parent_locations]
-            child_energy = traits.child_energy[parent_locations]
-            child_biomass = traits.child_biomass[parent_locations]
-            # - update the state
-            state = state.replace(
-                hp = state.hp.at[child_locations].set(child_hp),
-                water = state.water.at[child_locations].set(child_water),
-                energy = state.energy.at[child_locations].set(child_energy),
-                biomass = state.biomass.at[child_locations].set(child_biomass),
-            )
+            ## - update the state
+            #    water = state.water.at[child_locations].set(child_water),
+            #    energy = state.energy.at[child_locations].set(child_energy),
+            #    biomass = state.biomass.at[child_locations].set(child_biomass),
+            #)
             
             # zero negative hp
             state = state.replace(hp = jnp.clip(state.hp, min=0.))
@@ -1075,29 +1117,44 @@ def make_bugs(
             # external resources
             key, water_key, energy_key, biomass_key = jrng.split(key, 4)
             # - water
-            sensor_external_water = jnp.clip(
-                external_water/traits.max_water_observation, min=0., max=1.)
-            sensor_external_water = noisy_sensor(
-                water_key,
-                sensor_external_water,
-                traits.external_resource_sensor_noise,
-            ) * ~newborn
+            if params.include_water:
+                sensor_external_water = jnp.clip(
+                    external_water/traits.max_water_observation, min=0., max=1.)
+                sensor_external_water = noisy_sensor(
+                    water_key,
+                    sensor_external_water,
+                    traits.external_resource_sensor_noise,
+                ) * ~newborn
+            else:
+                sensor_external_water = None
             # - energy
-            sensor_external_energy = jnp.clip(
-                external_energy/traits.max_energy_observation, min=0., max=1.)
-            sensor_external_energy = noisy_sensor(
-                energy_key,
-                sensor_external_energy,
-                traits.external_resource_sensor_noise,
-            ) * ~newborn
+            if params.include_energy:
+                sensor_external_energy = jnp.clip(
+                    external_energy/traits.max_energy_observation,
+                    min=0.,
+                    max=1.,
+                )
+                sensor_external_energy = noisy_sensor(
+                    energy_key,
+                    sensor_external_energy,
+                    traits.external_resource_sensor_noise,
+                ) * ~newborn
+            else:
+                sensor_external_energy = None
             # - biomass
-            sensor_external_biomass = jnp.clip(
-                external_biomass/traits.max_biomass_observation, min=0., max=1.)
-            sensor_external_biomass = noisy_sensor(
-                biomass_key,
-                sensor_external_biomass,
-                traits.external_resource_sensor_noise,
-            ) * ~newborn
+            if params.include_biomass:
+                sensor_external_biomass = jnp.clip(
+                    external_biomass/traits.max_biomass_observation,
+                    min=0.,
+                    max=1.,
+                )
+                sensor_external_biomass = noisy_sensor(
+                    biomass_key,
+                    sensor_external_biomass,
+                    traits.external_resource_sensor_noise,
+                ) * ~newborn
+            else:
+                sensor_external_biomass = None
             
             # health and internal resources
             key, health_key, water_key, energy_key, biomass_key = jrng.split(
@@ -1111,26 +1168,35 @@ def make_bugs(
             )
             sensor_health *= ~newborn
             # - water
-            sensor_internal_water = state.water/traits.max_water
-            sensor_internal_water = noisy_sensor(
-                water_key,
-                sensor_internal_water,
-                traits.internal_resource_sensor_noise,
-            ) * ~newborn
+            if params.include_water:
+                sensor_internal_water = state.water/traits.max_water
+                sensor_internal_water = noisy_sensor(
+                    water_key,
+                    sensor_internal_water,
+                    traits.internal_resource_sensor_noise,
+                ) * ~newborn
+            else:
+                sensor_internal_water = None
             # - energy
-            sensor_internal_energy = state.energy/traits.max_energy
-            sensor_internal_energy = noisy_sensor(
-                energy_key,
-                sensor_internal_energy,
-                traits.internal_resource_sensor_noise,
-            ) * ~newborn
+            if params.include_energy:
+                sensor_internal_energy = state.energy/traits.max_energy
+                sensor_internal_energy = noisy_sensor(
+                    energy_key,
+                    sensor_internal_energy,
+                    traits.internal_resource_sensor_noise,
+                ) * ~newborn
+            else:
+                sensor_internal_energy = None
             # - biomass
-            sensor_internal_biomass = state.biomass/traits.max_biomass
-            sensor_internal_biomass = noisy_sensor(
-                biomass_key,
-                sensor_internal_biomass,
-                traits.internal_resource_sensor_noise,
-            ) * ~newborn
+            if params.include_biomass:
+                sensor_internal_biomass = state.biomass/traits.max_biomass
+                sensor_internal_biomass = noisy_sensor(
+                    biomass_key,
+                    sensor_internal_biomass,
+                    traits.internal_resource_sensor_noise,
+                ) * ~newborn
+            else:
+                sensor_internal_biomass = None
             
             return BugObservation(
                 age=sensor_age,
@@ -1150,6 +1216,8 @@ def make_bugs(
                 internal_biomass=sensor_internal_biomass,
             )
         
+        def get_action_type_and_primitive(action):
+            return action_to_primitive_map[action]
         
         def metabolism_old(
             state : BugState,
