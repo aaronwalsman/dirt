@@ -7,8 +7,9 @@ import glfw
 import splendor.core as core
 import splendor.contexts.glfw_context as glfw_context
 from splendor.interactive_camera_glfw import InteractiveCameraGLFW
+from splendor.frame_buffer import FrameBufferWrapper
 import splendor.camera as camera
-from splendor.masks import color_index_to_float
+from splendor.masks import color_index_to_float, color_byte_to_index
 import splendor.primitives as primitives
 from splendor.image import save_image
 
@@ -32,7 +33,15 @@ default_get_terrain_map = lambda params : jnp.zeros(
 #    xz = jnp.sin(jnp.linspace(0, 2*2*jnp.pi, w))
 #    return yz[:,None] + xz[None,:]
 #default_get_water_map = lambda : None
-default_get_player_color = lambda player_id : color_index_to_float(player_id+1)
+#default_get_player_color = lambda player_id : color_index_to_float(player_id+1)
+def default_get_player_color(player_id, report):
+    if hasattr(report, 'player_color'):
+        return report.player_color[player_id]
+    else:
+        return color_index_to_float(player_id+1)
+
+def default_print_player_info(player_id):
+    print(player_id)
 
 PLAYER_RADIUS=0.4
 
@@ -49,6 +58,7 @@ class Viewer:
         start_step=0,
         terrain_texture_resolution=None,
         max_render_players=512,
+        get_report_block=lambda report : report,
         get_active_players=default_get_active_players,
         get_player_x=default_get_player_x,
         get_player_r=default_get_player_r,
@@ -58,8 +68,11 @@ class Viewer:
         get_water_map=None,
         get_player_color=default_get_player_color,
         get_sun_direction=None,
+        print_player_info=default_print_player_info,
     ):
         
+        self.get_report_block = standardize_args(
+            get_report_block, ('report',))
         if get_active_players is not None:
             self.get_active_players = standardize_args(
                 #get_active_players, ('params', 'report'))
@@ -99,6 +112,9 @@ class Viewer:
             self.get_sun_direction = standardize_args(
                 #get_sun_direction, ('params', 'report'))
                 get_sun_direction, ('report',))
+        if print_player_info:
+            self.print_player_info = standardize_args(
+                print_player_info, ('player_id', 'report',))
         
         self.world_size = world_size
         
@@ -136,11 +152,13 @@ class Viewer:
         self.step_0 = step_0
         self.current_step = start_step
         self.block_index = 0
+        self._example_report = example_report
         
         #self.params = load_example_data(example_params, params_file)
         self.report_files = report_files
-        self.current_report_block = load_example_data(
-            example_report, self.report_files[self.block_index])
+        report_block = load_example_data(
+            self._example_report, self.report_files[self.block_index])
+        self.current_report_block = self.get_report_block(report_block)
         self.report = tree_getitem(
             self.current_report_block, 0)
         self.reports_per_block = tree_len(self.current_report_block)
@@ -155,6 +173,11 @@ class Viewer:
             anti_alias=False,
             anti_alias_samples=0,
         )
+        #self._mask_framebuffer = FrameBufferWrapper(
+        #    width=window_width,
+        #    height=window_height,
+        #    anti_alias=False,
+        #)
     
     def _init_splendor_render(self):
         self.renderer = core.SplendorRender()
@@ -405,13 +428,16 @@ class Viewer:
                 rough=1.,
                 metal=0.,
             )
-        
+            
+            player_mask_color = color_index_to_float(player_id+1)
+            
             player_name = f'player_{player_id}'
             self.renderer.add_instance(
                 name=player_name,
                 mesh_name='player_mesh',
                 material_name=material_name,
                 transform=np.eye(4),
+                mask_color=player_mask_color,
                 hidden=True,
             )
             
@@ -421,6 +447,7 @@ class Viewer:
                 mesh_name='eye_white_mesh',
                 material_name='eye_white_material',
                 transform=np.eye(4),
+                mask_color=player_mask_color,
                 hidden=True,
             )
             
@@ -430,6 +457,7 @@ class Viewer:
                 mesh_name='eye_pupil_mesh',
                 material_name='eye_pupil_material',
                 transform=np.eye(4),
+                mask_color=player_mask_color,
                 hidden=True,
             )
             
@@ -505,11 +533,35 @@ class Viewer:
             #(106./255., 223/255., 255./255.),
             (188./255., 225./255., 242./255.),
         )
-        
+    
+    def mouse_button_callback(self, window, button, action, mods):
+        if self._ctrl_down:
+            if action == glfw.PRESS:
+                #self.mask_render()
+                #x, y = self.camera_control.get_raw_mouse_pixel_position(window)
+                #mask = self._mask_framebuffer.read_pixels()
+                mask = self.window.read_pixels()
+                save_image(mask[...,:3], 'mask.png')
+                x, y = self.camera_control.get_mouse_pixel_position(window)
+                fbw, fbh = self.window.framebuffer_size()
+                y = fbh - y
+                mask_color = mask[y,x]
+                render_id = color_byte_to_index(mask_color) - 1
+                if render_id in self._render_players:
+                    player_id = self._render_players[render_id]
+                    self.print_player_info(player_id, self.report)
+                #self.window.set_active()
+        else:
+            return self.camera_control.mouse_callback(
+                window, button, action, mods)
+    
     def _init_callbacks(self):
         self._shift_down = False
+        self._ctrl_down = False
+        #self.window.set_mouse_button_callback(
+        #    self.camera_control.mouse_callback)
         self.window.set_mouse_button_callback(
-            self.camera_control.mouse_callback)
+            self.mouse_button_callback)
         self.window.set_cursor_pos_callback(
             self.camera_control.mouse_move)
         self.window.set_scroll_callback(
@@ -527,8 +579,9 @@ class Viewer:
         block_index, block_step = self.step_to_block(step)
         if block_index != self.block_index:
             self.block_index = block_index
-            self.current_report_block = load_example_data(
-                self.current_report_block, self.report_files[self.block_index])
+            report_block = load_example_data(
+                self._example_report, self.report_files[self.block_index])
+            self.current_report_block = self.get_report_block(report_block)
         self.current_step = step
         
         print(f'Current Step: {step} '
@@ -564,10 +617,7 @@ class Viewer:
         print(f'Active Players: {jnp.sum(active_players)}')
         
         # figure out which players are in the frustum, and z sort them
-        render_players = {i : -1 for i in range(self.max_players)}
-        #if self.max_players >= scene_players:
-        #    render_players = {i:i for i in range(self.max_players)}
-        #else:
+        self._render_players = {i : -1 for i in range(self.max_players)}
         projection = self.renderer.get_projection()
         view_matrix = self.renderer.get_view_matrix()
         local_transforms = projection @ view_matrix @ player_transforms
@@ -588,14 +638,14 @@ class Viewer:
         scene_players, = active_players.shape
         for player_id in best_players: #range(scene_players):
             if active_players[player_id] & in_bounds[player_id]:
-                render_players[next_render_id] = player_id
+                self._render_players[next_render_id] = player_id
                 next_render_id += 1
-                if next_render_id not in render_players:
+                if next_render_id not in self._render_players:
                     break
         
         #for player_id in range(self.max_players):
         #for render_id, player_id in render_players.items():
-        for render_id, player_id in render_players.items():
+        for render_id, player_id in self._render_players.items():
             player_name = f'player_{render_id}'
             eye_white_name = f'player_eye_white_{render_id}'
             eye_pupil_name = f'player_eye_pupil_{render_id}'
@@ -751,7 +801,15 @@ class Viewer:
         #self._update_players()
         fbw, fbh = self.window.framebuffer_size()
         self.renderer.viewport_scissor(0,0,fbw,fbh)
-        self.renderer.color_render(flip_y=False)
+        if self._ctrl_down:
+            self.renderer.mask_render(flip_y=False)
+        else:
+            self.renderer.color_render(flip_y=False)
+    
+    #def mask_render(self):
+    #    self.renderer.viewport_scissor(
+    #        0,0,self._mask_framebuffer.width,self._mask_framebuffer.height)
+    #    self.renderer.mask_render(flip_y=True)
     
     def key_callback(self, window, key, scancode, action, mods):
         # 0-9 sets various display modes
@@ -767,6 +825,8 @@ class Viewer:
             print(f'step size: {self.step_size}')
         if key in (340, 344):
             self._shift_down = action
+        if key in (341, 345) and action:
+            self._ctrl_down = not self._ctrl_down
         
         if key == 65 and action:
              self.show_players = not self.show_players
