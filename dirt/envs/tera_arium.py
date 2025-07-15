@@ -30,6 +30,7 @@ from dirt.bug import (
     BugObservation,
     BugState,
     make_bugs,
+    action_type_names,
 )
 from dirt.gridworld2d.grid import read_grid_locations
 from dirt.gridworld2d.observations import first_person_view, noisy_sensor
@@ -41,16 +42,24 @@ class TeraAriumParams:
     initial_players : int = 1024
     max_players : int = 16384
     
+    include_rock : bool = True
     include_water : bool = True
     include_energy : bool = True
     include_biomass : bool = True
     include_temperature : bool = True
     include_rain : bool = True
+    include_light : bool = True
+    include_energy : bool = True
+    include_biomass : bool = True
     
     # observations
     max_view_width : int = 11
     max_view_distance : int = 5
     max_view_back_distance : int = 5
+    
+    # reporting
+    report_bug_actions : bool = False
+    report_bug_internals : bool = False
     
     landscape : LandscapeParams = LandscapeParams()
     bugs : BugParams = BugParams()
@@ -200,14 +209,15 @@ def make_tera_arium(
         ) = bugs.birth_and_death(bug_state, action, traits)
         
         # - add evaporated water to the atmosphere/ground
-        evaporated_moisture = (
-            evaporated_move + evaporated_metabolism + evaporated_birth)
-        if params.landscape.include_rain:
-            landscape_state = landscape.add_moisture(
-                landscape_state, expelled_x, evaporated_moisture)
-        elif params.include_water:
-            landscape_state = landscape.add_water(
-                landscape_state, expelled_x, evaporated_moisture)
+        if params.include_water:
+            evaporated_moisture = (
+                evaporated_move + evaporated_metabolism + evaporated_birth)
+            if params.landscape.include_rain:
+                landscape_state = landscape.add_moisture(
+                    landscape_state, expelled_x, evaporated_moisture)
+            else:
+                landscape_state = landscape.add_water(
+                    landscape_state, expelled_x, evaporated_moisture)
         if params.include_water:
             landscape_state = landscape.add_water(
                 landscape_state, expelled_x, expelled_water)
@@ -253,7 +263,9 @@ def make_tera_arium(
         )
         
         # - relative altitude
-        altitude = state.landscape.rock + state.landscape.water
+        altitude = state.landscape.rock
+        if params.include_water:
+            altitude += state.landscape.water
         bug_altitude = read_grid_locations(
             altitude, state.bugs.x, params.landscape.terrain_downsample)
         altitude_view = first_person_view(
@@ -289,11 +301,17 @@ def make_tera_arium(
         )
         
         # external resources
-        external_water = read_grid_locations(
-            state.landscape.water,
-            state.bugs.x,
-            params.landscape.terrain_downsample,
-        )
+        if params.include_water:
+            '''
+            external_water = read_grid_locations(
+                state.landscape.water,
+                state.bugs.x,
+                params.landscape.terrain_downsample,
+            )
+            '''
+            external_water = landscape.get_water(state.landscape, state.bugs.x)
+        else:
+            external_water = None
         external_energy = read_grid_locations(
             state.landscape.energy,
             state.bugs.x,
@@ -326,59 +344,6 @@ def make_tera_arium(
     def family_info(state):
         return bugs.family_info(state.bugs)
     
-    '''
-    def render(
-        water,
-        temperature,
-        energy,
-        biomass,
-        bug_x,
-        bug_color,
-        light,
-    ):
-        h, w = water.shape
-
-        # start with a baseline rock color of 50% gray
-        rgb = jnp.full((h,w,3), ROCK_COLOR, dtype=water.dtype)
-
-        # overlay the water as blue and ice as white
-        while len(temperature.shape) < 3:
-            temperature = temperature[..., None]
-        water_color = jnp.where(
-            temperature <= 0,
-            ICE_COLOR,
-            WATER_COLOR,
-        )
-        rgb = jnp.where(water[..., None] > 0.05, water_color, rgb)
-        
-        # apply the energy and biomass tint
-        clipped_energy = jnp.clip(energy, min=0., max=1.)
-        clipped_biomass = jnp.clip(biomass, min=0., max=1.)
-        biomass_and_energy = jnp.minimum(
-            clipped_energy, clipped_biomass)
-        just_energy = clipped_energy - biomass_and_energy
-        just_biomass = clipped_biomass - biomass_and_energy
-        rgb = rgb + biomass_and_energy[..., None] * BIOMASS_AND_ENERGY_TINT
-        rgb = rgb + just_energy[..., None] * ENERGY_TINT
-        rgb = rgb + just_biomass[..., None] * BIOMASS_TINT
-        # # apply the energy tint
-        # rgb = rgb + clipped_energy[..., None] * ENERGY_TINT
-
-        # # apply the biomass tint
-        # rgb = rgb + clipped_biomass[..., None] * BIOMASS_TINT
-        
-        # overlay the bug colors
-        rgb = rgb.at[bug_x[...,0], bug_x[...,1]].set(bug_color)
-        
-        # apply lighting
-        rgb = rgb * light[..., None]
-        
-        # clip between 0 and 1
-        rgb = jnp.clip(rgb, min=0., max=1.)
-        
-        return rgb
-    '''
-    
     def visualizer_terrain_texture(report, shape, display_mode):
         return landscape.render_display_mode(
             report,
@@ -389,6 +354,105 @@ def make_tera_arium(
             convert_to_image=True,
         )
     
+    @static_data
+    class VisualizerReport:
+        if params.include_rock:
+            rock : jnp.ndarray = False
+        if params.include_water:
+            water : jnp.ndarray = False
+        if params.include_light:
+            light : jnp.ndarray = False
+        if params.include_temperature:
+            temperature : jnp.ndarray = False
+        if params.include_rain:
+            moisture : jnp.ndarray = False
+            raining : jnp.ndarray = False
+        if params.include_energy:
+            energy : jnp.ndarray = False
+        if params.include_biomass:
+            biomass : jnp.ndarray = False
+     
+        players : jnp.ndarray = False
+        player_x : jnp.ndarray = False
+        player_r : jnp.ndarray = False 
+        player_color : jnp.ndarray = False
+        
+        if params.report_bug_actions:
+            actions : jnp.ndarray = False
+        if params.report_bug_internals:
+            age : jnp.ndarray = False
+            hp : jnp.ndarray = False
+            if params.include_water:
+                player_water : jnp.ndarray = False
+            if params.include_energy:
+                player_energy : jnp.ndarray = False
+            if params.include_biomass:
+                player_biomass : jnp.ndarray = False
+    
+    def default_visualizer_report():
+        return VisualizerReport()
+    
+    def make_visualizer_report(state, actions):
+        report = VisualizerReport(
+            players=active_players(state),
+            player_x=state.bugs.x,
+            player_r=state.bugs.r,
+            player_color=state.bugs.color,
+        )
+        if params.include_rock:
+            report = report.replace(rock=state.landscape.rock)
+        if params.include_water:
+            report = report.replace(water=state.landscape.water)
+        if params.include_light:
+            report = report.replace(light=state.landscape.light)
+        if params.include_temperature:
+            report = report.replace(temperature=state.landscape.temperature)
+        if params.include_rain:
+            report = report.replace(
+                moisture=state.landscape.moisture,
+                raining=state.landscape.raining,
+            )
+        if params.include_energy:
+            report = report.replace(energy=state.landscape.energy)
+        if params.include_biomass:
+            report = report.replace(biomass=state.landscape.biomass)
+        
+        if params.report_bug_actions:
+            report = report.replace(actions=actions)
+        if params.report_bug_internals:
+            report = report.replace(age=state.bugs.age)
+            report = report.replace(hp=state.bugs.hp)
+            if params.include_water:
+                report = report.replace(player_water=state.bugs.water)
+            if params.include_energy:
+                report = report.replace(player_energy=state.bugs.energy)
+            if params.include_biomass:
+                report = report.replace(player_biomass=state.bugs.biomass)
+            
+        
+        return report
+    
+    def print_player_info(player_id, report):
+        print(f'ID:        {player_id}')
+        if params.report_bug_actions:
+            action_type, action_primitive = bugs.get_action_type_and_primitive(
+                report.actions[player_id]) 
+            print(
+                f'  actions: '
+                f'{action_type_names[int(action_type)]} '
+                f'{action_primitive} '
+                f'({report.actions[player_id]})'
+            )
+        if params.report_bug_internals:
+            print(f'  age:     {report.age[player_id]}')
+            print(f'  hp:      {report.hp[player_id]}')
+            if params.include_water:
+                print(f'  water:   {report.player_water[player_id]}')
+            if params.include_energy:
+                print(f'  energy:  {report.player_energy[player_id]}')
+            if params.include_biomass:
+                print(f'  biomass: {report.player_biomass[player_id]}')
+    
     game = make_poeg(
         init_state,
         transition,
@@ -397,8 +461,10 @@ def make_tera_arium(
         family_info,
         visualizer_terrain_map=landscape.visualizer_terrain_map,
         visualizer_terrain_texture=visualizer_terrain_texture,
+        default_visualizer_report=default_visualizer_report,
+        make_visualizer_report=make_visualizer_report,
+        print_player_info=print_player_info,
+        num_actions=bugs.num_actions,
     )
-    
-    game.num_actions = bugs.num_actions
     
     return game
