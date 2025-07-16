@@ -118,6 +118,8 @@ class BugParams:
     move_energy_cost : float = 0.001
     climb_water_cost : float = 0.0001
     climb_energy_cost : float = 0.001
+    # - attack
+    attack_energy_cost : float = 0.01
     # - reproduction
     birth_energy_cost : float = 0.001
     birth_water_cost : float = 0.0001
@@ -128,7 +130,7 @@ class BugParams:
     min_biomass_constant : float = 0.1
     biomass_per_brain_size : float = 0.05
     biomass_per_movement_primitive : float = 0.02
-    # biomass_per_attack_primitive : float = 0.03
+    biomass_per_attack_primitive : float = 0.03
 
     biomass_per_photosynthesis : float = 0.01
     biomass_per_max_climb : float = 0.01
@@ -343,10 +345,10 @@ class BugTraits:
                 [1, 0, 0],
                 [0, 0,-1],
                 [0, 0, 1],
-            ], dtype=DEFAULT_FLOAT_DTYPE)),
-            # TODO (Chase) : Come up with good defaults here
-            attack_primitives = jnp.zeros(
-                (),
+            ], dtype=DEFAULT_FLOAT_DTYPE),
+            attack_primitives = jnp.zeros([
+                [1, 0, 0, 0, 1] # x-offset, y-offset, width, height, damage
+            ],
                 dtype=DEFAULT_FLOAT_DTYPE,
             ),
         )
@@ -356,12 +358,12 @@ class BugTraits:
         Calculate the biomass requirement for this bug's traits.
         """
         n_move = self.movement_primitives.shape[0] if hasattr(self.movement_primitives, "shape") else 0
-        # n_attack = self.attack_primitives.shape[0] if hasattr(self.attack_primitives, "shape") else 0
+        n_attack = self.attack_primitives.shape[0] if hasattr(self.attack_primitives, "shape") else 0
         req = (
             params.min_biomass_constant
             + self.brain_size * params.biomass_per_brain_size
             + n_move * params.biomass_per_movement_primitive
-            # + n_attack * params.biomass_per_attack_primitive
+            + n_attack * params.biomass_per_attack_primitive
             + self.photosynthesis * params.biomass_per_photosynthesis
             + self.max_climb * params.biomass_per_max_climb
             + self.max_water * params.biomass_per_max_water
@@ -782,7 +784,76 @@ def make_bugs(
             action : int,
             traits : BugTraits,
         ):
-            # TODO (Chase) : First pass here
+            assert (
+                params.attack_primitives ==
+                traits.attack_primitives.shape[0]
+            )
+            action_type = action_to_primitive_map[action, 0]
+            action_primitive = action_to_primitive_map[action, 1]
+            attack = (action_type == ATTACK_ACTION_TYPE)
+            
+            active_bugs = family_tree.active(state.family_tree)
+            
+            attack_offsets = jnp.where(
+                attack[..., None],
+                traits.attack_primitives[action_primitive],
+                jnp.zeros_like(traits.attack_primitives[0])
+            )
+            attack_pos = state.x + attack_offsets
+            bug_pos = state.x
+            
+            def generate_attack_offsets(dx, dy, width, height):
+                wx = width
+                wy = height
+                x_range = jnp.arange(-wx, wx + 1)
+                y_range = jnp.arange(-wy, wy + 1)
+                grid_x, grid_y = jnp.meshgrid(x_range, y_range, indexing="xy")
+                offsets = jnp.stack([grid_x, grid_y], axis=-1).reshape(-1, 2)
+                return offsets + jnp.array([dx, dy])
+
+            def single_attack(attacker_idx, attack_flag, prim_idx, attacker_pos):
+                # If not attacking, return no damage
+                def not_attacking():
+                    return jnp.zeros(bug_pos.shape[0]), 0.0
+
+                def attacking():
+                    prim = traits.attack_primitives[prim_idx]
+                    dx, dy, w, h, damage = prim
+
+                    offsets = generate_attack_offsets(dx, dy, w, h)
+                    attack_tiles = attacker_pos[None, :] + offsets
+
+                    # Check which bugs are on any attack tile
+                    def is_hit(target_pos):
+                        return jnp.any(jnp.all(attack_tiles == target_pos[None, :], axis=-1))
+
+                    hits = jax.vmap(is_hit)(bug_pos)
+                    hits = hits.at[attacker_idx].set(0) # prevent self hit
+                    per_target_damage = hits * damage
+                    energy_cost = params.attack_energy_cost
+                    return per_target_damage, energy_cost
+
+                return jax.lax.cond(attack_flag, attacking, not_attacking)
+
+            damages, energy_costs = jax.vmap(
+                single_attack,
+                in_axes=(0, attack, action_primitive, bug_pos)
+            )(jnp.arange(bug_pos.shape[0]), attack, action_primitive, bug_pos)
+
+            damage_received = jnp.sum(damages, axis=0)
+            new_hp = state.hp - damage_received
+
+            if params.include_energy:
+                energy_cost = params.attack_energy_cost * attack * active_bugs
+                new_energy = state.energy - energy_cost
+            else:
+                new_energy = state.energy
+
+            state = state.replace(
+                hp=new_hp,
+                energy=new_energy
+            )
+
             return state
         
         def metabolism(
