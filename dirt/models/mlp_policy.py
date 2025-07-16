@@ -14,40 +14,40 @@ def flatten_bug_observation(obs):
     
     Expected observation fields and their shapes:
     - age: (batch_size,) -> 1 element per batch
-    - newborn: (batch_size,) -> 1 element per batch  
+    - newborn: (batch_size,)
     - rgb: (batch_size, 11, 11, 3) -> 363 elements per batch
     - relative_altitude: (batch_size, 11, 11) -> 121 elements per batch
-    - audio: (batch_size, 8) -> 8 elements per batch
-    - smell: (batch_size, 8) -> 8 elements per batch
-    - wind: (batch_size, 2) -> 2 elements per batch
-    - temperature: (batch_size,) -> 1 element per batch
-    - external_water: (batch_size,) -> 1 element per batch
-    - external_energy: (batch_size,) -> 1 element per batch
-    - external_biomass: (batch_size,) -> 1 element per batch
-    - health: (batch_size,) -> 1 element per batch
-    - internal_water: (batch_size,) -> 1 element per batch
-    - internal_energy: (batch_size,) -> 1 element per batch
-    - internal_biomass: (batch_size,) -> 1 element per batch
+    - audio: (batch_size, 8)
+    - smell: (batch_size, 8)
+    - wind: (batch_size, 2)
+    - temperature: (batch_size,)
+    - external_water: (batch_size,)
+    - external_energy: (batch_size,)
+    - external_biomass: (batch_size,)
+    - health: (batch_size,)
+    - internal_water: (batch_size,)
+    - internal_energy: (batch_size,)
+    - internal_biomass: (batch_size,)
     
     Total flattened dimension: 1 + 1 + 363 + 121 + 8 + 8 + 2 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 = 512
     """
     # Flatten each field and concatenate
     flattened_parts = [
-        jnp.atleast_1d(obs.age).flatten(),
-        jnp.atleast_1d(obs.newborn).flatten(),
+        obs.age.flatten(),
+        obs.newborn.flatten(),
         obs.rgb.flatten(),
         obs.relative_altitude.flatten(),
         obs.audio.flatten(),
         obs.smell.flatten(),
         obs.wind.flatten(),
-        jnp.atleast_1d(obs.temperature).flatten(),
-        jnp.atleast_1d(obs.external_water).flatten(),
-        jnp.atleast_1d(obs.external_energy).flatten(),
-        jnp.atleast_1d(obs.external_biomass).flatten(),
-        jnp.atleast_1d(obs.health).flatten(),
-        jnp.atleast_1d(obs.internal_water).flatten(),
-        jnp.atleast_1d(obs.internal_energy).flatten(),
-        jnp.atleast_1d(obs.internal_biomass).flatten(),
+        obs.temperature.flatten(),
+        obs.external_water.flatten(),
+        obs.external_energy.flatten(),
+        obs.external_biomass.flatten(),
+        obs.health.flatten(),
+        obs.internal_water.flatten(),
+        obs.internal_energy.flatten(),
+        obs.internal_biomass.flatten(),
     ]
     
     # Concatenate all parts
