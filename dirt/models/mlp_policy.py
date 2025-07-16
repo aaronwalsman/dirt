@@ -57,7 +57,7 @@ def flatten_bug_observation(obs):
 def mlp_network(
     in_channels,
     out_channels,
-    hidden_layers=1,
+    hidden_layers=0,  # hidden_layers=1 -> "ValueError: bytes object is too large" during save_leaf_data
     hidden_channels=256
 ):
     """
