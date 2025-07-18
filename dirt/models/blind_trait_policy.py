@@ -7,6 +7,7 @@ from mechagogue.nn.linear import linear_layer
 from mechagogue.nn.initializers import kaiming, zero
 from mechagogue.nn.distributions import categorical_sampler_layer
 
+from dirt.envs.tera_arium import TeraAriumTraits
 
 def blind_network(
     out_channels,
@@ -41,13 +42,15 @@ def blind_network(
     return network
 
 
-def make_blind_policy(num_actions):
+def make_blind_trait_policy(num_actions):
     network = blind_network(num_actions)
     
     @static_functions
-    class BlindPolicy:
+    class BlindTraitPolicy:
         def init(key):
-            return network.init(key)
+            model_state = network.init(key)
+            traits = TeraAriumTraits.default(())
+            return model_state, traits
         
         def act(key, obs, state):
             # the network is blind to the observation - it always maps it to 1,
@@ -55,6 +58,10 @@ def make_blind_policy(num_actions):
             # then applies a softmax to get a probability distribution over
             #   the num_actions logits,
             # then samples from the distribution to get an action
-            return network.forward(key, obs, state)
+            model_state, traits = state
+            return network.forward(key, obs, model_state)
+        
+        def traits(state):
+            return state[1]
     
-    return BlindPolicy
+    return BlindTraitPolicy

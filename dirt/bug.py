@@ -120,8 +120,10 @@ class BugParams:
     
     # costs
     # - resting
-    resting_water_cost : float = 0.0001
-    resting_energy_cost : float = 0.001
+    resting_water_cost : float = 0.00005
+    resting_water_cost_per_mass : float = 0.0001
+    resting_energy_cost : float = 0.0005
+    resting_energy_cost_per_mass : float = 0.001
     # - brain
     brain_size_water_cost : float = 0.0001
     brain_size_energy_cost : float = 0.001
@@ -183,12 +185,82 @@ class BugParams:
     initial_water : float = 0.1
     initial_energy : float = 1.
     initial_biomass : float = 1.0
-    initial_color : Tuple[float, float, float] = (0.5, 0.25, 0.5)
-
+    #initial_color : Tuple[float, float, float] = (0.5, 0.25, 0.5)
+    
+    # trait mutation parameters
+    # - mutation noise rates
+    # -- global
+    mutate_trait_probability : float = 0.1 
+    mutate_default_noise : float = 0.05
+    mutate_default_lognoise : float = 0.05
+    # -- specific
+    #mutate_max_age_observation_noise : float = 1.
+    #mutate_view_distance_noise : float = 0.1
+    #mutate_view_back_distance_noise : float = 0.1
+    #mutate_view_width_noise : float = 0.2
+    #mutate_max_altitude_observation_noise : float = 0.1
+    #mutate_max_water_observation_noise : float = 0.1
+    #mutate_max_energy_observation_noise : float = 0.1
+    #mutate_max_biomass_observation_noise : float = 0.1
+    #
+    #mutate_min_temperature_observation_noise : float = 0.1
+    #mutate_max_temperature_observation_noise : float = 0.1
+    #mutate_max_climb_noise : float = 0.1
+    #mutate_max_water_noise : float = 0.1
+    #mutate_max_water_gulp_noise : float = 0.1
+    #mutate_max_energy_noise : float = 0.1
+    #mutate_max_energy_gulp_noise : float = 0.1
+    #mutate_max_biomass_noise : float = 0.1
+    #mutate_max_biomass_gulp_noise : float = 0.1
+    #
+    #mutate_armor_noise : float = 0.1
+    #mutate_senescence_damage_noise : float = 0.1
+    #mutate_max_hp_noise : float = 0.1
+    #mutate_healing_rate_noise : float = 0.1
+    #
+    #mutate_child_water_noise : float = 0.1
+    #mutate_child_hp_noise : float = 0.1
+    #mutate_child_energy_noise : float = 0.1
+    #mutate_child_biomass_noise : float = 0.1
+    #
+    #mutate_movement_noise : float = 0.1
+    
+    # - min and max values
+    max_view_distance : int = 5
+    max_view_back_distance : int = 5
+    max_view_width : int = 11
+    max_max_altitude_observation : float = 5.
+    max_max_water_observation : float = 5.
+    max_max_energy_observation : float = 5.
+    max_max_biomass_observation : float = 5.
+    min_min_temperature_observation : float = -5.
+    max_min_temperature_observation : float = 5.
+    min_max_temperature_observation : float = -5.
+    max_max_temperature_observation : float = 5.
+    max_max_climb : float = 5.
+    max_max_water : float = 10.
+    max_max_water_gulp : float = 10.
+    max_max_energy : float = 10.
+    max_max_energy_gulp : float = 10.
+    max_max_biomass : float = 10.
+    max_max_biomass_gulp : float = 10.
+    
+    max_armor : float = 10.
+    max_senescence_damage : float = 100.
+    max_max_hp : float = 100.
+    max_healing_rate : float = 10.
+    
+    max_child_water : float = 10.
+    max_child_hp : float = 10.
+    max_child_energy : float = 10.
+    max_child_biomass : float = 10.
+    
+    max_movement : float = 4.
+    
     def validate(params):
         assert params.initial_players <= params.max_players, (
             f'params.initial_players ({params.initial_players}) must be less '
-            f'than or equal to params.max_players ({max_players})'
+            f'than or equal to params.max_players ({params.max_players})'
         )
         
         return params
@@ -235,8 +307,8 @@ class BugTraits:
     
     # efficiency
     max_climb : float | jnp.ndarray
-    climb_efficiency : float | jnp.ndarray
-    move_effciency : float | jnp.ndarray
+    #climb_efficiency : float | jnp.ndarray
+    #move_effciency : float | jnp.ndarray
     
     # stomach
     max_water : float | jnp.ndarray
@@ -271,12 +343,14 @@ class BugTraits:
     attack_primitives : jnp.ndarray
     
     @staticmethod
-    def default(n):
+    def default(shape):
+        if isinstance(shape, int):
+            shape = (shape,)
         def float_vector(v):
-            return jnp.full((n,), v, dtype=DEFAULT_FLOAT_DTYPE)
+            return jnp.full(shape, v, dtype=DEFAULT_FLOAT_DTYPE)
         
         def int_vector(v):
-            return jnp.full((n,), v, dtype=jnp.int32)
+            return jnp.full(shape, v, dtype=jnp.int32)
         
         return BugTraits(
             # brain
@@ -284,7 +358,7 @@ class BugTraits:
             
             # color
             color = jnp.full(
-                (n,3), DEFAULT_BUG_COLOR, dtype=DEFAULT_FLOAT_DTYPE),
+                (*shape,3), DEFAULT_BUG_COLOR, dtype=DEFAULT_FLOAT_DTYPE),
             
             # resources
             photosynthesis = float_vector(0.),
@@ -297,7 +371,7 @@ class BugTraits:
             view_distance = int_vector(5),
             view_back_distance = int_vector(0),
             view_width = int_vector(5),
-            max_altitude_observation = float_vector(5.),
+            max_altitude_observation = float_vector(1.),
             visual_sensor_noise = float_vector(0.),
             # - audio
             audio_sensor_noise = float_vector(0.),
@@ -320,8 +394,8 @@ class BugTraits:
             
             # efficiency
             max_climb = float_vector(2.),
-            climb_efficiency = float_vector(1.),
-            move_effciency = float_vector(1.),
+            #climb_efficiency = float_vector(1.),
+            #move_effciency = float_vector(1.),
             
             # stomach
             max_water = float_vector(1.),
@@ -350,19 +424,24 @@ class BugTraits:
             child_biomass = float_vector(1.0),
             child_water = float_vector(0.5),
             child_color = jnp.full(
-                (n,3), DEFAULT_BUG_COLOR, dtype=DEFAULT_FLOAT_DTYPE),
+                (*shape,3), DEFAULT_BUG_COLOR, dtype=DEFAULT_FLOAT_DTYPE),
             
             # actions
-            movement_primitives = jnp.full((n,3,3), jnp.array([
-                [1, 0, 0],
-                [0, 0,-1],
-                [0, 0, 1],
-            ], dtype=DEFAULT_FLOAT_DTYPE),
-            attack_primitives = jnp.zeros([
-                [1, 0, 0, 0, 1] # x-offset, y-offset, width, height, damage
-            ],
-                dtype=DEFAULT_FLOAT_DTYPE,
+            movement_primitives = jnp.full(
+                (*shape, 3, 3), jnp.array([
+                    [1, 0, 0],
+                    [0, 0,-1],
+                    [0, 0, 1],
+                ], dtype=DEFAULT_FLOAT_DTYPE)
             ),
+            attack_primitives = jnp.full(
+                (*shape, 1, 5), jnp.array([
+                    [1, 0, 0, 0, 1]
+                ], dtype=DEFAULT_FLOAT_DTYPE),
+            )
+            #attack_primitives = jnp.array([
+            #    [1, 0, 0, 0, 1] # x-offset, y-offset, width, height, damage
+            #], dtype=DEFAULT_FLOAT_DTYPE),
         )
     
     def biomass_requirement(self, params: "BugParams"):
@@ -446,7 +525,7 @@ class BugState:
     biomass : jnp.ndarray
     
     # color
-    color : jnp.ndarray
+    #color : jnp.ndarray
     
     # level
     level : jnp.ndarray
@@ -563,8 +642,8 @@ def make_bugs(
             
             # initialize color
             n = active_players.shape[0]
-            color = jnp.full(
-                (n, 3), jnp.array(params.initial_color, dtype=float_dtype))
+            #color = jnp.full(
+            #    (n, 3), jnp.array(params.initial_color, dtype=float_dtype))
             
             # initialize level
             level = jnp.zeros(params.max_players, dtype=jnp.int32)
@@ -581,7 +660,7 @@ def make_bugs(
                 biomass=biomass,
                 water=water,
                 
-                color=color,
+                #color=color,
                 
                 level=level,
                 
@@ -834,7 +913,12 @@ def make_bugs(
                 offsets = jnp.stack([grid_x, grid_y], axis=-1).reshape(-1, 2)
                 return offsets + jnp.array([dx, dy])
 
-            def single_attack(attacker_idx, attack_flag, prim_idx, attacker_pos):
+            def single_attack(
+                attacker_idx,
+                attack_flag,
+                prim_idx,
+                attacker_pos
+            ):
                 # If not attacking, return no damage
                 def not_attacking():
                     return jnp.zeros(bug_pos.shape[0]), 0.0
@@ -848,7 +932,8 @@ def make_bugs(
 
                     # Check which bugs are on any attack tile
                     def is_hit(target_pos):
-                        return jnp.any(jnp.all(attack_tiles == target_pos[None, :], axis=-1))
+                        return jnp.any(jnp.all(
+                            attack_tiles == target_pos[None, :], axis=-1))
 
                     hits = jax.vmap(is_hit)(bug_pos)
                     hits = hits.at[attacker_idx].set(0) # prevent self hit
@@ -885,12 +970,16 @@ def make_bugs(
         ):
             damage = jnp.zeros((params.max_players,), dtype=float_dtype)
             
+            # change color
+            #state = state.replace(color=traits.color)
+            
             # energy cost
             if params.include_energy:
                 alive = Bugs.active_players(state)
                 mass = Bugs.get_mass(state.water, state.biomass)
                 energy_cost = (
-                    params.resting_energy_cost * mass +
+                    params.resting_energy_cost +
+                    params.resting_energy_cost_per_mass * mass +
                     params.brain_size_energy_cost * traits.brain_size
                 ) * alive
                 energy_paid = jnp.minimum(state.energy, energy_cost)
@@ -904,7 +993,8 @@ def make_bugs(
             # water cost
             if params.include_water:
                 water_cost = (
-                    params.resting_water_cost * mass +
+                    params.resting_water_cost +
+                    params.resting_water_cost_per_mass * mass +
                     params.brain_size_water_cost * traits.brain_size
                 ) * alive
                 water_paid = jnp.minimum(state.water, water_cost)
@@ -1289,6 +1379,114 @@ def make_bugs(
         
         def get_action_type_and_primitive(action):
             return action_to_primitive_map[action]
+    
+        def mutate_traits(key, traits):
+            def normal_mutate_trait(key, traits, trait_name):
+                do_key, noise_key = jrng.split(key)
+                do_mutate = jrng.bernoulli(
+                    do_key, p=params.mutate_trait_probability, shape=())
+                trait = getattr(traits, trait_name)
+                max_trait = getattr(params, f'max_{trait_name}', 1.)
+                min_trait = getattr(params, f'min_{trait_name}', 0.)
+                noise_std = getattr(
+                    params,
+                    f'mutate_{trait_name}_noise',
+                    params.mutate_default_noise * (max_trait - min_trait),
+                )
+                noise = (
+                    jrng.normal(noise_key, shape=trait.shape) *
+                    noise_std *
+                    do_mutate
+                )
+                trait = trait + noise
+                
+                traits = traits.replace(**{trait_name : trait+noise})
+                return traits
+            
+            all_trait_names = set(
+                key for key, value in traits.__dict__.items()
+                if not callable(value)
+            )
+            nonstandard_trait_names = set((
+                'brain_size',
+                'max_age_observation',
+                'senescence_damage',
+                'movement_primitives',
+                'attack_primitives',
+            ))
+            standard_trait_names = all_trait_names - nonstandard_trait_names
+            
+            for trait_name in standard_trait_names:
+                key, trait_key = jrng.split(key)
+                traits = normal_mutate_trait(trait_key, traits, trait_name)
+            
+            def lognormal_mutate_trait(key, traits, trait_name):
+                do_key, noise_key = jrng.split(key)
+                do_mutate = jrng.bernoulli(
+                    do_key, p=params.mutate_trait_probability, shape=())
+                trait = getattr(traits, trait_name)
+                log_noise_std = getattr(
+                    params,
+                    f'mutate_{trait_name}_noise',
+                    params.mutate_default_lognoise,
+                )
+                log_noise = (
+                    jrng.normal(noise_key, shape=()) * log_noise_std
+                )
+                new_trait = jnp.exp(
+                    jnp.log(traits.max_age_observation) + log_noise * do_mutate)
+                traits = traits.replace(max_age_observation=new_trait)
+                return traits
+            
+            key, max_age_observation_key = jrng.split(key)
+            traits = lognormal_mutate_trait(
+                max_age_observation_key, traits, 'max_age_observation')
+            key, senescence_damage_key = jrng.split(key)
+            traits = lognormal_mutate_trait(
+                senescence_damage_key, traits, 'senescence_damage')
+            
+            # move primitives
+            key, do_key, primitive_key, dx_noise_key, dr_noise_key = (
+                jrng.split(key, 5))
+            do_mutate = jrng.bernoulli(
+                do_key, p=params.mutate_trait_probability, shape=())
+            mutate_primitive = jrng.choice(
+                primitive_key, params.movement_primitives, shape=())
+            dx_noise_std = getattr(
+                params,
+                f'mutate_movement_noise',
+                params.mutate_default_noise * 2 * params.max_movement,
+            )
+            dx_noise = (
+                jrng.normal(dx_noise_key, shape=(2,)) *
+                dx_noise_std *
+                do_mutate
+            )
+            dr_noise_std = getattr(
+                params,
+                f'mutate_rotation_noise',
+                params.mutate_default_noise * 4,
+            )
+            dr_noise = (
+                jrng.normal(dr_noise_key, shape=(1,)) *
+                dr_noise_std *
+                do_mutate
+            )
+            #jax.debug.print('dx noise std {dx}', dx=dx_noise_std)
+            #jax.debug.print('dr noise std {dr}', dr=dr_noise_std)
+            dx = traits.movement_primitives[:,:2]
+            dx = dx.at[mutate_primitive].add(dx_noise)
+            dx = jnp.clip(dx, min=-params.max_movement, max=params.max_movement)
+            dr = traits.movement_primitives[:,[3]] + dr_noise
+            dr = dr.at[mutate_primitive].add(dr_noise)
+            dr = dr % 4
+            movement_primitives = jnp.concatenate((dx, dr), axis=-1)
+            
+            traits = traits.replace(movement_primitives=movement_primitives)
+            
+            # TODO: Attack primitives
+            
+            return traits
         
         def metabolism_old(
             state : BugState,
@@ -1480,7 +1678,7 @@ def make_bugs(
             birthdays = next_state.family_tree.player_state.players[...,0]
             current_time = next_state.family_tree.player_state.current_time
             child_locations, = jnp.nonzero(
-                birthdays == current_time,
+                (birthdays == current_time) & (current_time != 0),
                 size=params.max_players,
                 fill_value=params.max_players,
             )

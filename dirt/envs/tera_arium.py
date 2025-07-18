@@ -6,6 +6,7 @@ import jax.random as jrng
 
 import chex
 
+from mechagogue.tree import tree_getitem
 from mechagogue.static import static_data, static_functions
 from mechagogue.dp.poeg import make_poeg
 
@@ -53,13 +54,14 @@ class TeraAriumParams:
     include_biomass : bool = True
     
     # observations
-    max_view_width : int = 11
     max_view_distance : int = 5
     max_view_back_distance : int = 5
+    max_view_width : int = 11
     
     # reporting
     report_bug_actions : bool = False
     report_bug_internals : bool = False
+    report_bug_traits : bool = False
     
     landscape : LandscapeParams = LandscapeParams()
     bugs : BugParams = BugParams()
@@ -251,7 +253,7 @@ def make_tera_arium(
             state.landscape,
             params.world_size,
             spot_x=state.bugs.x,
-            spot_color=state.bugs.color,
+            spot_color=state.bug_traits.color,
         )
         rgb_view = first_person_view(
             state.bugs.x,
@@ -388,6 +390,8 @@ def make_tera_arium(
                 player_energy : jnp.ndarray = False
             if params.include_biomass:
                 player_biomass : jnp.ndarray = False
+        if params.report_bug_traits:
+            traits : BugTraits = BugTraits.default(())
     
     def default_visualizer_report():
         return VisualizerReport()
@@ -397,7 +401,7 @@ def make_tera_arium(
             players=active_players(state),
             player_x=state.bugs.x,
             player_r=state.bugs.r,
-            player_color=state.bugs.color,
+            player_color=state.bug_traits.color,
         )
         if params.include_rock:
             report = report.replace(rock=state.landscape.rock)
@@ -428,7 +432,9 @@ def make_tera_arium(
                 report = report.replace(player_energy=state.bugs.energy)
             if params.include_biomass:
                 report = report.replace(player_biomass=state.bugs.biomass)
-            
+        
+        if params.report_bug_traits:
+            report = report.replace(traits=state.bug_traits)
         
         return report
     
@@ -452,6 +458,12 @@ def make_tera_arium(
                 print(f'  energy:  {report.player_energy[player_id]}')
             if params.include_biomass:
                 print(f'  biomass: {report.player_biomass[player_id]}')
+        
+        if params.report_bug_traits:
+            bug_traits = tree_getitem(report.traits, player_id)
+            for key, value in bug_traits.__dict__.items():
+                if not callable(value):
+                    print(f'  {key}: {value}')
     
     game = make_poeg(
         init_state,
@@ -459,6 +471,7 @@ def make_tera_arium(
         observe,
         active_players,
         family_info,
+        mutate_traits=bugs.mutate_traits,
         visualizer_terrain_map=landscape.visualizer_terrain_map,
         visualizer_terrain_texture=visualizer_terrain_texture,
         default_visualizer_report=default_visualizer_report,

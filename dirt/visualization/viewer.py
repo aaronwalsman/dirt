@@ -825,8 +825,8 @@ class Viewer:
             print(f'step size: {self.step_size}')
         if key in (340, 344):
             self._shift_down = action
-        if key in (341, 345) and action:
-            self._ctrl_down = not self._ctrl_down
+        if key in (341, 345):
+            self._ctrl_down = action
         
         if key == 65 and action:
              self.show_players = not self.show_players
