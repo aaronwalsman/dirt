@@ -42,8 +42,8 @@ def blind_network(
     return network
 
 
-def make_blind_trait_policy(num_actions):
-    network = blind_network(num_actions)
+def make_blind_trait_policy(num_actions, dtype=jnp.float32):
+    network = blind_network(num_actions, dtype=dtype)
     
     @static_functions
     class BlindTraitPolicy:

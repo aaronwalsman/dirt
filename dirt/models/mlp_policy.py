@@ -58,7 +58,8 @@ def mlp_network(
     in_channels,
     out_channels,
     hidden_layers=0,  # hidden_layers=1 -> "ValueError: bytes object is too large" during save_leaf_data
-    hidden_channels=256
+    hidden_channels=256,
+    dtype=jnp.float32,
 ):
     """
     This network flattens a BugsObservation, passes it through an MLP,
@@ -83,7 +84,7 @@ def mlp_network(
                 p_dropout=0.0,
                 init_weights=kaiming,
                 init_bias=zero,
-                dtype=jnp.float32
+                dtype=dtype
             ),
             categorical_sampler_layer()
         )
