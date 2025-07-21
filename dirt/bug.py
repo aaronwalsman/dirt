@@ -281,7 +281,7 @@ class BugTraits:
     max_age_observation : float | jnp.ndarray
     age_sensor_noise : float | jnp.ndarray
     # - visual
-    view_distance : int | jnp.ndarray
+    view_distance : float | jnp.ndarray
     view_back_distance : int | jnp.ndarray
     view_width : int | jnp.ndarray
     max_altitude_observation : float | jnp.ndarray
@@ -368,9 +368,9 @@ class BugTraits:
             max_age_observation = float_vector(1000.),
             age_sensor_noise = float_vector(0.),
             # - visual
-            view_distance = int_vector(5),
-            view_back_distance = int_vector(0),
-            view_width = int_vector(5),
+            view_distance = float_vector(5),
+            view_back_distance = float_vector(0),
+            view_width = float_vector(5),
             max_altitude_observation = float_vector(1.),
             visual_sensor_noise = float_vector(0.),
             # - audio
@@ -1393,11 +1393,9 @@ def make_bugs(
                     f'mutate_{trait_name}_noise',
                     params.mutate_default_noise * (max_trait - min_trait),
                 )
-                noise = (
-                    jrng.normal(noise_key, shape=trait.shape) *
-                    noise_std *
-                    do_mutate
-                )
+                noise = jrng.normal(
+                    noise_key, shape=trait.shape, dtype=float_dtype
+                ) * noise_std * do_mutate
                 trait = trait + noise
                 
                 traits = traits.replace(**{trait_name : trait+noise})
@@ -1430,12 +1428,11 @@ def make_bugs(
                     f'mutate_{trait_name}_noise',
                     params.mutate_default_lognoise,
                 )
-                log_noise = (
-                    jrng.normal(noise_key, shape=()) * log_noise_std
-                )
+                log_noise = jrng.normal(
+                    noise_key, shape=(), dtype=float_dtype) * log_noise_std
                 new_trait = jnp.exp(
-                    jnp.log(traits.max_age_observation) + log_noise * do_mutate)
-                traits = traits.replace(max_age_observation=new_trait)
+                    jnp.log(trait) + log_noise * do_mutate)
+                traits = traits.replace(**{trait_name:new_trait})
                 return traits
             
             key, max_age_observation_key = jrng.split(key)
@@ -1458,7 +1455,7 @@ def make_bugs(
                 params.mutate_default_noise * 2 * params.max_movement,
             )
             dx_noise = (
-                jrng.normal(dx_noise_key, shape=(2,)) *
+                jrng.normal(dx_noise_key, shape=(2,), dtype=float_dtype) *
                 dx_noise_std *
                 do_mutate
             )
@@ -1468,7 +1465,7 @@ def make_bugs(
                 params.mutate_default_noise * 4,
             )
             dr_noise = (
-                jrng.normal(dr_noise_key, shape=(1,)) *
+                jrng.normal(dr_noise_key, shape=(1,), dtype=float_dtype) *
                 dr_noise_std *
                 do_mutate
             )
