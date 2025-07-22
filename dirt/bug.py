@@ -1,3 +1,8 @@
+'''
+Run this file with:
+python bug.py -m configs/sweep.yaml
+'''
+
 from typing import TypeVar, Tuple, Any, Optional
 import hydra
 from omegaconf import DictConfig
@@ -535,6 +540,7 @@ class BugState:
     # tracking
     family_tree : Any
 
+@hydra.main(config_path="configs", config_name="config", version_base="1.3")
 def make_bugs(
     params : BugParams = BugParams(),
     float_dtype : Any = DEFAULT_FLOAT_DTYPE
