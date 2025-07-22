@@ -1,4 +1,6 @@
 from typing import TypeVar, Tuple, Any, Optional
+import hydra
+from omegaconf import DictConfig
 
 import jax
 import jax.numpy as jnp
