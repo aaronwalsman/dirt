@@ -13,7 +13,7 @@ authors = [
 ]
 description = "Environment building tools"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.11,<3.12"
 classifiers = [
   "Programming Language :: Python :: 3",
   "License :: OSI Approved :: MIT License",
@@ -24,6 +24,7 @@ dependencies = [
   "flax",
   "chex",
   "splendor-render",
+  "hydra-core"
 ]
 
 [project.urls]
