@@ -33,7 +33,12 @@ cd splendor-render
 pip install -e .
 ```
 
-Clone `mechagogue` and install the package:
+Now, run
+```
+splendor_asset_installer
+```
+
+Next, clone `mechagogue` and install the package:
 ```
 cd ..
 git clone https://github.com/aaronwalsman/mechagogue.git
