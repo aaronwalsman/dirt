@@ -8,7 +8,7 @@ version = "0.0.0"
 authors = [
   {name="Aaron Walsman", email="aaronwalsman@gmail.com"},
   {name="Chloe H Su", email="suhither@gmail.com"},
-  {name="Vincent Wang, email="vincentwcr041219@gmail.com"}
+  {name="Vincent Wang", email="vincentwcr041219@gmail.com"}
 ]
 description = "Environment building tools"
 readme = "README.md"
