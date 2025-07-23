@@ -104,7 +104,7 @@ def make_tera_arium(
 ):
     
     landscape = make_landscape(params.landscape, float_dtype=float_dtype)
-    bugs = make_bugs(params.bugs, float_dtype=float_dtype)
+    bugs = make_bugs(params.bugs)
     
     def init_state(
         key : chex.PRNGKey,

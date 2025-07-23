@@ -29,7 +29,9 @@ from dirt.gridworld2d.water import flow_step, flow_step_twodir
 # from dirt.gridworld2d.climate_pattern_day import (
 #     temperature_step, light_step, get_day_status)
 from dirt.gridworld2d.gas import make_gas
-from dirt.gridworld2d.climate_pattern_day_cont import (
+# from dirt.gridworld2d.climate_pattern_day_cont import (
+#     light_step, get_day_status)
+from dirt.gridworld2d.climate_pattern_day_year import (
     light_step, get_day_status)
 from dirt.gridworld2d.climate_pattern_year import (
     get_day_light_length, get_day_light_strength)
@@ -130,6 +132,7 @@ class LandscapeParams:
     night_effect: float = 0.15
     cloud_shade: float = 0.25
     rain_shade: float = 0.25
+    max_season_angle: float = 0.41
     
     # weather
     # - wind
@@ -686,6 +689,13 @@ def make_landscape(
             
             light_length = get_day_light_length(t).astype(float_dtype)
             day_status = get_day_status(params.steps_per_day, light_length, t)
+            day_length = params.steps_per_day
+            days_per_year = params.days_per_year
+            max_season_angle = params.max_season_angle
+
+            # Calulate the season angle based on the time
+            total_steps_per_year = day_length * days_per_year
+            season_angle = max_season_angle * jnp.sin(2 * jnp.pi * t / total_steps_per_year)
             
             # water
             if params.include_water:
@@ -918,6 +928,7 @@ def make_landscape(
                     light_strength,
                     light_length,
                     t,
+                    season_angle,
                     params.night_effect
                 )
                 light = grid_mean_to_sum(light, params.light_downsample)
