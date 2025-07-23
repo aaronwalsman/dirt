@@ -10,9 +10,9 @@ Clone the repo:
 git clone https://github.com/aaronwalsman/dirt.git
 ```
 
-Create a conda env with Python >= 3.11:
+Create a conda env with Python 3.11:
 ```
-conda create --name dirt python=3.12 pip
+conda create --name dirt python=3.11 pip
 ```
 
 Activate the environment and install `dirt` dependencies:
