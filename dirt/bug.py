@@ -320,10 +320,13 @@ class BugTraits:
     # stomach
     max_water : float | jnp.ndarray
     water_gulp : float | jnp.ndarray
+    water_expell : float | jnp.ndarray
     max_energy : float | jnp.ndarray
     energy_gulp : float | jnp.ndarray
+    energy_expell : float | jnp.ndarray
     max_biomass : float | jnp.ndarray
     biomass_gulp : float | jnp.ndarray
+    biomass_expell : float | jnp.ndarray
     
     # climate
     insulation : float | jnp.ndarray
@@ -407,10 +410,13 @@ class BugTraits:
             # stomach
             max_water = float_vector(1.),
             water_gulp = float_vector(0.5),
+            water_expell = float_vector(0.05),
             max_energy = float_vector(2.),
             energy_gulp = float_vector(0.5),
+            energy_expell = float_vector(0.05),
             max_biomass = float_vector(5.),
             biomass_gulp = float_vector(0.5),
+            biomass_expell = float_vector(0.05),
             
             # climate
             insulation = float_vector(0.),
@@ -811,7 +817,7 @@ def make_bugs(
                 consumed_water = jnp.minimum(desired_water, water)
                 # - compute how much water each bug will expell
                 expelled_water = expell_water * jnp.minimum(
-                    traits.water_gulp, state.water)
+                    traits.water_expell, state.water)
                 # - compute the lefover water and the bugs' new water
                 leftover_water = water - consumed_water + expelled_water
                 new_water = state.water + consumed_water - expelled_water
@@ -831,7 +837,7 @@ def make_bugs(
                 consumed_energy = jnp.minimum(desired_energy, energy)
                 # - compute how much energy each bug will expell
                 expelled_energy = expell_energy * jnp.minimum(
-                    traits.energy_gulp, state.energy)
+                    traits.energy_expell, state.energy)
                 # - compute the leftover energy and the bugs' new energy
                 leftover_energy = energy - consumed_energy + expelled_energy
                 new_energy = state.energy + consumed_energy - expelled_energy
@@ -851,7 +857,7 @@ def make_bugs(
                 consumed_biomass = jnp.minimum(desired_biomass, biomass)
                 # - compute how much biomass each bug will expell
                 expelled_biomass = expell_biomass * jnp.minimum(
-                    traits.biomass_gulp, state.biomass)
+                    traits.biomass_expell, state.biomass)
                 # - compute the leftover biomass and the bugs' new energy
                 leftover_biomass = biomass - consumed_biomass + expelled_biomass
                 new_biomass = state.biomass + consumed_biomass -expelled_biomass
