@@ -1102,11 +1102,11 @@ def make_bugs(
             )
             # - compute recent deaths
             #   (the parent dying from birth damage does not prevent birth)
-            alive = state.hp > 0
-            recent_deaths = active & ~alive
+            still_alive = state.hp > 0
+            recent_deaths = active & ~still_alive
             
             # - increment the age of alive bugs and zero the age of dead bugs
-            age = (state.age+1) * alive
+            age = (state.age+1) * still_alive
             # - step the family tree
             family_tree_state, child_locations, _ = family_tree.step(
                 state.family_tree,
@@ -1121,6 +1121,10 @@ def make_bugs(
             )
             
             # update the bug physical positions and rotations
+            # - empty the positions of the dead bugs in the object grid
+            object_grid = (
+                state.object_grid.at[state.x[...,0], state.x[...,1]].set(
+                    jnp.where(still_alive, jnp.arange(params.max_players), -1)))
             # - move the dead bugs off the map and set 0 rotation
             x = jnp.where(
                 recent_deaths[:,None],
@@ -1137,7 +1141,7 @@ def make_bugs(
             x = x.at[child_locations].set(child_x)
             r = r.at[child_locations].set(child_r)
             # - update the object grid
-            object_grid = state.object_grid.at[x[...,0], x[...,1]].set(
+            object_grid = object_grid.at[x[...,0], x[...,1]].set(
                 jnp.where(active, jnp.arange(params.max_players), -1))
             # - update the state
             state = state.replace(x=x, r=r, object_grid=object_grid)

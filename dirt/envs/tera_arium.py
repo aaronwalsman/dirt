@@ -33,8 +33,9 @@ from dirt.bug import (
     make_bugs,
     action_type_names,
 )
-from dirt.gridworld2d.grid import read_grid_locations
+from dirt.gridworld2d.grid import read_grid_locations, set_grid_shape
 from dirt.gridworld2d.observations import first_person_view, noisy_sensor
+from dirt.visualization.image import jax_to_image
 
 @static_data
 class TeraAriumParams:
@@ -347,14 +348,20 @@ def make_tera_arium(
         return bugs.family_info(state.bugs)
     
     def visualizer_terrain_texture(report, shape, display_mode):
-        return landscape.render_display_mode(
-            report,
-            shape,
-            display_mode,
-            spot_x=report.player_x,
-            spot_color=report.player_color,
-            convert_to_image=True,
-        )
+        if display_mode in (1,2,3,4,5):
+            return landscape.render_display_mode(
+                report,
+                shape,
+                display_mode,
+                spot_x=report.player_x,
+                spot_color=report.player_color,
+                convert_to_image=True,
+            )
+        elif display_mode == 6:
+            occupied = report.object_grid != -1
+            rgb = jnp.stack((occupied, occupied, occupied), axis=-1)
+            rgb = set_grid_shape(rgb, *shape, preserve_mass=False)
+            return jax_to_image(rgb)
     
     @static_data
     class VisualizerReport:
@@ -377,6 +384,7 @@ def make_tera_arium(
         players : jnp.ndarray = False
         player_x : jnp.ndarray = False
         player_r : jnp.ndarray = False 
+        object_grid : jnp.ndarray = False
         player_color : jnp.ndarray = False
         
         if params.report_bug_actions:
@@ -401,6 +409,7 @@ def make_tera_arium(
             players=active_players(state),
             player_x=state.bugs.x,
             player_r=state.bugs.r,
+            object_grid=state.bugs.object_grid,
             player_color=state.bug_traits.color,
         )
         if params.include_rock:
