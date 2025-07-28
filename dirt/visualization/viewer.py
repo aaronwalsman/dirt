@@ -315,6 +315,7 @@ class Viewer:
         #active_players = self.get_active_players(self.params, self.report)
         active_players = self.get_active_players(self.report)
         self.max_players = min(active_players.shape[0], max_render_players)
+        self.selected_player = None
         
         # make player cube
         self.renderer.load_mesh(
@@ -549,7 +550,11 @@ class Viewer:
                 render_id = color_byte_to_index(mask_color) - 1
                 if render_id in self._render_players:
                     player_id = self._render_players[render_id]
+                    self.selected_player = player_id
                     self.print_player_info(player_id, self.report)
+                else:
+                    self.selected_player = None
+                self._update_players()
                 #self.window.set_active()
         else:
             return self.camera_control.mouse_callback(
@@ -596,6 +601,9 @@ class Viewer:
         #self._update_water()
         if self.get_active_players is not None:
             self._update_players()
+        
+        if self.selected_player is not None:
+            self.print_player_info(self.selected_player, self.report)
     
     def _update_players(self):
         #active_players = self.get_active_players(self.params, self.report)
@@ -662,9 +670,14 @@ class Viewer:
                 self.renderer.set_instance_transform(
                     eye_pupil_name, player_transforms[player_id])
                 
-                player_color = self.get_player_color(
-                #    player_id, self.params, self.report)
-                    player_id, self.report)
+                if (self.selected_player is not None and
+                    player_id == self.selected_player
+                ):
+                    player_color = np.array([1., 0., 0.])
+                else:
+                    player_color = self.get_player_color(
+                    #    player_id, self.params, self.report)
+                        player_id, self.report)
                 material_name = f'player_material_{render_id}'
                 self.renderer.set_material_flat_color(
                     material_name, player_color)
@@ -817,17 +830,21 @@ class Viewer:
             self.display_mode = (key - 48)
             print(f'display mode: {self.display_mode}')
             self.change_step(self.current_step)
+        # -
         if action == glfw.PRESS and key == 45:
             self.step_size = max(1, self.step_size-1)
             print(f'step size: {self.step_size}')
+        # +
         if action == glfw.PRESS and key == 61:
             self.step_size += 1
             print(f'step size: {self.step_size}')
+        # shift
         if key in (340, 344):
             self._shift_down = action
+        # ctrl
         if key in (341, 345):
             self._ctrl_down = action
-        
+        # a
         if key == 65 and action:
              self.show_players = not self.show_players
              self.change_step(self.current_step)
