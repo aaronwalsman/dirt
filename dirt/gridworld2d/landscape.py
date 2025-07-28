@@ -979,8 +979,9 @@ def make_landscape(
                     params.mountain_temperature_baseline +
                     (1. - altitude_baseline_alpha) *
                     params.sea_level_temperature_baseline,
-                    #params.terrain_downsample,
-                    params.light_downsample,
+                    # THIS IS THE PART IN QUESTION VVV CURRENTLY SET TO OLDER V.
+                    params.terrain_downsample,
+                    #params.light_downsample,
                 )
                 # --- the heat_absorption represents how quickly the surface
                 #     is heated by incoming light
