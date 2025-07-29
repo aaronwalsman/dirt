@@ -148,7 +148,7 @@ class BugParams:
     
     # biomass requirements
     # Vincent first pass for biomass requirements of various traits, random put some parameters here
-    min_biomass_constant : float = 0.1
+    min_biomass_constant : float = 0.00
     biomass_per_brain_size : float = 0.05
     biomass_per_movement_primitive : float = 0.02
     biomass_per_attack_primitive : float = 0.03
@@ -166,7 +166,7 @@ class BugParams:
     biomass_per_max_hp : float = 0.01
 
     # damage paramters
-    lack_biomass_damage: float = 10.0
+    lack_biomass_damage: float = 5.0
 
     # mass
     biomass_mass : float = 1.
@@ -462,12 +462,23 @@ class BugTraits:
         Calculate the biomass requirement for this bug's traits.
         """
         n_move = self.movement_primitives.shape[0] if hasattr(self.movement_primitives, "shape") else 0
-        n_attack = self.attack_primitives.shape[0] if hasattr(self.attack_primitives, "shape") else 0
+        attack_biomass = 0.0
+        if hasattr(self.attack_primitives, "shape"):
+            for prim in self.attack_primitives:
+                # prim: [dx, dy, w, h, damage]
+                width = abs(prim[2])
+                height = abs(prim[3])
+                damage = abs(prim[4])
+                area = (2 * width + 1) * (2 * height + 1)
+                # weight might need to be adjusted accordingly
+                attack_biomass += (
+                    params.biomass_per_attack_primitive * area * damage
+                )
         req = (
             params.min_biomass_constant
             + self.brain_size * params.biomass_per_brain_size
             + n_move * params.biomass_per_movement_primitive
-            + n_attack * params.biomass_per_attack_primitive
+            + attack_biomass
             + self.photosynthesis * params.biomass_per_photosynthesis
             + self.max_climb * params.biomass_per_max_climb
             + self.max_water * params.biomass_per_max_water
