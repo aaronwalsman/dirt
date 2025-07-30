@@ -148,8 +148,8 @@ class LandscapeParams:
     mountain_temperature_baseline : float = -2.
     ground_heat_absorption : float = 3.
     water_heat_absorption : float = 2.
-    ground_thermal_mass : float = 0.995
-    water_thermal_mass : float = 0.999
+    ground_thermal_mass : float = 0.999 #0.995
+    water_thermal_mass : float = 0.9999 #0.999
     temperature_diffusion_radius : int = 1
     temperature_diffusion_strength : float = 1.
     temperature_follows_wind : bool = True
@@ -907,7 +907,7 @@ def make_landscape(
             # light
             if params.include_light:
                 # - seasonal
-                light_strength = get_day_light_strength(t).astype(float_dtype)
+                #light_strength = get_day_light_strength(t).astype(float_dtype)
                 if params.include_water:
                     # - mask the terrain normals based on standing water which
                     #   is approximated to being flat everywhere in order to
@@ -928,7 +928,7 @@ def make_landscape(
                 light = light_step(
                     params.steps_per_day,
                     terrain_normals, 
-                    light_strength,
+                    #light_strength,
                     light_length,
                     t,
                     season_angle,
@@ -983,7 +983,6 @@ def make_landscape(
                     params.mountain_temperature_baseline +
                     (1. - altitude_baseline_alpha) *
                     params.sea_level_temperature_baseline,
-                    #params.terrain_downsample,
                     params.light_downsample,
                 )
                 # --- the heat_absorption represents how quickly the surface
@@ -1008,7 +1007,6 @@ def make_landscape(
                 # --- c is a correction factor due to the light not being full
                 #     strength all day
                 c = jnp.array((4./jnp.pi), dtype=float_dtype)
-                #c = jnp.array((8./jnp.pi), dtype=float_dtype)
                 target_temperature = add_grids(
                     no_light_baseline,
                     c * state.light * heat_absorption,

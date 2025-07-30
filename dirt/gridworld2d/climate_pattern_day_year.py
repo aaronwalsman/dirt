@@ -74,7 +74,7 @@ def light_step(
     day_length: int,
     #altitude: jnp.array,
     normals : jnp.array,
-    light_strength: float,
+    #light_strength: float,
     day_light_length: int,
     time: int,
     season_angle: float = 0.0,
