@@ -133,6 +133,7 @@ class LandscapeParams:
     cloud_shade: float = 0.25
     rain_shade: float = 0.25
     max_season_angle: float = 0.41
+    latitude: float = 0.73 # BOSTON!
     
     # weather
     # - wind
@@ -697,7 +698,8 @@ def make_landscape(
             total_steps_per_year = day_length * days_per_year
             season_angle = (
                 max_season_angle *
-                jnp.sin(2 * jnp.pi * t / total_steps_per_year)
+                jnp.sin(2 * jnp.pi * t / total_steps_per_year) +
+                params.latitude
             )
             
             # water
