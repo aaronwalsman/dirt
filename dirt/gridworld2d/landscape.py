@@ -695,7 +695,10 @@ def make_landscape(
 
             # Calulate the season angle based on the time
             total_steps_per_year = day_length * days_per_year
-            season_angle = max_season_angle * jnp.sin(2 * jnp.pi * t / total_steps_per_year)
+            season_angle = (
+                max_season_angle *
+                jnp.sin(2 * jnp.pi * t / total_steps_per_year)
+            )
             
             # water
             if params.include_water:
@@ -966,25 +969,26 @@ def make_landscape(
                         params.ground_thermal_mass,
                         dtype=float_dtype,
                     )
+                #jax.debug.print('ta {tamin} {tamax}', tamin=temperature_alpha.min(), tamax=temperature_alpha.max())
                 # -- compute the target temperature
-                # --- the temperature_baseline represents the temperature a
+                # --- the no_light_baseline represents the temperature a
                 #     particular altitude should settle to with no incoming
                 #     light
                 # ---- altitude_baseline_alpha is unitless
                 altitude_baseline_alpha = subsample_grid(
                     normalized_altitude, *light_shape, preserve_mass=False)
-                # ---- temperature_baseline is in temperature mass units
-                temperature_baseline = grid_mean_to_sum(
+                # ---- no_light_baseline is in temperature mass units
+                no_light_baseline = grid_mean_to_sum(
                     altitude_baseline_alpha *
                     params.mountain_temperature_baseline +
                     (1. - altitude_baseline_alpha) *
                     params.sea_level_temperature_baseline,
-                    # THIS IS THE PART IN QUESTION VVV CURRENTLY SET TO OLDER V.
-                    params.terrain_downsample,
-                    #params.light_downsample,
+                    #params.terrain_downsample,
+                    params.light_downsample,
                 )
                 # --- the heat_absorption represents how quickly the surface
-                #     is heated by incoming light
+                #     is heated by incoming light, and is in temperature/area
+                #     units
                 if params.include_water:
                     heat_absorption = jnp.where(
                         standing_water_light,
@@ -999,13 +1003,14 @@ def make_landscape(
                         params.ground_heat_absorption,
                         dtype=float_dtype,
                     )
-                heat_absorption = grid_mean_to_sum(
-                    heat_absorption, params.light_downsample)
+                #heat_absorption = grid_mean_to_sum(
+                #    heat_absorption, params.light_downsample)
                 # --- c is a correction factor due to the light not being full
                 #     strength all day
                 c = jnp.array((4./jnp.pi), dtype=float_dtype)
+                #c = jnp.array((8./jnp.pi), dtype=float_dtype)
                 target_temperature = add_grids(
-                    temperature_baseline,
+                    no_light_baseline,
                     c * state.light * heat_absorption,
                 )
                 
