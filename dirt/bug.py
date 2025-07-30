@@ -166,7 +166,7 @@ class BugParams:
     biomass_per_max_hp : float = 0.01
 
     # damage paramters
-    lack_biomass_damage: float = 5.0
+    lack_biomass_damage: float = 3.0
 
     # mass
     biomass_mass : float = 1.
@@ -463,17 +463,17 @@ class BugTraits:
         """
         n_move = self.movement_primitives.shape[0] if hasattr(self.movement_primitives, "shape") else 0
         attack_biomass = 0.0
-        if hasattr(self.attack_primitives, "shape"):
-            for prim in self.attack_primitives:
-                # prim: [dx, dy, w, h, damage]
-                width = abs(prim[2])
-                height = abs(prim[3])
-                damage = abs(prim[4])
-                area = (2 * width + 1) * (2 * height + 1)
-                # weight might need to be adjusted accordingly
-                attack_biomass += (
-                    params.biomass_per_attack_primitive * area * damage
-                )
+        if hasattr(self.attack_primitives, "shape") and self.attack_primitives.ndim == 3:
+            width = jnp.abs(self.attack_primitives[..., 2])
+            height = jnp.abs(self.attack_primitives[..., 3])
+            damage = jnp.abs(self.attack_primitives[..., 4])
+            area = (2 * width + 1) * (2 * height + 1)
+            # shape: (N, n_attack)
+            attack_biomass = params.biomass_per_attack_primitive * area * damage
+            # sum over n_attack axis, shape: (N,)
+            attack_biomass = jnp.sum(attack_biomass, axis=-1)
+        else:
+            attack_biomass = 0.0
         req = (
             params.min_biomass_constant
             + self.brain_size * params.biomass_per_brain_size
@@ -1036,10 +1036,10 @@ def make_bugs(
             # Vincent's pass to check biomass requirements
             biomass_req = traits.biomass_requirement(params)
             # check if the biomass requirement is met
-            lack_biomass = state.biomass < biomass_req
+            lack_biomass = jnp.maximum(state.biomass - biomass_req,0)
             # if not, apply damage
             # turning this off momentarily until we tune the parameters
-            #damage += lack_biomass * params.lack_biomass_damage
+            damage += lack_biomass * params.lack_biomass_damage
                        
             state = state.replace(
                 hp=state.hp - damage,
