@@ -117,6 +117,7 @@ class LandscapeParams:
     sea_level : float = 0.
     fill_water_to_sea_level : bool = True
     initial_water_per_cell : float = 0.
+    include_water_flow : bool = True
     water_flow_rate : float = 0.25
     ice_flow_rate : float = 0.001
     include_water_sources_and_sinks : bool = True
@@ -705,17 +706,21 @@ def make_landscape(
             # water
             if params.include_water:
                 # - make water flow downhill
-                if params.include_temperature:
-                    flow_rate = jnp.where(
-                        state.temperature > 0.,
-                        jnp.array(params.water_flow_rate, dtype=float_dtype),
-                        jnp.array(params.ice_flow_rate, dtype=float_dtype),
-                    )
+                if params.include_water_flow:
+                    if params.include_temperature:
+                        water_flow = jnp.array(
+                            params.water_flow_rate, dtype=float_dtype)
+                        ice_flow = jnp.array(
+                            params.ice_flow_rate,dtype=float_dtype)
+                        flow_rate = jnp.where(
+                            state.temperature > 0., water_flow, ice_flow)
+                    else:
+                        flow_rate = jnp.full(
+                            (1,1), params.water_flow_rate, dtype=float_dtype)
+                    flow_rate /= params.terrain_downsample
+                    water = flow_step(state.rock, state.water, flow_rate)
                 else:
-                    flow_rate = jnp.full(
-                        (1,1), params.water_flow_rate, dtype=float_dtype)
-                flow_rate /= params.terrain_downsample
-                water = flow_step(state.rock, state.water, flow_rate)
+                    water = state.water
                 
                 # - sources and sinks
                 #   The total ammount of water transferred is equal to the
@@ -893,11 +898,10 @@ def make_landscape(
                 raining = (
                     (raining & raining_neighbors > 3) | raining_neighbors > 6)
                 raining = raining.astype(jnp.bool)
-                # - apply rain gas dynamics
+                # - apply rain and moisture gas dynamics
                 key, rain_key = jrng.split(key)
-                raining = rain_system.step(rain_key, raining, wind=state.wind)
-                
-                # apply moisture gas dynamics
+                raining = rain_system.step(
+                    rain_key, raining, wind=state.wind)
                 key, moisture_key = jrng.split(key)
                 moisture = moisture_system.step(
                     moisture_key, moisture, wind=state.wind)
