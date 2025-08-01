@@ -157,9 +157,9 @@ def make_tera_arium(
             bug_state,
             action,
             traits,
-            water=bug_water,
-            energy=bug_energy,
-            biomass=bug_biomass,
+            external_water=bug_water,
+            external_energy=bug_energy,
+            external_biomass=bug_biomass,
         )
         # -- put the leftovers back in the environment
         if params.include_water:
@@ -221,7 +221,6 @@ def make_tera_arium(
             else:
                 landscape_state = landscape.add_water(
                     landscape_state, expelled_x, evaporated_moisture)
-        if params.include_water:
             landscape_state = landscape.add_water(
                 landscape_state, expelled_x, expelled_water)
         if params.include_energy:

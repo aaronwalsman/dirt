@@ -191,7 +191,7 @@ class BugParams:
     initial_hp : float = 10.
     initial_water : float = 0.1
     initial_energy : float = 1.
-    initial_biomass : float = 1.0
+    initial_biomass : float = 1.
     #initial_color : Tuple[float, float, float] = (0.5, 0.25, 0.5)
     
     # trait mutation parameters
@@ -260,6 +260,7 @@ class BugParams:
     max_child_water : float = 10.
     max_child_hp : float = 10.
     max_child_energy : float = 10.
+    min_child_biomass : float = 0.01
     max_child_biomass : float = 10.
     
     max_movement : float = 4.
@@ -434,8 +435,8 @@ class BugTraits:
             # reproduction
             child_hp = float_vector(5.),
             child_energy = float_vector(1.0),
-            child_biomass = float_vector(1.0),
-            child_water = float_vector(0.5),
+            child_biomass = float_vector(0.9),
+            child_water = float_vector(0.1),
             child_color = jnp.full(
                 (*shape,3), DEFAULT_BUG_COLOR, dtype=DEFAULT_FLOAT_DTYPE),
             
@@ -800,9 +801,9 @@ def make_bugs(
             state : BugState,
             action : int,
             traits : BugTraits,
-            water : Optional[jnp.ndarray] = None,
-            energy : Optional[jnp.ndarray] = None,
-            biomass : Optional[jnp.ndarray] = None,
+            external_water : Optional[jnp.ndarray] = None,
+            external_energy : Optional[jnp.ndarray] = None,
+            external_biomass : Optional[jnp.ndarray] = None,
         ):
             # get the right traits
             if params.levels:
@@ -821,16 +822,18 @@ def make_bugs(
             if params.include_water:
                 # - compute which bugs are drinking water
                 drink_water = eat & (action_primitive == WATER_PRIMITIVE)
+                drink_water &= state.water < traits.max_water
                 expell_water = expell & (action_primitive == WATER_PRIMITIVE)
                 # - compute how much water each bug will consume
                 desired_water = drink_water * jnp.minimum(
                     traits.water_gulp, traits.max_water - state.water)
-                consumed_water = jnp.minimum(desired_water, water)
+                consumed_water = jnp.minimum(desired_water, external_water)
                 # - compute how much water each bug will expell
                 expelled_water = expell_water * jnp.minimum(
                     traits.water_expell, state.water)
                 # - compute the lefover water and the bugs' new water
-                leftover_water = water - consumed_water + expelled_water
+                leftover_water = (
+                    external_water - consumed_water + expelled_water)
                 new_water = state.water + consumed_water - expelled_water
                 # - update state
                 state = state.replace(water=new_water)
@@ -845,12 +848,13 @@ def make_bugs(
                 # - compute how much energy each bug will consume
                 desired_energy = eat_energy * jnp.minimum(
                     traits.energy_gulp, traits.max_energy - state.energy)
-                consumed_energy = jnp.minimum(desired_energy, energy)
+                consumed_energy = jnp.minimum(desired_energy, external_energy)
                 # - compute how much energy each bug will expell
                 expelled_energy = expell_energy * jnp.minimum(
                     traits.energy_expell, state.energy)
                 # - compute the leftover energy and the bugs' new energy
-                leftover_energy = energy - consumed_energy + expelled_energy
+                leftover_energy = (
+                    external_energy - consumed_energy + expelled_energy)
                 new_energy = state.energy + consumed_energy - expelled_energy
                 # - update state
                 state = state.replace(energy=new_energy)
@@ -865,12 +869,14 @@ def make_bugs(
                 # - compute how much biomass each bug will consume
                 desired_biomass = eat_biomass * jnp.minimum(
                     traits.biomass_gulp, traits.max_biomass - state.biomass)
-                consumed_biomass = jnp.minimum(desired_biomass, biomass)
+                consumed_biomass = jnp.minimum(
+                    desired_biomass, external_biomass)
                 # - compute how much biomass each bug will expell
                 expelled_biomass = expell_biomass * jnp.minimum(
                     traits.biomass_expell, state.biomass)
-                # - compute the leftover biomass and the bugs' new energy
-                leftover_biomass = biomass - consumed_biomass + expelled_biomass
+                # - compute the leftover biomass and the bugs' new biomass
+                leftover_biomass = (
+                    external_biomass - consumed_biomass + expelled_biomass)
                 new_biomass = state.biomass + consumed_biomass -expelled_biomass
                 # - update state
                 state = state.replace(biomass=new_biomass)
@@ -1096,6 +1102,12 @@ def make_bugs(
                 state.r,
                 object_grid=state.object_grid,
             )
+            # - finally filter by available slots
+            #   (technically, this may undercount the number of available slots
+            #   since it doesn't consider the bugs that may die in this time
+            #   step)
+            available_slots = params.max_players - active.sum()
+            will_reproduce &= jnp.cumsum(will_reproduce) < available_slots
             
             # charge the parents for the required birth resources
             paid_hp = birth_damage * will_reproduce
@@ -1181,7 +1193,6 @@ def make_bugs(
                 child_water = traits.child_water[parent_locations]
                 water = state.water * ~recent_deaths
                 water = water.at[child_locations].set(child_water)
-                #state = state.replace(water = state.water * ~recent_deaths)
                 state = state.replace(water=water)
             else:
                 expelled_moisture = None
@@ -1191,7 +1202,6 @@ def make_bugs(
                 child_energy = traits.child_energy[parent_locations]
                 energy = state.energy * ~recent_deaths
                 energy = energy.at[child_locations].set(child_energy)
-                #state = state.replace(energy = state.energy * ~recent_deaths)
                 state = state.replace(energy=energy)
             else:
                 dead_energy = None
@@ -1200,7 +1210,6 @@ def make_bugs(
                 child_biomass = traits.child_biomass[parent_locations]
                 biomass = state.biomass * ~recent_deaths
                 biomass = biomass.at[child_locations].set(child_biomass)
-                #state = state.replace(biomass = state.biomass * ~recent_deaths)
                 state = state.replace(biomass=biomass)
             
             ## - update the state
@@ -1425,9 +1434,9 @@ def make_bugs(
                 noise = jrng.normal(
                     noise_key, shape=trait.shape, dtype=float_dtype
                 ) * noise_std * do_mutate
-                trait = trait + noise
+                trait = jnp.clip(trait + noise, min=min_trait, max=max_trait)
                 
-                traits = traits.replace(**{trait_name : trait+noise})
+                traits = traits.replace(**{trait_name : trait})
                 return traits
             
             all_trait_names = set(

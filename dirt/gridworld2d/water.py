@@ -79,7 +79,10 @@ def flow_step(
     water = water - flow_down + jnp.pad(flow_down, ((1, 0), (0, 0)))[:-1, :]
     water = water - flow_left + jnp.pad(flow_left, ((0, 0), (0, 1)))[:, 1:]
     water = water - flow_right + jnp.pad(flow_right, ((0, 0), (1, 0)))[:, :-1]
-
+    
+    # clip at zero to account for rounding errors
+    water = jnp.clip(water, min=0.)
+    
     return water
 
 def calculate_flow_twodir(
