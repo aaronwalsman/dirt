@@ -85,14 +85,18 @@ def wrap_r(
 def distance_x(x0, x1):
     return jnp.abs(x1-x0).sum(axis=-1)
 
+def shortest_r(r0, r1):
+    return ((r1 - r0 + 2) % 4) - 2
+
 def distance_r(r0, r1):
-    distance_matrix = jnp.array([
-        [0,1,2,1],
-        [1,0,1,2],
-        [2,1,0,1],
-        [1,2,1,0]
-    ])
-    return distance_matrix[r0, r1]
+    #distance_matrix = jnp.array([
+    #    [0,1,2,1],
+    #    [1,0,1,2],
+    #    [2,1,0,1],
+    #    [1,2,1,0]
+    #])
+    #return distance_matrix[r0, r1]
+    return jnp.abs(shortest_r(r0, r1))
 
 def move_mass(
     x0 : jnp.ndarray,
