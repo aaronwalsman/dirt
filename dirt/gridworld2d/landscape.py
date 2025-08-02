@@ -223,6 +223,8 @@ class LandscapeParams:
         if params.include_light:
             light_downsample = max(
                 params.terrain_downsample, params.light_downsample)
+        else:
+            light_downsample = params.light_downsample
         
         if params.include_temperature:
             assert params.include_light, (
@@ -496,9 +498,16 @@ def make_landscape(
             
             # light
             if params.include_light:
-                light_shape = downsample_grid_shape(
-                    *params.world_size, params.light_downsample)
-                if light_shape[0] == 1 or light_shape[1] == 1:
+                if params.include_rock or params.include_water:
+                    light_shape = downsample_grid_shape(
+                        *params.world_size, params.light_downsample)
+                else:
+                    light_shape = (1,1)
+                
+                if ((not params.include_rock) or
+                    light_shape[0] == 1 or
+                    light_shape[1] == 1
+                ):
                     rock_normals = jnp.full(
                         (1,1,3), jnp.array([0,0,1], dtype=float_dtype))
                 else:
@@ -663,7 +672,7 @@ def make_landscape(
         
         # get altitude
         def get_altitude(state):
-            altitude = jnp.zeros((), dtype=float_dtype)
+            altitude = jnp.zeros((1,1), dtype=float_dtype)
             if params.include_rock:
                 altitude += state.rock
             if params.include_water:
@@ -975,14 +984,17 @@ def make_landscape(
                         params.ground_thermal_mass,
                         dtype=float_dtype,
                     )
-                #jax.debug.print('ta {tamin} {tamax}', tamin=temperature_alpha.min(), tamax=temperature_alpha.max())
                 # -- compute the target temperature
                 # --- the no_light_baseline represents the temperature a
                 #     particular altitude should settle to with no incoming
                 #     light
                 # ---- altitude_baseline_alpha is unitless
-                altitude_baseline_alpha = subsample_grid(
-                    normalized_altitude, *light_shape, preserve_mass=False)
+                if params.include_rock or params.include_water:
+                    altitude_baseline_alpha = subsample_grid(
+                        normalized_altitude, *light_shape, preserve_mass=False)
+                else:
+                    altitude_baseline_alpha = jnp.zeros(
+                        light_shape, dtype=float_dtype)
                 # ---- no_light_baseline is in temperature mass units
                 no_light_baseline = grid_mean_to_sum(
                     altitude_baseline_alpha *
@@ -1032,10 +1044,15 @@ def make_landscape(
                         state.energy <
                         state.biomass * params.photosynthesis_energy_per_biomass
                     )
+                    if params.include_light:
+                        light_mean = grid_sum_to_mean(
+                            state.light, params.light_downsample)
+                    else:
+                        light_mean = jnp.ones_like(state.biomass)
                     photosynthesis_energy = scale_grid(
                         state.biomass *
                         params.biomass_photosynthesis,
-                        grid_sum_to_mean(state.light, params.light_downsample),
+                        light_mean,
                     )
                     delta_energy = jnp.where(
                         add_energy_locations,
@@ -1133,7 +1150,7 @@ def make_landscape(
                     rgb = write_grid_locations(
                         rgb, spot_x, spot_color, rgb_downsample)
             
-            if use_light:
+            if use_light and params.include_light:
                 light = grid_sum_to_mean(state.light, params.light_downsample)
                 rgb = scale_grid(rgb, light[..., None])
             
