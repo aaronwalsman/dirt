@@ -173,11 +173,14 @@ def make_tera_arium(
                 landscape_state, bug_state.x, leftover_biomass)
         
         # - photosynthesis
-        bug_light = grid.read_grid_locations(
-            state.landscape.light,
-            bug_state.x,
-            params.landscape.light_downsample,
-        )
+        if params.include_light:
+            bug_light = grid.read_grid_locations(
+                state.landscape.light,
+                bug_state.x,
+                params.landscape.light_downsample,
+            )
+        else:
+            bug_light = jnp.ones((params.max_players,), dtype=float_dtype) 
         bug_state = bugs.photosynthesis(bug_state, traits, bug_light)
         
         # - heal
@@ -265,7 +268,10 @@ def make_tera_arium(
         )
         
         # - relative altitude
-        altitude = state.landscape.rock
+        if params.include_rock:
+            altitude = state.landscape.rock
+        else:
+            altitude = jnp.zeros((1,1), dtype=float_dtype)
         if params.include_water:
             altitude += state.landscape.water
         bug_altitude = read_grid_locations(
@@ -296,11 +302,14 @@ def make_tera_arium(
         # weather
         wind = state.landscape.wind / state.landscape.max_wind
         wind = jnp.repeat(wind[None,...], repeats=params.max_players, axis=0)
-        temperature = read_grid_locations(
-            state.landscape.temperature,
-            state.bugs.x,
-            params.landscape.temperature_downsample,
-        )
+        if params.include_temperature:
+            temperature = read_grid_locations(
+                state.landscape.temperature,
+                state.bugs.x,
+                params.landscape.temperature_downsample,
+            )
+        else:
+            temperature = 0.
         
         # external resources
         if params.include_water:

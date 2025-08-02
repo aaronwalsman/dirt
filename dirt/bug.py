@@ -148,7 +148,7 @@ class BugParams:
     
     # biomass requirements
     # Vincent first pass for biomass requirements of various traits, random put some parameters here
-    min_biomass_constant : float = 0.00
+    min_biomass_constant : float = 0.2
     biomass_per_brain_size : float = 0.05
     biomass_per_movement_primitive : float = 0.02
     biomass_per_attack_primitive : float = 0.03
@@ -457,40 +457,6 @@ class BugTraits:
             #    [1, 0, 0, 0, 1] # x-offset, y-offset, width, height, damage
             #], dtype=DEFAULT_FLOAT_DTYPE),
         )
-    
-    def biomass_requirement(self, params: "BugParams"):
-        """
-        Calculate the biomass requirement for this bug's traits.
-        """
-        n_move = self.movement_primitives.shape[0] if hasattr(self.movement_primitives, "shape") else 0
-        attack_biomass = 0.0
-        if hasattr(self.attack_primitives, "shape") and self.attack_primitives.ndim == 3:
-            width = jnp.abs(self.attack_primitives[..., 2])
-            height = jnp.abs(self.attack_primitives[..., 3])
-            damage = jnp.abs(self.attack_primitives[..., 4])
-            area = (2 * width + 1) * (2 * height + 1)
-            # shape: (N, n_attack)
-            attack_biomass = params.biomass_per_attack_primitive * area * damage
-            # sum over n_attack axis, shape: (N,)
-            attack_biomass = jnp.sum(attack_biomass, axis=-1)
-        else:
-            attack_biomass = 0.0
-        req = (
-            params.min_biomass_constant
-            + self.brain_size * params.biomass_per_brain_size
-            + n_move * params.biomass_per_movement_primitive
-            + attack_biomass
-            + self.photosynthesis * params.biomass_per_photosynthesis
-            + self.max_climb * params.biomass_per_max_climb
-            + self.max_water * params.biomass_per_max_water
-            + self.water_gulp * params.biomass_per_water_gulp
-            + self.max_energy * params.biomass_per_max_energy
-            + self.energy_gulp * params.biomass_per_energy_gulp
-            + self.max_biomass * params.biomass_per_max_biomass
-            + self.biomass_gulp * params.biomass_per_biomass_gulp
-            + self.max_hp * params.biomass_per_max_hp
-        )
-        return req
 
 @static_data
 class BugObservation:
@@ -619,6 +585,55 @@ def make_bugs(
     if params.include_biomass:
         BIOMASS_PRIMITIVE = resource_primitive
         resource_primitive += 1
+    
+    def biomass_requirement(traits):
+        """
+        Calculate the biomass requirement for this bug's traits.
+        """
+        #n_move = traits.movement_primitives.shape[0] if hasattr(traits.movement_primitives, "shape") else 0
+        dx = traits.movement_primitives[:,:2]
+        dr = traits.movement_primitives[:,2]
+        distance_x = jnp.abs(dx).sum(axis=-2)
+        distance_r = dynamics.distance_r(dr, 0)
+        total_movement_distance = (
+            distance_x.sum(axis=-1) + distance_r.sum(axis=-1))
+        
+        attack_biomass = 0.0
+        if hasattr(traits.attack_primitives, "shape") and traits.attack_primitives.ndim == 3:
+            width = jnp.abs(traits.attack_primitives[..., 2])
+            height = jnp.abs(traits.attack_primitives[..., 3])
+            damage = jnp.abs(traits.attack_primitives[..., 4])
+            area = (2 * width + 1) * (2 * height + 1)
+            # shape: (N, n_attack)
+            attack_biomass = params.biomass_per_attack_primitive * area * damage
+            # sum over n_attack axis, shape: (N,)
+            attack_biomass = jnp.sum(attack_biomass, axis=-1)
+        else:
+            attack_biomass = 0.0
+        req = (
+            params.min_biomass_constant
+            + traits.brain_size * params.biomass_per_brain_size
+            #+ n_move * params.biomass_per_movement_primitive
+            + total_movement_distance * params.biomass_per_movement_primitive
+            + attack_biomass
+            + traits.photosynthesis * params.biomass_per_photosynthesis
+            + traits.max_climb * params.biomass_per_max_climb
+            + traits.max_water * params.biomass_per_max_water
+            + traits.water_gulp * params.biomass_per_water_gulp
+            + traits.max_energy * params.biomass_per_max_energy
+            + traits.energy_gulp * params.biomass_per_energy_gulp
+            + traits.max_biomass * params.biomass_per_max_biomass
+            + traits.biomass_gulp * params.biomass_per_biomass_gulp
+            + traits.max_hp * params.biomass_per_max_hp
+        )
+        #jax.debug.print('bs {bs}', bs=traits.brain_size * params.biomass_per_brain_size)
+        #jax.debug.print('mov {m}', m=total_movement_distance * params.biomass_per_movement_primitive)
+        #jax.debug.print('att {a}', a=attack_biomass)
+        #jax.debug.print('mc {mc}', mc=traits.max_climb * params.biomass_per_max_climb)
+        #jax.debug.print('mw {mw}', mw=traits.max_water * params.biomass_per_max_water)
+        #jax.debug.print('req {r}', r=req)
+        return req
+    
     
     @static_functions
     class Bugs:
@@ -1040,9 +1055,10 @@ def make_bugs(
             damage += traits.senescence_damage * state.age
             
             # Vincent's pass to check biomass requirements
-            biomass_req = traits.biomass_requirement(params)
+            biomass_req = biomass_requirement(traits)
             # check if the biomass requirement is met
-            lack_biomass = jnp.maximum(state.biomass - biomass_req,0)
+            #jax.debug.print(state.biomass - biomass_req)
+            lack_biomass = jnp.maximum(biomass_req - state.biomass, 0)
             # if not, apply damage
             # turning this off momentarily until we tune the parameters
             damage += lack_biomass * params.lack_biomass_damage
