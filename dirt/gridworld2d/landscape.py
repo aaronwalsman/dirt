@@ -35,7 +35,7 @@ from dirt.gridworld2d.climate_pattern_day_year import (
     light_step, get_day_status)
 from dirt.gridworld2d.climate_pattern_year import (
     get_day_light_length, get_day_light_strength)
-from dirt.gridworld2d.spawn import unique_x, poisson_grid
+from dirt.gridworld2d.spawn import unique_x, poisson_grid, poisson_vector
 from dirt.gridworld2d.grid import (
     downsample_grid_shape,
     zero_grid,
@@ -102,12 +102,18 @@ class LandscapeParams:
     # - rock
     include_rock : bool = True
     rock_bias : float = 0
-    rock_octaves : int = 12
+    rock_octaves : int = 14
     rock_max_octaves : int = 20
     rock_lacunarity : float = 2.
     rock_persistence : float = 0.5
-    rock_unit_scale : float = 0.0025
-    rock_max_height : float = 50.
+    rock_unit_scale : float = 0.00125
+    rock_max_height : float = 128.
+    # -- mountains
+    mountain_density : float = 0.5
+    max_mountains : int = 8
+    min_mountain_height : float = 128
+    max_mountain_height : float = 256
+    mountain_slope : float = 0.25
     # -- erosion
     include_erosion : bool = False
     erosion_endurance : float = 0. #0.05
@@ -179,9 +185,23 @@ class LandscapeParams:
     # - energy
     initial_energy_site_density : float = (1./4.)
     initial_energy_per_site : float = 1.
+    energy_fractal_mask : bool = True
+    energy_mask_bias : float = 0.
+    energy_octaves : int = 12
+    energy_lacunarity : float = 2.
+    energy_persistence : float = 0.5
+    energy_max_octaves : int = 20
+    energy_unit_scale : float = 0.0025
     # - biomass
     initial_biomass_site_density : float = (1./4.)
     initial_biomass_per_site : float = 1.
+    biomass_fractal_mask : bool = True
+    biomass_mask_bias : float = 0.
+    biomass_octaves : int = 12
+    biomass_lacunarity : float = 2.
+    biomass_persistence : float = 0.5
+    biomass_max_octaves : int = 20
+    biomass_unit_scale : float = 0.0025
     biomass_photosynthesis : float = 0.01
     photosynthesis_energy_per_biomass : float = 1.
     
@@ -411,21 +431,6 @@ def make_landscape(
             params.world_size[0] * params.world_size[1]
         ))
     
-    '''
-    def compute_normalized_altitude(state):
-        altitude = jnp.zeros((), dtype=float_dtype)
-        if params.include_rock:
-            altitude += state.rock
-        if params.include_water:
-            altitude += state.water
-        altitude = grid_sum_to_mean(altitude, params.terrain_downsample)
-        normalized_altitude = (
-            (altitude - params.sea_level) / params.max_effective_altitude)
-        normalized_altitude = jnp.clip(normalized_altitude, 0., 1.)
-        
-        return normalized_altitude
-    '''
-    
     @static_functions
     class Landscape:
         
@@ -458,6 +463,46 @@ def make_landscape(
                     dtype=float_dtype,
                 ) + params.rock_bias
                 rock = grid_mean_to_sum(rock, params.terrain_downsample)
+                state = state.replace(rock=rock)
+                
+                # -- add mountains
+                mean_mountains = params.world_size[0] * params.world_size[1]
+                mean_mountains *= params.mountain_density / 1024**2
+                key, mountain_n_key, mountain_height_key = jrng.split(key, 3)
+                mountain_vector = poisson_vector(
+                    mountain_n_key, mean_mountains, params.max_mountains)
+                mountain_heights = jrng.uniform(
+                    mountain_height_key,
+                    shape=(params.max_mountains,),
+                    minval=params.min_mountain_height,
+                    maxval=params.max_mountain_height,
+                    dtype=float_dtype,
+                ) * mountain_vector
+                rock = state.rock
+                for mountain_height in mountain_heights:
+                    key, mountain_x_key = jrng.split(key)
+                    mountain_location = jrng.uniform(
+                        mountain_x_key,
+                        shape=(2,),
+                        minval=0.,
+                        maxval=jnp.array(params.world_size),
+                        dtype=float_dtype,
+                    )
+                    x0 = jnp.arange(
+                        0, params.world_size[0], params.terrain_downsample)
+                    x1 = jnp.arange(
+                        0, params.world_size[1], params.terrain_downsample)
+                    dx02 = (mountain_location[0] - x0).astype(jnp.float32)**2
+                    dx12 = (mountain_location[1] - x1).astype(jnp.float32)**2
+                    d = (dx02[:,None] + dx12[None,:])**0.5
+                    d = d.astype(float_dtype)
+                    
+                    added_height = jnp.clip(
+                        mountain_height - d * params.mountain_slope, min=0.)
+                    added_rock = added_height * params.terrain_downsample**2
+                    
+                    rock += added_rock
+                
                 state = state.replace(rock=rock)
                 
                 # -- erosion
@@ -564,6 +609,8 @@ def make_landscape(
             
                 # - energy
                 if params.include_energy:
+                    initial_energy = jnp.array(
+                    params.initial_energy_per_site, dtype=float_dtype)
                     key, energy_key = jrng.split(key)
                     energy_sites = poisson_grid(
                         energy_key,
@@ -571,12 +618,27 @@ def make_landscape(
                         round(mean_energy_sites*2),
                         params.world_size,
                     )
-                    energy = (
-                        energy_sites *
-                        jnp.array(
-                            params.initial_energy_per_site, dtype=float_dtype)
-                    )
+                    energy = energy_sites * initial_energy
                     energy = downsample_grid(energy, *resource_size)
+                    if params.energy_fractal_mask:
+                        key, energy_mask_key = jrng.split(key)
+                        unit_scale = (
+                            params.energy_unit_scale *
+                            params.resource_downsample
+                        )
+                        energy_mask = fractal_noise(
+                            energy_mask_key,
+                            resource_size,
+                            params.energy_octaves,
+                            params.energy_lacunarity,
+                            params.energy_persistence,
+                            params.energy_max_octaves,
+                            unit_scale,
+                            1.,
+                            dtype=float_dtype,
+                        ) + params.energy_mask_bias > 0.
+                        energy *= energy_mask
+                    
                     state = state.replace(energy=energy)
             
                 # - biomass
@@ -594,6 +656,26 @@ def make_landscape(
                             params.initial_biomass_per_site,dtype=float_dtype)
                     )
                     biomass = downsample_grid(biomass, *resource_size)
+                    
+                    if params.biomass_fractal_mask:
+                        key, biomass_mask_key = jrng.split(key)
+                        unit_scale = (
+                            params.biomass_unit_scale *
+                            params.resource_downsample
+                        )
+                        biomass_mask = fractal_noise(
+                            biomass_mask_key,
+                            resource_size,
+                            params.biomass_octaves,
+                            params.biomass_lacunarity,
+                            params.biomass_persistence,
+                            params.biomass_max_octaves,
+                            unit_scale,
+                            1.,
+                            dtype=float_dtype,
+                        ) + params.biomass_mask_bias > 0.
+                        biomass *= biomass_mask
+                    
                     state = state.replace(biomass=biomass)
             
             # smell
