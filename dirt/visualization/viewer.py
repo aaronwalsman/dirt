@@ -538,11 +538,7 @@ class Viewer:
     def mouse_button_callback(self, window, button, action, mods):
         if self._ctrl_down:
             if action == glfw.PRESS:
-                #self.mask_render()
-                #x, y = self.camera_control.get_raw_mouse_pixel_position(window)
-                #mask = self._mask_framebuffer.read_pixels()
                 mask = self.window.read_pixels()
-                save_image(mask[...,:3], 'mask.png')
                 x, y = self.camera_control.get_mouse_pixel_position(window)
                 fbw, fbh = self.window.framebuffer_size()
                 y = fbh - y
@@ -810,19 +806,12 @@ class Viewer:
         glfw_context.terminate()
     
     def render(self):
-        #instances = ['terrain', 'tmp_sphere']
-        #self._update_players()
         fbw, fbh = self.window.framebuffer_size()
         self.renderer.viewport_scissor(0,0,fbw,fbh)
         if self._ctrl_down:
             self.renderer.mask_render(flip_y=False)
         else:
             self.renderer.color_render(flip_y=False)
-    
-    #def mask_render(self):
-    #    self.renderer.viewport_scissor(
-    #        0,0,self._mask_framebuffer.width,self._mask_framebuffer.height)
-    #    self.renderer.mask_render(flip_y=True)
     
     def key_callback(self, window, key, scancode, action, mods):
         # 0-9 sets various display modes
