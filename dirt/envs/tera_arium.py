@@ -63,6 +63,7 @@ class TeraAriumParams:
     report_bug_actions : bool = False
     report_bug_internals : bool = False
     report_bug_traits : bool = False
+    report_object_grid : bool = False
     
     landscape : LandscapeParams = LandscapeParams()
     bugs : BugParams = BugParams()
@@ -365,10 +366,13 @@ def make_tera_arium(
                 spot_color=report.player_color,
                 convert_to_image=True,
             )
-        elif display_mode == 6:
+        elif display_mode == 6 and params.report_object_grid:
             occupied = report.object_grid != -1
             rgb = jnp.stack((occupied, occupied, occupied), axis=-1)
             rgb = set_grid_shape(rgb, *shape, preserve_mass=False)
+            return jax_to_image(rgb)
+        else:
+            rgb = jnp.zeros((*shape, 3), dtype=float_dtype)
             return jax_to_image(rgb)
     
     @static_data
@@ -417,7 +421,6 @@ def make_tera_arium(
             players=active_players(state),
             player_x=state.bugs.x,
             player_r=state.bugs.r,
-            object_grid=state.bugs.object_grid,
             player_color=state.bug_traits.color,
         )
         if params.include_rock:
@@ -452,6 +455,9 @@ def make_tera_arium(
         
         if params.report_bug_traits:
             report = report.replace(traits=state.bug_traits)
+        
+        if params.report_object_grid:
+            report = report.replace(object_grid=state.bugs.object_grid)
         
         return report
     

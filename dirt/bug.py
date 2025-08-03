@@ -626,12 +626,6 @@ def make_bugs(
             + traits.biomass_gulp * params.biomass_per_biomass_gulp
             + traits.max_hp * params.biomass_per_max_hp
         )
-        #jax.debug.print('bs {bs}', bs=traits.brain_size * params.biomass_per_brain_size)
-        #jax.debug.print('mov {m}', m=total_movement_distance * params.biomass_per_movement_primitive)
-        #jax.debug.print('att {a}', a=attack_biomass)
-        #jax.debug.print('mc {mc}', mc=traits.max_climb * params.biomass_per_max_climb)
-        #jax.debug.print('mw {mw}', mw=traits.max_water * params.biomass_per_max_water)
-        #jax.debug.print('req {r}', r=req)
         return req
     
     
