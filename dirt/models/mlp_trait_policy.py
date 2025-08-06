@@ -107,5 +107,8 @@ def make_mlp_trait_policy(obs_dimension, num_actions):
         def act(key, obs, state):
             model_state, traits = state
             return network.forward(key, obs, model_state)
+        
+        def traits(state):
+            return state[1]
     
     return MLPTraitPolicy
