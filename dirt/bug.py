@@ -153,7 +153,7 @@ class BugParams:
     biomass_per_movement_primitive : float = 0.02
     biomass_per_attack_primitive : float = 0.03
 
-    biomass_per_photosynthesis : float = 0.01
+    biomass_per_photosynthesis : float = 0.1
     biomass_per_max_climb : float = 0.01
 
     biomass_per_max_water : float = 0.01
@@ -263,7 +263,7 @@ class BugParams:
     max_child_water : float = 10.
     min_child_energy : float = 0.1
     max_child_energy : float = 10.
-    min_child_biomass : float = 0.09
+    min_child_biomass : float = 0.2
     max_child_biomass : float = 10.
     
     max_movement : float = 4.
