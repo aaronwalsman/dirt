@@ -495,12 +495,14 @@ def make_tera_arium(
         active_players,
         family_info,
         mutate_traits=bugs.mutate_traits,
+        empty_family_tree_state=bugs.empty_family_tree_state,
         visualizer_terrain_map=landscape.visualizer_terrain_map,
         visualizer_terrain_texture=visualizer_terrain_texture,
         default_visualizer_report=default_visualizer_report,
         make_visualizer_report=make_visualizer_report,
         print_player_info=print_player_info,
         num_actions=bugs.num_actions,
+        biomass_requirement=bugs.biomass_requirement,
     )
     
     return game
