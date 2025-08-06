@@ -7,6 +7,8 @@ from mechagogue.nn.initializers import kaiming, zero
 from mechagogue.nn.distributions import categorical_sampler_layer
 from mechagogue.nn.mlp import mlp
 
+from fitness_of_intelligence.models.mutable_mlp import make_mutable_mlp
+
 from dirt.envs.tera_arium import TeraAriumTraits
 
 def flatten_bug_observation(obs):
@@ -55,47 +57,35 @@ def flatten_bug_observation(obs):
     return jnp.concatenate(flattened_parts)
 
 
-def mlp_network(
+def make_mutable_mlp_trait_policy(
     in_channels,
     out_channels,
-    hidden_layers=0,  # hidden_layers=1 -> "ValueError: bytes object is too large" during save_leaf_data
-    hidden_channels=256,
-    dtype=jnp.float32,
+    initial_hidden_channels,
+    min_hidden_channels,
+    max_hidden_channels,
+    initial_hidden_layers,
+    max_hidden_layers,
+    use_bias,
 ):
-    """
-    This network flattens a BugsObservation, passes it through an MLP,
-    then applies a softmax to get a distribution over `out_channels` actions that is then sampled from.
+    mutable_mlp = make_mutable_mlp(
+        in_channels,
+        out_channels,
+        initial_hidden_channels,
+        min_hidden_channels,
+        max_hidden_channels,
+        initial_hidden_layers,
+        max_hidden_layers,
+        use_bias,
+    )
     
-    in_channels * hidden_channels + hidden_channels * out_channels
-    =
-    flattened_bug_observation_dimension * hidden_channels + hidden_channels * num_actions
-    =
-    512 * 256 + 256 * 14 = 134,656 params
-    """
     flatten = make_layer(lambda: None, lambda x: flatten_bug_observation(x))
     network = layer_sequence(
         (
             flatten,
-            mlp(
-                hidden_layers=hidden_layers,
-                in_channels=in_channels,
-                hidden_channels=hidden_channels,
-                out_channels=out_channels,
-                use_bias=True,
-                p_dropout=0.0,
-                init_weights=kaiming,
-                init_bias=zero,
-                dtype=dtype,
-            ),
-            categorical_sampler_layer()
+            mutable_mlp,
+            categorical_sampler_layer(),
         )
     )
-    
-    return network
-
-
-def make_mlp_trait_policy(obs_dimension, num_actions):
-    network = mlp_network(obs_dimension, num_actions)
     
     @static_functions
     class MLPTraitPolicy:
