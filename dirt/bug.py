@@ -257,10 +257,13 @@ class BugParams:
     max_max_hp : float = 100.
     max_healing_rate : float = 10.
     
-    max_child_water : float = 10.
+    min_child_hp : float = 1.
     max_child_hp : float = 10.
+    min_child_water : float = 0.01
+    max_child_water : float = 10.
+    min_child_energy : float = 0.1
     max_child_energy : float = 10.
-    min_child_biomass : float = 0.01
+    min_child_biomass : float = 0.09
     max_child_biomass : float = 10.
     
     max_movement : float = 4.
