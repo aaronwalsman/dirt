@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Generator: Adobe Illustrator 28.3.0, SVG Export Plug-In . SVG Version: 6.00 Build 0)  -->
+<svg version="1.1" id="Layer_1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" x="0px" y="0px"
+	 viewBox="0 0 1090 792" style="enable-background:new 0 0 1090 792;" xml:space="preserve">
+<style type="text/css">
+	.st0{fill:#F8F9E5;stroke:#000000;stroke-miterlimit:10;}
+	.st1{fill:#FAC6D0;stroke:#000000;stroke-miterlimit:10;}
+	.st2{fill:#CDE3F5;stroke:#000000;stroke-miterlimit:10;}
+	.st3{fill:#FFFFFF;stroke:#000000;stroke-miterlimit:10;}
+	.st4{font-family:'MyriadPro-Regular';}
+	.st5{font-size:20px;}
+	.st6{fill:none;stroke:#000000;stroke-width:2;stroke-miterlimit:10;}
+</style>
+<rect x="146.5" y="74.5" class="st0" width="800" height="200"/>
+<rect x="46.5" y="396" class="st0" width="200" height="200"/>
+<rect x="313.17" y="396" class="st0" width="200" height="200"/>
+<rect x="36.5" y="396" class="st1" width="10" height="200"/>
+<rect x="246.5" y="396" class="st2" width="10" height="200"/>
+<rect x="303.17" y="396" class="st2" width="10" height="200"/>
+<rect x="621.5" y="396" class="st3" width="10" height="200"/>
+<rect x="674.83" y="396" class="st3" width="10" height="200"/>
+<rect x="579.83" y="396" class="st0" width="200" height="200"/>
+<rect x="846.5" y="396" class="st0" width="200" height="200"/>
+<rect x="511.5" y="396" class="st2" width="10" height="200"/>
+<rect x="569.83" y="396" class="st2" width="10" height="200"/>
+<rect x="779.83" y="396" class="st2" width="10" height="200"/>
+<rect x="836" y="396" class="st2" width="10" height="200"/>
+<rect x="1047" y="396" class="st1" width="10" height="200"/>
+<text transform="matrix(1 0 0 1 121.0005 502.4609)" class="st4 st5">GPU 0</text>
+<text transform="matrix(1 0 0 1 387.6669 502.4609)" class="st4 st5">GPU 1</text>
+<text transform="matrix(1 0 0 1 654.3336 502.6807)" class="st4 st5">GPU 2</text>
+<text transform="matrix(1 0 0 1 921.0002 502.4609)" class="st4 st5">GPU 3</text>
+<text transform="matrix(1 0 0 1 146.5 50.7812)" class="st4 st5">Simulation Domain</text>
+<text transform="matrix(1 0 0 1 268.5818 330.0952)" class="st4 st5">Distributed Among 4 Devices</text>
+<g>
+	<g>
+		<line class="st6" x1="546.5" y1="296" x2="546.5" y2="352.12"/>
+		<g>
+			<path d="M546.5,364.19c-2.11-5.68-5.7-12.73-9.51-17.09l9.51,3.44l9.51-3.44C552.2,351.46,548.61,358.51,546.5,364.19z"/>
+		</g>
+	</g>
+</g>
+<rect x="41.5" y="649" class="st0" width="30" height="30"/>
+<text transform="matrix(1 0 0 1 97.7576 669.501)" class="st4 st5">Original Simulation Domain</text>
+<rect x="41.5" y="697" class="st2" width="30" height="30"/>
+<text transform="matrix(1 0 0 1 98.4775 720.6816)" class="st4 st5">Halo Zone (Used in Sync)</text>
+<rect x="43.01" y="745" class="st1" width="30" height="30"/>
+<text transform="matrix(1 0 0 1 99.9886 768.6816)" class="st4 st5">Halo Zone (Not used in Sync)</text>
+</svg>
