@@ -58,19 +58,17 @@ def flatten_bug_observation(obs):
 def mlp_network(
     in_channels,
     out_channels,
-    hidden_layers=0,  # hidden_layers=1 -> "ValueError: bytes object is too large" during save_leaf_data
-    hidden_channels=256,
+    hidden_layers,
+    hidden_channels,
     dtype=jnp.float32,
 ):
     """
     This network flattens a BugsObservation, passes it through an MLP,
     then applies a softmax to get a distribution over `out_channels` actions that is then sampled from.
     
-    in_channels * hidden_channels + hidden_channels * out_channels
-    =
+    num params =
+    in_channels * hidden_channels + hidden_channels * out_channels =
     flattened_bug_observation_dimension * hidden_channels + hidden_channels * num_actions
-    =
-    512 * 256 + 256 * 14 = 134,656 params
     """
     flatten = make_layer(lambda: None, lambda x: flatten_bug_observation(x))
     network = layer_sequence(
@@ -94,8 +92,8 @@ def mlp_network(
     return network
 
 
-def make_mlp_trait_policy(obs_dimension, num_actions):
-    network = mlp_network(obs_dimension, num_actions)
+def make_mlp_trait_policy(obs_dimension, num_actions, hidden_layers=0, hidden_channels=32):
+    network = mlp_network(obs_dimension, num_actions, hidden_layers=hidden_layers, hidden_channels=hidden_channels)
     
     @static_functions
     class MLPTraitPolicy:
