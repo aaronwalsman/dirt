@@ -132,8 +132,8 @@ class BugParams:
     resting_energy_cost : float = 0.0005
     resting_energy_cost_per_mass : float = 0.001
     # - brain
-    brain_size_water_cost : float = 1e-8  # ≈ 0.000167 water/tick at 16,713 brain_size
-    brain_size_energy_cost : float = 1e-7  # ≈ 0.00167 energy/tick at 16,713 brain_size
+    brain_size_water_cost : float = 1e-9 # 1e-8  # ≈ 0.000167 water/tick at 16,713 brain_size
+    brain_size_energy_cost : float = 1e-8 # 1e-7  # ≈ 0.00167 energy/tick at 16,713 brain_size
     # - movement
     move_water_cost : float = 0.0001
     move_energy_cost : float = 0.001
@@ -149,7 +149,7 @@ class BugParams:
     # biomass requirements
     # Vincent first pass for biomass requirements of various traits, random put some parameters here
     min_biomass_constant : float = 0.2
-    biomass_per_brain_size : float = 3e-5  # ≈ 0.5 biomass/tick at 16,713 brain_size
+    biomass_per_brain_size : float = 3e-6 # 3e-5  # ≈ 0.5 biomass/tick at 16,713 brain_size
     biomass_per_movement_primitive : float = 0.02
     biomass_per_attack_primitive : float = 0.03
 
