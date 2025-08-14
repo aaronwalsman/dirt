@@ -39,7 +39,7 @@ Expended energy when reproducing:
 Biomass requirements:
     min_biomass_constant (params) +
     biomass_required_for_brain = (
-        brain_size (trait) + biomass_per_brain_size (param)) +
+        brain_size (trait) * biomass_per_brain_size (param)) +
     biomass_required_for_motion_primitives +
     biomass_required_for_attack_primitives (maybe area * abs(damage) + distance)
         (ooh! do we allow damage to be negative so agents can heal others?)
@@ -50,40 +50,40 @@ If biomass requirement not met (agent is born too small):
     lose health? can't do things?  Is there a way we can make it so that the
     babies can start small and grow big without dying right away?  They would
     have to eat biomass to grow to adult size.  How do we use traits to allow
-    for development?  How do we charge the parent the correct ammount of
+    for development?  How do we charge the parent the correct amount of
     biomass for their baby, when mutation could cause the requirements to
     change?  Also, if we allow for some kind of development, when does that
     happen?  Ok, one option: as a parameter, we have N "levels" per agent.
-    Each level has it's own set of movement primitives, etc. so that each level
-    will have its own biomass cost.  Then a player can take an action to switch
-    to another level, but it only works if it has enough resources.  Ok, so
-    that's an easy way to do development.  Still the question: what do we do if
-    a player doesn't have enough biomass?  OR we could make sure that it always
+    Each level has its own set of movement primitives, etc. so that each level
+    will have its own biomass cost. Then a player can take an action to switch
+    to another level, but it only works if it has enough resources. Ok, so
+    that's an easy way to do development. Still the question: what do we do if
+    a player doesn't have enough biomass? OR we could make sure that it always
     does have enough biomass by making level 0 the same for all agents, which
     is set as a parameter, and then if agents want to level up, they have to
     get the resources to do it, and levels 1-N are traits that can all be
-    mutated, etc.  That's... fine?  Oh, or parent's have trait, which is Baby's
+    mutated, etc. That's... fine? Oh, or parents have trait, which is Baby's
     first level that MUST get copied verbatim (no mutation) to baby's first
-    level?  Eeh?  Or we keep around the parent's traits to handle this instead
+    level? Eeh? Or we keep around the parent's traits to handle this instead
     of copying?
     
     Ok, after thinking for a moment, I think we need to just make agents take
-    damage (rapidly) if they don't have the right biomass.  Because this lets
+    damage (rapidly) if they don't have the right biomass. Because this lets
     us handle agents that are allowed to expell biomass too (which we would
-    have to clip if we()ere doing this in a constraint-based setup.
+    have to clip if we were doing this in a constraint-based setup.
     
     I guess the distinction is between constraint-based and penalty-based
-    rules for this.  The argument for penalty-based is that it is very easy.
-    Agent's can have a "baby size" trait, and then if the actual baby's size
-    doesn't match, it dies pretty quickly.  The downsize is that it may be
+    rules for this. The argument for penalty-based is that it is very easy.
+    Agents can have a "baby size" trait, and then if the actual baby's size
+    doesn't match, it dies pretty quickly. The downsize is that it may be
     possible to "hack" the system and allow for agents that have less biomass
     than should be possible, and use the associated skills and features, and
-    make up for it by healing themselves and getting the biomass later.  I
+    make up for it by healing themselves and getting the biomass later. I
     guess you can make this short-lived by killing them at a faster rate than
-    they can heal?  Using constraints is kind of nice because you don't get
+    they can heal? Using constraints is kind of nice because you don't get
     hacking, but it sucks because you have to jump through extra hoops, and
     have to know something about the new child's traits when deciding if
-    an agent is able to reproduce.  So yeah let's do penalty-based.
+    an agent is able to reproduce. So yeah let's do penalty-based.
 
 Do we allow agents to expell biomass/energy/water to either share with others
 or reduce mass?
@@ -134,8 +134,8 @@ class BugParams:
     resting_energy_cost : float = 0.0005
     resting_energy_cost_per_mass : float = 0.001
     # - brain
-    brain_size_water_cost : float = 0.0001
-    brain_size_energy_cost : float = 0.001
+    brain_size_water_cost : float = 1e-9 # 1e-8  # ≈ 0.000167 water/tick at 16,713 brain_size
+    brain_size_energy_cost : float = 1e-8 # 1e-7  # ≈ 0.00167 energy/tick at 16,713 brain_size
     # - movement
     move_water_cost : float = 0.0001
     move_energy_cost : float = 0.001
@@ -151,7 +151,7 @@ class BugParams:
     # biomass requirements
     # Vincent first pass for biomass requirements of various traits, random put some parameters here
     min_biomass_constant : float = 0.2
-    biomass_per_brain_size : float = 0.05
+    biomass_per_brain_size : float = 3e-6 # 3e-5  # ≈ 0.5 biomass/tick at 16,713 brain_size
     biomass_per_movement_primitive : float = 0.02
     biomass_per_attack_primitive : float = 0.03
 
@@ -167,7 +167,7 @@ class BugParams:
 
     biomass_per_max_hp : float = 0.01
 
-    # damage paramters
+    # damage parameters
     lack_biomass_damage: float = 3.0
 
     # mass
@@ -284,6 +284,7 @@ class BugParams:
 @static_data
 class BugTraits:
     # brain
+    # the total number of active parameters in the bug's policy model aka 'brain'
     brain_size : float | jnp.ndarray
     
     # color
@@ -362,7 +363,7 @@ class BugTraits:
     attack_primitives : jnp.ndarray
     
     @staticmethod
-    def default(shape):
+    def default(shape, init_brain_size=0.):
         if isinstance(shape, int):
             shape = (shape,)
         def float_vector(v):
@@ -373,7 +374,7 @@ class BugTraits:
         
         return BugTraits(
             # brain
-            brain_size = float_vector(0.),
+            brain_size = float_vector(init_brain_size),
             
             # color
             color = jnp.full(

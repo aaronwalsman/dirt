@@ -66,6 +66,10 @@ def make_mutable_mlp_trait_policy(
     initial_hidden_layers,
     max_hidden_layers,
     use_bias,
+    weight_mutation_rate=1e-3,
+    bias_mutation_rate=1e-3,
+    channel_mutation_rate=0.05,
+    layer_mutation_rate=0.01,
 ):
     mutable_mlp = make_mutable_mlp(
         in_channels,
@@ -76,6 +80,10 @@ def make_mutable_mlp_trait_policy(
         initial_hidden_layers,
         max_hidden_layers,
         use_bias,
+        weight_mutation_rate,
+        bias_mutation_rate,
+        channel_mutation_rate,
+        layer_mutation_rate,
     )
     
     flatten = make_layer(lambda: None, lambda x: flatten_bug_observation(x))
