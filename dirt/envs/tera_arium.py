@@ -51,8 +51,6 @@ class TeraAriumParams:
     include_temperature : bool = True
     include_rain : bool = True
     include_light : bool = True
-    include_energy : bool = True
-    include_biomass : bool = True
     
     # observations
     max_view_distance : int = 5
@@ -74,30 +72,6 @@ class TeraAriumState:
     bugs : BugState
     bug_traits : BugTraits
 
-# @static_data
-# class TeraAriumObservation:
-#     # grid external
-#     rgb : jnp.ndarray
-#     relative_altitude : jnp.ndarray
-#     
-#     # single channel external
-#     # - sensory
-#     audio : jnp.ndarray
-#     smell : jnp.ndarray
-#     # - resources
-#     external_water : jnp.ndarray
-#     external_energy : jnp.ndarray
-#     external_biomass : jnp.ndarray
-#     wind : jnp.ndarray
-#     temperature : jnp.ndarray
-#     
-#     # single channel internal   
-#     health : jnp.ndarray
-#     internal_water : jnp.ndarray
-#     internal_energy : jnp.ndarray
-#     internal_biomass : jnp.ndarray
-
-#TeraAriumAction = BugAction
 TeraAriumTraits = BugTraits
 
 def make_tera_arium(

@@ -119,6 +119,8 @@ class BugParams:
     initial_players : int = 1024
     max_players : int = 16384
     
+    include_reproduction : bool = True
+    
     include_water : bool = True
     include_energy : bool = True
     include_biomass : bool = True
@@ -267,6 +269,9 @@ class BugParams:
     max_child_biomass : float = 10.
     
     max_movement : float = 4.
+    
+    # environment
+    wind_std : float = 5.
     
     def validate(params):
         assert params.initial_players <= params.max_players, (
@@ -557,7 +562,7 @@ def make_bugs(
         SMELL_ACTION_TYPE : params.odor_primitives,
         AUDIO_ACTION_TYPE : params.audio_primitives,
         LEVEL_ACTION_TYPE : params.levels,
-        REPRODUCE_ACTION_TYPE : 1,
+        REPRODUCE_ACTION_TYPE : int(params.include_reproduction),
     }
     num_action_primitives = sum(action_primitives.values())
     max_action_primitives = max(action_primitives.values())
@@ -1309,6 +1314,7 @@ def make_bugs(
             # weather
             key, wind_key, temperature_key = jrng.split(key, 3)
             # - wind
+            wind = wind / params.wind_std
             sensor_wind = noisy_sensor(
                 wind_key, wind, traits.wind_sensor_noise) * ~newborn[:,None]
             # - temperature

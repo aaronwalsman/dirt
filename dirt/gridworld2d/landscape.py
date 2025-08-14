@@ -1196,12 +1196,18 @@ def make_landscape(
                     rgb, water_color, ~standing_water, preserve_mass=False)
             
             # apply the energy and biomass tint
-            energy = grid_sum_to_mean(
-                state.energy, params.resource_downsample)
-            energy = jnp.clip(energy, min=0, max=1)
-            biomass = grid_sum_to_mean(
-                state.biomass, params.resource_downsample)
-            biomass = jnp.clip(biomass, min=0, max=1)
+            if params.include_energy:
+                energy = grid_sum_to_mean(
+                    state.energy, params.resource_downsample)
+                energy = jnp.clip(energy, min=0, max=1)
+            else:
+                energy = 0.
+            if params.include_biomass:
+                biomass = grid_sum_to_mean(
+                    state.biomass, params.resource_downsample)
+                biomass = jnp.clip(biomass, min=0, max=1)
+            else:
+                biomass = 0.
             biomass_and_energy = jnp.minimum(energy, biomass)
             just_energy = energy - biomass_and_energy
             just_biomass = biomass - biomass_and_energy

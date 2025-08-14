@@ -8,7 +8,8 @@ import chex
 
 from mechagogue.tree import tree_getitem
 from mechagogue.static import static_data, static_functions
-from mechagogue.dp.poeg import make_poeg
+from mechagogue.dp.pomdp import make_pomdp
+from mechagogue.tree import tree_getitem
 
 from dirt.constants import (
     ROCK_COLOR,
@@ -38,26 +39,24 @@ from dirt.gridworld2d.observations import first_person_view, noisy_sensor
 from dirt.visualization.image import jax_to_image
 
 @static_data
-class VisionEnvParams:
+class NomParams:
     world_size : Tuple[int, int] = (16, 16)
     
     initial_players : int = 1
     max_players : int = 1
     
-    include_rock : bool = True
-    include_water : bool = True
+    include_rock : bool = False
+    include_water : bool = False
     include_energy : bool = True
-    include_biomass : bool = True
-    include_temperature : bool = True
-    include_rain : bool = True
-    include_light : bool = True
-    include_energy : bool = True
-    include_biomass : bool = True
+    include_biomass : bool = False
+    include_temperature : bool = False
+    include_rain : bool = False
+    include_light : bool = False
     
     # observations
-    max_view_distance : int = 5
-    max_view_back_distance : int = 5
-    max_view_width : int = 11
+    max_view_distance : int = 10
+    max_view_back_distance : int = 10
+    max_view_width : int = 21
     
     # reporting
     report_bug_actions : bool = False
@@ -69,24 +68,37 @@ class VisionEnvParams:
     bugs : BugParams = BugParams()
 
 @static_data
-class VisionEnvState:
+class NomState:
     landscape : LandscapeState
     bugs : BugState
-    bug_traits : BugTraits
+    bug_traits : BugTraits = BugTraits.default((1,))
 
-VisionEnvTraits = BugTraits
+NomTraits = BugTraits
 
-def make_vision_env(
-    params : TeraAriumParams = TeraAriumParams(),
+def make_nom(
+    params : NomParams = NomParams(),
     float_dtype=DEFAULT_FLOAT_DTYPE,
 ):
+    
+    params = params.replace(
+        include_energy=True,
+        include_biomass=False,
+        include_temperature=False,
+        include_rain=False,
+        include_light=False,
+        bugs=params.bugs.replace(include_reproduction=False),
+        landscape=params.landscape.replace(
+            include_energy=True,
+            energy_fractal_mask=False,
+        )
+    )
     
     landscape = make_landscape(params.landscape, float_dtype=float_dtype)
     bugs = make_bugs(params.bugs)
     
     def init_state(
         key : chex.PRNGKey,
-    ) -> TeraAriumState :
+    ) -> NomState :
         
         key, landscape_key = jrng.split(key)
         landscape_state = landscape.init(landscape_key)
@@ -95,16 +107,16 @@ def make_vision_env(
         bug_state = bugs.init(bug_key)
         bug_traits = BugTraits.default(params.max_players)
         
-        state = TeraAriumState(landscape_state, bug_state, bug_traits)
+        state = NomState(landscape_state, bug_state, bug_traits)
         
         return state
     
     def transition(
         key : chex.PRNGKey,
-        state : TeraAriumState,
+        state : NomState,
         action : int,
-        traits : BugTraits,
-    ) -> TeraAriumState :
+        #traits : BugTraits,
+    ) -> NomState :
         
         # bugs
         bug_state = state.bugs
@@ -133,7 +145,7 @@ def make_vision_env(
         bug_state, leftover_water, leftover_energy, leftover_biomass = bugs.eat(
             bug_state,
             action,
-            traits,
+            state.bug_traits,
             external_water=bug_water,
             external_energy=bug_energy,
             external_biomass=bug_biomass,
@@ -149,25 +161,9 @@ def make_vision_env(
             landscape_state = landscape.add_biomass(
                 landscape_state, bug_state.x, leftover_biomass)
         
-        # - photosynthesis
-        if params.include_light:
-            bug_light = grid.read_grid_locations(
-                state.landscape.light,
-                bug_state.x,
-                params.landscape.light_downsample,
-            )
-        else:
-            bug_light = jnp.ones((params.max_players,), dtype=float_dtype) 
-        bug_state = bugs.photosynthesis(bug_state, traits, bug_light)
-        
-        # - heal
-        bug_state = bugs.heal(bug_state, traits)
-        
         # - metabolism
-        bug_state, evaporated_metabolism = bugs.metabolism(bug_state, traits)
-        
-        # - fight
-        # bug_state = bugs.fight(bug_state, action, traits)
+        bug_state, evaporated_metabolism = bugs.metabolism(
+            bug_state, state.bug_traits)
         
         # - move bugs
         key, move_key = jrng.split(key)
@@ -176,7 +172,7 @@ def make_vision_env(
             move_key,
             bug_state,
             action,
-            traits,
+            state.bug_traits,
             altitude,
             params.landscape.terrain_downsample,
         )
@@ -189,7 +185,7 @@ def make_vision_env(
             expelled_water,
             expelled_energy,
             expelled_biomass,
-        ) = bugs.birth_and_death(bug_state, action, traits)
+        ) = bugs.birth_and_death(bug_state, action, state.bug_traits)
         
         # - add evaporated water to the atmosphere/ground
         if params.include_water:
@@ -218,14 +214,14 @@ def make_vision_env(
         state = state.replace(
             landscape=landscape_state,
             bugs=bug_state,
-            bug_traits=traits,
+            bug_traits=state.bug_traits,
         )
         
         return state
     
     def observe(
         key : chex.PRNGKey,
-        state : TeraAriumState,
+        state : NomState,
     ) -> BugObservation:
         # visual
         # - rgb
@@ -300,18 +296,24 @@ def make_vision_env(
             external_water = landscape.get_water(state.landscape, state.bugs.x)
         else:
             external_water = None
-        external_energy = read_grid_locations(
-            state.landscape.energy,
-            state.bugs.x,
-            params.landscape.resource_downsample,
-        )
-        external_biomass = read_grid_locations(
-            state.landscape.biomass,
-            state.bugs.x,
-            params.landscape.resource_downsample,
-        )
+        if params.include_energy:
+            external_energy = read_grid_locations(
+                state.landscape.energy,
+                state.bugs.x,
+                params.landscape.resource_downsample,
+            )
+        else:
+            external_energy = None
+        if params.include_biomass:
+            external_biomass = read_grid_locations(
+                state.landscape.biomass,
+                state.bugs.x,
+                params.landscape.resource_downsample,
+            )
+        else:
+            external_biomass = None
         
-        return bugs.observe(
+        obs = bugs.observe(
             key,
             state.bugs,
             state.bug_traits,
@@ -325,12 +327,16 @@ def make_vision_env(
             external_energy,
             external_biomass,
         )
+        return tree_getitem(obs, 0)
     
-    def active_players(state):
-        return bugs.active_players(state.bugs)
+    def reward(key, state, action, next_state):
+        return jnp.where(
+            next_state.bugs.energy > state.bugs.energy, 1., 0.).flatten()
     
-    def family_info(state):
-        return bugs.family_info(state.bugs)
+    def terminal(state):
+        dead_bug = (state.bugs.hp[0] <= 0.)
+        no_energy = state.landscape.energy.sum() == 0
+        return dead_bug | no_energy
     
     def visualizer_terrain_texture(report, shape, display_mode):
         if display_mode in (1,2,3,4,5):
@@ -386,8 +392,8 @@ def make_vision_env(
                 player_energy : jnp.ndarray = False
             if params.include_biomass:
                 player_biomass : jnp.ndarray = False
-        if params.report_bug_traits:
-            traits : BugTraits = BugTraits.default(())
+        #if params.report_bug_traits:
+        #    traits : BugTraits = BugTraits.default(())
     
     def default_visualizer_report():
         return VisualizerReport()
@@ -429,8 +435,8 @@ def make_vision_env(
             if params.include_biomass:
                 report = report.replace(player_biomass=state.bugs.biomass)
         
-        if params.report_bug_traits:
-            report = report.replace(traits=state.bug_traits)
+        #if params.report_bug_traits:
+        #    report = report.replace(traits=state.bug_traits)
         
         if params.report_object_grid:
             report = report.replace(object_grid=state.bugs.object_grid)
@@ -458,27 +464,29 @@ def make_vision_env(
             if params.include_biomass:
                 print(f'  biomass: {report.player_biomass[player_id]}')
         
-        if params.report_bug_traits:
-            bug_traits = tree_getitem(report.traits, player_id)
-            for key, value in bug_traits.__dict__.items():
-                if not callable(value):
-                    print(f'  {key}: {value}')
+        #if params.report_bug_traits:
+        #    bug_traits = tree_getitem(report.traits, player_id)
+        #    for key, value in bug_traits.__dict__.items():
+        #        if not callable(value):
+        #            print(f'  {key}: {value}')
     
-    game = make_poeg(
+    game = make_pomdp(
         init_state,
         transition,
         observe,
-        active_players,
-        family_info,
-        mutate_traits=bugs.mutate_traits,
-        empty_family_tree_state=bugs.empty_family_tree_state,
-        visualizer_terrain_map=landscape.visualizer_terrain_map,
-        visualizer_terrain_texture=visualizer_terrain_texture,
-        default_visualizer_report=default_visualizer_report,
-        make_visualizer_report=make_visualizer_report,
-        print_player_info=print_player_info,
-        num_actions=bugs.num_actions,
-        biomass_requirement=bugs.biomass_requirement,
+        terminal,
+        reward,
+        #mutate_traits=bugs.mutate_traits,
+        #empty_family_tree_state=bugs.empty_family_tree_state,
+        #visualizer_terrain_map=landscape.visualizer_terrain_map,
+        #visualizer_terrain_texture=visualizer_terrain_texture,
+        #default_visualizer_report=default_visualizer_report,
+        #make_visualizer_report=make_visualizer_report,
+        #print_player_info=print_player_info,
+        #num_actions=bugs.num_actions,
+        #biomass_requirement=bugs.biomass_requirement,
     )
+    
+    game.num_actions = bugs.num_actions
     
     return game
