@@ -392,7 +392,7 @@ def make_tera_arium(
             if params.include_biomass:
                 player_biomass : jnp.ndarray = False
         if params.report_bug_traits:
-            traits : BugTraits = BugTraits.default(())
+            traits : BugTraits = BugTraits.default((), init_brain_size)
     
     def default_visualizer_report():
         return VisualizerReport()
