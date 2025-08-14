@@ -200,7 +200,7 @@ def read_grid_locations(a, x, downsample, downsample_scale=True):
     downsample ratio.
     '''
     xd = x // downsample
-    value = a[xd[...,0], xd[...,1]]
+    value = a.at[xd[...,0], xd[...,1]].get(mode='fill', fill_value=0.)
     if downsample_scale:
         value /= (downsample**2)
     return value

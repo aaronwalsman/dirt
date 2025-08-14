@@ -124,8 +124,14 @@ def make_tera_arium(
         else:
             bug_energy = None
         if params.include_biomass:
+            # XXX
+            #fbm = landscape_state.biomass.astype(jnp.float32).sum()
             landscape_state, bug_biomass = landscape.take_biomass(
                 landscape_state, bug_state.x)
+            # XXX
+            #fbml = landscape_state.biomass.astype(jnp.float32).sum()
+            #fbmb = bug_biomass.astype(jnp.float32).sum()
+            #jax.debug.print('take {a}', a = fbm - (fbml + fbmb))
         else:
             bug_biomass = None
         # -- feed the resources to the bugs
