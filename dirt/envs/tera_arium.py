@@ -40,6 +40,10 @@ from dirt.visualization.image import jax_to_image
 @static_data
 class TeraAriumParams:
     world_size : Tuple[int, int] = (1024, 1024)
+    spatial_offset : Tuple[int, int] = (0,0)
+    
+    landscape_seed : int = None
+    bug_seed : int = None
     
     initial_players : int = 1024
     max_players : int = 16384
@@ -87,10 +91,16 @@ def make_tera_arium(
         key : chex.PRNGKey,
     ) -> TeraAriumState :
         
-        key, landscape_key = jrng.split(key)
+        if params.landscape_seed is None:
+            key, landscape_key = jrng.split(key)
+        else:
+            landscape_key = jrng.key(params.landscape_seed)
         landscape_state = landscape.init(landscape_key)
         
-        key, bug_key = jrng.split(key)
+        if params.bug_seed is None:
+            key, bug_key = jrng.split(key)
+        else:
+            bug_key = jrng.key(params.bug_seed)
         bug_state = bugs.init(bug_key)
         bug_traits = BugTraits.default(params.max_players, init_brain_size)
         
