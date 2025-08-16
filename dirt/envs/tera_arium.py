@@ -81,7 +81,6 @@ TeraAriumTraits = BugTraits
 def make_tera_arium(
     params : TeraAriumParams = TeraAriumParams(),
     float_dtype=DEFAULT_FLOAT_DTYPE,
-    init_brain_size : float = 0.,
 ):
     
     landscape = make_landscape(params.landscape, float_dtype=float_dtype)
@@ -102,7 +101,7 @@ def make_tera_arium(
         else:
             bug_key = jrng.key(params.bug_seed)
         bug_state = bugs.init(bug_key)
-        bug_traits = BugTraits.default(params.max_players, init_brain_size)
+        bug_traits = BugTraits.default(params.max_players)
         
         state = TeraAriumState(landscape_state, bug_state, bug_traits)
         
