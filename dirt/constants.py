@@ -1,6 +1,7 @@
 import jax.numpy as jnp
 
-DEFAULT_FLOAT_DTYPE = jnp.float16
+# TMP
+DEFAULT_FLOAT_DTYPE = jnp.float32
 
 ROCK_COLOR = jnp.array(
     [0.5, 0.5, 0.5], dtype=DEFAULT_FLOAT_DTYPE)
