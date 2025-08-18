@@ -42,6 +42,11 @@ from dirt.visualization.image import jax_to_image
 @static_data
 class TeraAriumParams:
     world_size : Tuple[int, int] = (1024, 1024)
+    spatial_offset : Tuple[int, int] = (0,0)
+    max_size : Tuple[int, int] = None
+    
+    landscape_seed : int = None
+    bug_seed : int = None
     
     initial_players : int = 1024
     max_players : int = 16384
@@ -89,7 +94,6 @@ TeraAriumTraits = BugTraits
 def make_tera_arium(
     params : TeraAriumParams = TeraAriumParams(),
     float_dtype=DEFAULT_FLOAT_DTYPE,
-    init_brain_size : float = 0.,
 ):
     
     landscape = make_landscape(params.landscape, float_dtype=float_dtype)
@@ -99,12 +103,18 @@ def make_tera_arium(
         key : chex.PRNGKey,
     ) -> TeraAriumState :
         
-        key, landscape_key = jrng.split(key)
+        if params.landscape_seed is None:
+            key, landscape_key = jrng.split(key)
+        else:
+            landscape_key = jrng.key(params.landscape_seed)
         landscape_state = landscape.init(landscape_key)
         
-        key, bug_key = jrng.split(key)
+        if params.bug_seed is None:
+            key, bug_key = jrng.split(key)
+        else:
+            bug_key = jrng.key(params.bug_seed)
         bug_state = bugs.init(bug_key)
-        bug_traits = BugTraits.default(params.max_players, init_brain_size)
+        bug_traits = BugTraits.default(params.max_players)
         
         initial_biomass = (
             jnp.sum(landscape_state.biomass, dtype=jnp.float32) +
@@ -454,6 +464,7 @@ def make_tera_arium(
             actions : jnp.ndarray = False
         if params.report_bug_internals:
             age : jnp.ndarray = False
+            generation : jnp.ndarray = False
             hp : jnp.ndarray = False
             if params.include_water:
                 player_water : jnp.ndarray = False
@@ -496,6 +507,7 @@ def make_tera_arium(
             report = report.replace(actions=actions)
         if params.report_bug_internals:
             report = report.replace(age=state.bugs.age)
+            report = report.replace(generation=state.bugs.generation)
             report = report.replace(hp=state.bugs.hp)
             if params.include_water:
                 report = report.replace(player_water=state.bugs.water)
@@ -524,14 +536,15 @@ def make_tera_arium(
                 f'({report.actions[player_id]})'
             )
         if params.report_bug_internals:
-            print(f'  age:     {report.age[player_id]}')
-            print(f'  hp:      {report.hp[player_id]}')
+            print(f'  age:         {report.age[player_id]}')
+            print(f'  generation:  {report.generation[player_id]}')
+            print(f'  hp:          {report.hp[player_id]}')
             if params.include_water:
-                print(f'  water:   {report.player_water[player_id]}')
+                print(f'  water:       {report.player_water[player_id]}')
             if params.include_energy:
-                print(f'  energy:  {report.player_energy[player_id]}')
+                print(f'  energy:      {report.player_energy[player_id]}')
             if params.include_biomass:
-                print(f'  biomass: {report.player_biomass[player_id]}')
+                print(f'  biomass:     {report.player_biomass[player_id]}')
         
         if params.report_bug_traits:
             bug_traits = tree_getitem(report.traits, player_id)
