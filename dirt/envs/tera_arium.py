@@ -41,6 +41,7 @@ from dirt.visualization.image import jax_to_image
 class TeraAriumParams:
     world_size : Tuple[int, int] = (1024, 1024)
     spatial_offset : Tuple[int, int] = (0,0)
+    max_size : Tuple[int, int] = None
     
     landscape_seed : int = None
     bug_seed : int = None
@@ -393,6 +394,7 @@ def make_tera_arium(
             actions : jnp.ndarray = False
         if params.report_bug_internals:
             age : jnp.ndarray = False
+            generation : jnp.ndarray = False
             hp : jnp.ndarray = False
             if params.include_water:
                 player_water : jnp.ndarray = False
@@ -435,6 +437,7 @@ def make_tera_arium(
             report = report.replace(actions=actions)
         if params.report_bug_internals:
             report = report.replace(age=state.bugs.age)
+            report = report.replace(generation=state.bugs.generation)
             report = report.replace(hp=state.bugs.hp)
             if params.include_water:
                 report = report.replace(player_water=state.bugs.water)
@@ -463,14 +466,15 @@ def make_tera_arium(
                 f'({report.actions[player_id]})'
             )
         if params.report_bug_internals:
-            print(f'  age:     {report.age[player_id]}')
-            print(f'  hp:      {report.hp[player_id]}')
+            print(f'  age:         {report.age[player_id]}')
+            print(f'  generation:  {report.generation[player_id]}')
+            print(f'  hp:          {report.hp[player_id]}')
             if params.include_water:
-                print(f'  water:   {report.player_water[player_id]}')
+                print(f'  water:       {report.player_water[player_id]}')
             if params.include_energy:
-                print(f'  energy:  {report.player_energy[player_id]}')
+                print(f'  energy:      {report.player_energy[player_id]}')
             if params.include_biomass:
-                print(f'  biomass: {report.player_biomass[player_id]}')
+                print(f'  biomass:     {report.player_biomass[player_id]}')
         
         if params.report_bug_traits:
             bug_traits = tree_getitem(report.traits, player_id)

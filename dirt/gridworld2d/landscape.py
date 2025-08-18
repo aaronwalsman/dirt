@@ -89,6 +89,8 @@ class LandscapeParams:
     
     # space
     world_size : Tuple[int, int] = (1024, 1024)
+    spatial_offset : Tuple[int, int] = (0, 0)
+    max_size : Tuple[int,int] = None
     
     # time
     initial_time: int = 0
@@ -101,6 +103,7 @@ class LandscapeParams:
     min_standing_water : float = 0.01
     # - rock
     include_rock : bool = True
+    rock_mode : str = 'fractal'
     rock_bias : float = 0
     rock_octaves : int = 14
     rock_max_octaves : int = 20
@@ -108,6 +111,7 @@ class LandscapeParams:
     rock_persistence : float = 0.5
     rock_unit_scale : float = 0.00125
     rock_max_height : float = 128.
+    rock_slope_angle : float = 0.1
     # -- mountains
     mountain_density : float = 0.5
     max_mountains : int = 8
@@ -222,6 +226,22 @@ class LandscapeParams:
 
     def validate(params):
         
+        max_size = params.max_size
+        if max_size is None:
+            max_size = params.world_size
+        
+        in_bounds = (
+            params.spatial_offset[0] >= 0 and
+            params.spatial_offset[0] + params.world_size[0] <= max_size[0] and
+            params.spatial_offset[1] >= 0 and
+            params.spatial_offset[1] + params.world_size[1] <= max_size[1]
+        )
+        assert in_bounds, (
+            f'"spatial_offset" {params.spatial_offset} and '
+            f'"world_size" {params.world_size} incompatible with '
+            f'"max size" {max_size}'
+        )
+        
         def validate_downsample(downsample, world_size):
             downsample = min(downsample, world_size[0], world_size[1])
             assert (
@@ -251,6 +271,7 @@ class LandscapeParams:
                 '"include_temperature" requires "include_light"')
         
         return params.replace(
+            max_size=max_size,
             terrain_downsample=validate_downsample(
                 params.terrain_downsample, params.world_size),
             light_downsample=validate_downsample(
@@ -446,64 +467,101 @@ def make_landscape(
             # terrain
             terrain_size = downsample_grid_shape(
                 *params.world_size, params.terrain_downsample)
+            terrain_max_size = downsample_grid_shape(
+                *params.max_size, params.terrain_downsample)
+            terrain_spatial_offset = downsample_grid_shape(
+                *params.spatial_offset, params.terrain_downsample)
+            #terrain_spatial_offset = (
+            #    params.spatial_offset[0] // params.terrain_downsample,
+            #    params.spatial_offset[1] // params.terrain_downsample,
+            #)
             
             # - rock
             if params.include_rock:
-                # -- use fractal_noise to generate an initial rock grid
-                key, rock_key = jrng.split(key)
-                rock = fractal_noise(
-                    rock_key,
-                    terrain_size,
-                    params.rock_octaves,
-                    params.rock_lacunarity,
-                    params.rock_persistence,
-                    params.rock_max_octaves,
-                    params.rock_unit_scale * params.terrain_downsample,
-                    params.rock_max_height,
-                    dtype=float_dtype,
-                ) + params.rock_bias
-                rock = grid_mean_to_sum(rock, params.terrain_downsample)
-                state = state.replace(rock=rock)
-                
-                # -- add mountains
-                mean_mountains = params.world_size[0] * params.world_size[1]
-                mean_mountains *= params.mountain_density / 1024**2
-                key, mountain_n_key, mountain_height_key = jrng.split(key, 3)
-                mountain_vector = poisson_vector(
-                    mountain_n_key, mean_mountains, params.max_mountains)
-                mountain_heights = jrng.uniform(
-                    mountain_height_key,
-                    shape=(params.max_mountains,),
-                    minval=params.min_mountain_height,
-                    maxval=params.max_mountain_height,
-                    dtype=float_dtype,
-                ) * mountain_vector
-                rock = state.rock
-                for mountain_height in mountain_heights:
-                    key, mountain_x_key = jrng.split(key)
-                    mountain_location = jrng.uniform(
-                        mountain_x_key,
-                        shape=(2,),
-                        minval=0.,
-                        maxval=jnp.array(params.world_size),
+                if params.rock_mode == 'fractal':
+                    # -- use fractal_noise to generate an initial rock grid
+                    key, rock_key = jrng.split(key)
+                    rock = fractal_noise(
+                        rock_key,
+                        #terrain_size,
+                        terrain_max_size,
+                        params.rock_octaves,
+                        params.rock_lacunarity,
+                        params.rock_persistence,
+                        params.rock_max_octaves,
+                        #terrain_spatial_offset,
+                        params.rock_unit_scale * params.terrain_downsample,
+                        params.rock_max_height,
                         dtype=float_dtype,
-                    )
-                    x0 = jnp.arange(
-                        0, params.world_size[0], params.terrain_downsample)
-                    x1 = jnp.arange(
-                        0, params.world_size[1], params.terrain_downsample)
-                    dx02 = (mountain_location[0] - x0).astype(jnp.float32)**2
-                    dx12 = (mountain_location[1] - x1).astype(jnp.float32)**2
-                    d = (dx02[:,None] + dx12[None,:])**0.5
-                    d = d.astype(float_dtype)
+                    ) + params.rock_bias
+                    x0 = terrain_spatial_offset[0]
+                    x1 = terrain_spatial_offset[0] + terrain_size[0]
+                    y0 = terrain_spatial_offset[1]
+                    y1 = terrain_spatial_offset[1] + terrain_size[1]
+                    rock = rock[x0:x1,y0:y1]
+                    rock = grid_mean_to_sum(rock, params.terrain_downsample)
+                    state = state.replace(rock=rock)
                     
-                    added_height = jnp.clip(
-                        mountain_height - d * params.mountain_slope, min=0.)
-                    added_rock = added_height * params.terrain_downsample**2
+                    # -- add mountains
+                    mean_mountains = params.max_size[0] * params.max_size[1]
+                    mean_mountains *= params.mountain_density / 1024**2
+                    key, mountain_n_key, mountain_height_key = jrng.split(
+                        key, 3)
+                    mountain_vector = poisson_vector(
+                        mountain_n_key, mean_mountains, params.max_mountains)
+                    mountain_heights = jrng.uniform(
+                        mountain_height_key,
+                        shape=(params.max_mountains,),
+                        minval=params.min_mountain_height,
+                        maxval=params.max_mountain_height,
+                        dtype=float_dtype,
+                    ) * mountain_vector
+                    rock = state.rock
+                    for mountain_height in mountain_heights:
+                        key, mountain_x_key = jrng.split(key)
+                        mountain_location = jrng.uniform(
+                            mountain_x_key,
+                            shape=(2,),
+                            minval=0.,
+                            maxval=jnp.array(params.max_size),
+                            dtype=float_dtype,
+                        )
+                        x0 = jnp.arange(
+                            params.spatial_offset[0],
+                            params.spatial_offset[0] + params.world_size[0],
+                            params.terrain_downsample,
+                        )
+                        x1 = jnp.arange(
+                            params.spatial_offset[1],
+                            params.spatial_offset[1] + params.world_size[1],
+                            params.terrain_downsample,
+                        )
+                        dx02 = (mountain_location[0] - x0).astype(
+                            jnp.float32)**2
+                        dx12 = (mountain_location[1] - x1).astype(
+                            jnp.float32)**2
+                        d = (dx02[:,None] + dx12[None,:])**0.5
+                        d = d.astype(float_dtype)
+                        
+                        added_height = jnp.clip(
+                            mountain_height - d * params.mountain_slope, min=0.)
+                        added_rock = added_height * params.terrain_downsample**2
+                        
+                        rock += added_rock
                     
-                    rock += added_rock
-                
-                state = state.replace(rock=rock)
+                    state = state.replace(rock=rock)
+                    
+                elif params.rock_mode == 'slope':
+                    rock_size = downsample_grid_shape(
+                        *params.world_size, params.terrain_downsample)
+                    rock = jnp.ones(rock_size, dtype=float_dtype)
+                    slope = jnp.arange(0, rock_size[1], dtype=float_dtype)
+                    slope = slope - rock_size[1]//2
+                    slope = slope * params.terrain_downsample
+                    rock = rock * slope
+                    rock = rock * params.rock_slope_angle
+                    rock = grid_mean_to_sum(rock, params.terrain_downsample)
+                    state = state.replace(rock=rock)
                 
                 # -- erosion
                 if params.include_erosion:
@@ -602,10 +660,16 @@ def make_landscape(
             if params.include_energy or params.include_biomass:
                 assert params.world_size[0] % params.resource_downsample == 0
                 assert params.world_size[1] % params.resource_downsample == 0
-                resource_size = (
-                    params.world_size[0] // params.resource_downsample,
-                    params.world_size[1] // params.resource_downsample,
-                )
+                resource_size = downsample_grid_shape(
+                    *params.world_size, params.resource_downsample)
+                resource_max_size = downsample_grid_shape(
+                    *params.max_size, params.resource_downsample)
+                resource_spatial_offset = downsample_grid_shape(
+                    *params.spatial_offset, params.resource_downsample)
+                #resource_spatial_offset = (
+                #    params.spatial_offset[0] // params.resource_downsample,
+                #    params.spatial_offset[1] // params.resource_downsample,
+                #)
             
                 # - energy
                 if params.include_energy:
@@ -616,8 +680,14 @@ def make_landscape(
                         energy_key,
                         mean_energy_sites,
                         round(mean_energy_sites*2),
-                        params.world_size,
+                        params.max_size,
                     )
+                    x0 = params.spatial_offset[0]
+                    x1 = params.spatial_offset[0] + params.world_size[0]
+                    y0 = params.spatial_offset[1]
+                    y1 = params.spatial_offset[1] + params.world_size[1]
+                    energy_sites = energy_sites[x0:x1,y0:y1]
+                    
                     energy = energy_sites * initial_energy
                     energy = downsample_grid(energy, *resource_size)
                     if params.energy_fractal_mask:
@@ -628,15 +698,21 @@ def make_landscape(
                         )
                         energy_mask = fractal_noise(
                             energy_mask_key,
-                            resource_size,
+                            resource_max_size,
                             params.energy_octaves,
                             params.energy_lacunarity,
                             params.energy_persistence,
                             params.energy_max_octaves,
+                            #resource_spatial_offset,
                             unit_scale,
                             1.,
                             dtype=float_dtype,
                         ) + params.energy_mask_bias > 0.
+                        x0 = resource_spatial_offset[0]
+                        x1 = resource_spatial_offset[0] + resource_size[0]
+                        y0 = resource_spatial_offset[1]
+                        y1 = resource_spatial_offset[1] + resource_size[1]
+                        energy_mask = energy_mask[x0:x1, y0:y1]
                         energy *= energy_mask
                     
                     state = state.replace(energy=energy)
@@ -648,8 +724,13 @@ def make_landscape(
                         biomass_key,
                         mean_biomass_sites,
                         round(mean_biomass_sites*2),
-                        params.world_size,
+                        params.max_size,
                     )
+                    x0 = params.spatial_offset[0]
+                    x1 = params.spatial_offset[0] + params.world_size[0]
+                    y0 = params.spatial_offset[1]
+                    y1 = params.spatial_offset[1] + params.world_size[1]
+                    biomass_sites = biomass_sites[x0:x1,y0:y1]
                     biomass = (
                         biomass_sites *
                         jnp.array(
@@ -665,15 +746,22 @@ def make_landscape(
                         )
                         biomass_mask = fractal_noise(
                             biomass_mask_key,
-                            resource_size,
+                            #resource_size,
+                            resource_max_size,
                             params.biomass_octaves,
                             params.biomass_lacunarity,
                             params.biomass_persistence,
                             params.biomass_max_octaves,
+                            #resource_spatial_offset,
                             unit_scale,
                             1.,
                             dtype=float_dtype,
                         ) + params.biomass_mask_bias > 0.
+                        x0 = resource_spatial_offset[0]
+                        x1 = resource_spatial_offset[0] + resource_size[0]
+                        y0 = resource_spatial_offset[1]
+                        y1 = resource_spatial_offset[1] + resource_size[1]
+                        biomass_mask = biomass_mask[x0:x1, y0:y1]
                         biomass *= biomass_mask
                     
                     state = state.replace(biomass=biomass)
