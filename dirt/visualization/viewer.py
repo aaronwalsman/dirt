@@ -71,6 +71,7 @@ class Viewer:
         print_player_info=default_print_player_info,
     ):
         
+        print('A')
         self.get_report_block = standardize_args(
             get_report_block, ('report',))
         if get_active_players is not None:
@@ -118,6 +119,7 @@ class Viewer:
         
         self.world_size = world_size
         
+        print('B')
         self._init_params_and_reports(
             #example_params,
             #params_file,
@@ -126,6 +128,7 @@ class Viewer:
             step_0=step_0,
             start_step=start_step,
         )
+        print('C')
         self._init_context_and_window(window_size[0], window_size[1])
         self._init_splendor_render()
         self._init_landscape(terrain_texture_resolution)
