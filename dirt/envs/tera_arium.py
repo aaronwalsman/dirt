@@ -69,8 +69,6 @@ class TeraAriumParams:
     biomass_correction_sites : int = 32
     biomass_correction_overshoot : float = 1
     
-    auto
-    
     # reporting
     report_bug_actions : bool = False
     report_bug_internals : bool = False
