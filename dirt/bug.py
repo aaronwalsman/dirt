@@ -515,6 +515,7 @@ class BugState:
     
     # age
     age : jnp.ndarray
+    generation : jnp.ndarray
     
     # health
     hp : jnp.ndarray
@@ -621,6 +622,7 @@ def make_bugs(
             
             # initialize the player age
             age = jnp.zeros((params.max_players,), dtype=jnp.int32)
+            generation = jnp.where(active_players, 0, -1).astype(jnp.int32)
             
             # initialize hp, water, energy, and biomass
             hp = (
@@ -654,6 +656,7 @@ def make_bugs(
                 r=r,
                 object_grid=object_grid,
                 age=age,
+                generation=generation,
                 
                 hp=hp,
                 
@@ -1204,6 +1207,17 @@ def make_bugs(
             child_hp = traits.child_hp[parent_locations]
             state = state.replace(
                 hp = state.hp.at[child_locations].set(child_hp))
+            
+            # update the generation
+            # - set the children's generation
+            generation = state.generation
+            child_generation = generation[parent_locations] + 1
+            generation = generation.at[child_locations].set(child_generation)
+            # - set the generation number of dead bugs to be -1
+            #   (do this after getting the child generation)
+            generation = jnp.where(active, generation, -1)
+            # - update the state
+            state = state.replace(generation=generation)
             
             # update the resources
             # get the resources of the dead bugs, and the resources expended
