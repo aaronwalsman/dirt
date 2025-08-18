@@ -9,6 +9,7 @@ import chex
 from mechagogue.tree import tree_getitem
 from mechagogue.static import static_data, static_functions
 from mechagogue.dp.poeg import make_poeg
+from mechagogue.debug import conditional_print
 
 from dirt.constants import (
     ROCK_COLOR,
@@ -35,6 +36,7 @@ from dirt.bug import (
 )
 from dirt.gridworld2d.grid import read_grid_locations, set_grid_shape
 from dirt.gridworld2d.observations import first_person_view, noisy_sensor
+import dirt.gridworld2d.spawn as spawn
 from dirt.visualization.image import jax_to_image
 
 @static_data
@@ -57,6 +59,13 @@ class TeraAriumParams:
     max_view_back_distance : int = 5
     max_view_width : int = 11
     
+    # corrections
+    auto_correct_biomass : bool = False
+    biomass_correction_sites : int = 32
+    biomass_correction_overshoot : float = 1
+    
+    auto
+    
     # reporting
     report_bug_actions : bool = False
     report_bug_internals : bool = False
@@ -71,6 +80,9 @@ class TeraAriumState:
     landscape : LandscapeState
     bugs : BugState
     bug_traits : BugTraits
+    
+    initial_biomass : jnp.array
+    step_biomass_correction : jnp.array
 
 TeraAriumTraits = BugTraits
 
@@ -94,7 +106,18 @@ def make_tera_arium(
         bug_state = bugs.init(bug_key)
         bug_traits = BugTraits.default(params.max_players, init_brain_size)
         
-        state = TeraAriumState(landscape_state, bug_state, bug_traits)
+        initial_biomass = (
+            jnp.sum(landscape_state.biomass, dtype=jnp.float32) +
+            jnp.sum(bug_state.biomass, dtype=jnp.float32)
+        )
+        
+        state = TeraAriumState(
+            landscape_state,
+            bug_state,
+            bug_traits,
+            initial_biomass = initial_biomass,
+            step_biomass_correction = jnp.zeros((), dtype=jnp.float32)
+        )
         
         return state
     
@@ -124,14 +147,8 @@ def make_tera_arium(
         else:
             bug_energy = None
         if params.include_biomass:
-            # XXX
-            #fbm = landscape_state.biomass.astype(jnp.float32).sum()
             landscape_state, bug_biomass = landscape.take_biomass(
                 landscape_state, bug_state.x)
-            # XXX
-            #fbml = landscape_state.biomass.astype(jnp.float32).sum()
-            #fbmb = bug_biomass.astype(jnp.float32).sum()
-            #jax.debug.print('take {a}', a = fbm - (fbml + fbmb))
         else:
             bug_biomass = None
         # -- feed the resources to the bugs
@@ -214,11 +231,33 @@ def make_tera_arium(
         if params.include_biomass:
             landscape_state = landscape.add_biomass(
                 landscape_state, expelled_x, expelled_biomass)
-        
+            
         # natural landscape processes
         key, landscape_key = jrng.split(key)
         landscape_state = landscape.step(
             landscape_key, landscape_state)
+        
+        # fix biomass
+        site_biomass = (
+            state.step_biomass_correction *
+            params.biomass_correction_overshoot /
+            params.biomass_correction_sites
+        )
+        #jax.debug.print('site_biomass : {sb}', sb=site_biomass)
+        key, biomass_key = jrng.split(key)
+        biomass_sites = spawn.uniform_x(
+            biomass_key,
+            params.biomass_correction_sites,
+            params.landscape.resource_downsample,
+        )
+        corrected_biomass = landscape_state.biomass.at[
+            biomass_sites[:,0], biomass_sites[:,1]].add(site_biomass)
+        landscape_state = landscape_state.replace(biomass=corrected_biomass)
+        
+        #jax.debug.print('adding {sb} to {n} locations', sb=site_biomass, n=params.biomass_correction_sites)
+        
+        #landscape_state.replace(
+        #    biomass=landscape_state.biomass * state.step_biomass_correction)
         
         state = state.replace(
             landscape=landscape_state,
@@ -336,6 +375,37 @@ def make_tera_arium(
     
     def family_info(state):
         return bugs.family_info(state.bugs)
+    
+    def correct(state, steps):
+        if params.auto_correct_biomass:
+            #state_biomass = (
+            #    jnp.sum(state.landscape.biomass, dtype=jnp.float32) +
+            #    jnp.sum(state.bugs.biomass, dtype=jnp.float32)
+            #)
+            state_landscape_biomass = jnp.sum(
+                state.landscape.biomass, dtype=jnp.float32)
+            state_bugs_biomass = jnp.sum(
+                state.bugs.biomass, dtype=jnp.float32)
+            state_biomass = state_landscape_biomass + state_bugs_biomass
+            
+            missing_biomass = jnp.clip(
+                state.initial_biomass - state_biomass, min=0.)
+            #step_biomass_correction = (
+            #    missing_biomass / steps).astype(float_dtype)
+            step_biomass_correction = jnp.where(
+                missing_biomass > 0., params.biomass_correction_sites, 0.)
+            state = state.replace(
+                step_biomass_correction=step_biomass_correction)
+            
+            #target_landscape_biomass = state_biomass - next_state_bugs_biomass
+            #loss_ratio = next_state_landscape_biomass / target_landscape_biomass
+            #step_biomass_loss_ratio = loss_ratio ** (20./params.steps_per_epoch)
+            #step_biomass_correcton = (
+            #    1. / step_biomass_loss_ratio).astype(float_dtype)
+            #next_state = next_state.replace(
+            #    step_biomass_correction = step_biomass_correction)
+        
+        return state
     
     def visualizer_terrain_texture(report, shape, display_mode):
         if display_mode in (1,2,3,4,5):
@@ -484,6 +554,7 @@ def make_tera_arium(
         print_player_info=print_player_info,
         num_actions=bugs.num_actions,
         biomass_requirement=bugs.biomass_requirement,
+        correct=correct,
     )
     
     return game
