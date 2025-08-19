@@ -238,6 +238,7 @@ class BugParams:
     max_view_distance : int = 5
     max_view_back_distance : int = 5
     max_view_width : int = 11
+    include_compass : bool = True
     max_max_altitude_observation : float = 5.
     max_max_water_observation : float = 5.
     max_max_energy_observation : float = 5.
@@ -318,6 +319,8 @@ class BugTraits:
     min_temperature_observation : float | jnp.ndarray
     max_temperature_observation : float | jnp.ndarray
     temperature_sensor_noise : float | jnp.ndarray
+    # - compass
+    #compass_sensor_noise : float | jnp.ndarray
     # - health and internal resources
     health_sensor_noise : float | jnp.ndarray
     internal_resource_sensor_noise : float | jnp.ndarray
@@ -408,6 +411,8 @@ class BugTraits:
             min_temperature_observation = float_vector(-3.),
             max_temperature_observation = float_vector(3.),
             temperature_sensor_noise = float_vector(0.),
+            # - compass
+            #compass_sensor_noise = float_vector(0.),
             # internal resources
             health_sensor_noise = float_vector(0.),
             internal_resource_sensor_noise = float_vector(0.),
