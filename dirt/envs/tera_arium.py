@@ -63,6 +63,7 @@ class TeraAriumParams:
     max_view_distance : int = 5
     max_view_back_distance : int = 5
     max_view_width : int = 11
+    include_compass : bool = True
     
     # corrections
     auto_correct_biomass : bool = False
