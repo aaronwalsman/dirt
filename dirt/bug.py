@@ -115,6 +115,8 @@ action_type_names = {
 
 @static_data
 class BugParams:
+    verbose : bool = True
+    
     world_size : Tuple[int,int] = (1024,1024)
     initial_players : int = 1024
     max_players : int = 16384
@@ -124,6 +126,16 @@ class BugParams:
     include_water : bool = True
     include_energy : bool = True
     include_biomass : bool = True
+    
+    include_wind : bool = True
+    include_temperature : bool = True
+    include_rain : bool = True
+    include_light : bool = True
+    include_audio : bool = True
+    include_smell : bool = True
+    
+    include_expell_actions : bool = True
+    include_violence : bool = True
     
     levels : int = 0
     
@@ -280,6 +292,14 @@ class BugParams:
             f'than or equal to params.max_players ({params.max_players})'
         )
         
+        if not params.include_smell:
+            params = params.replace(odor_primitives=0)
+        if not params.include_audio:
+            params = params.replace(audio_primitives=0)
+        
+        if not params.include_violence:
+            params = params.replace(attack_primitives=0)
+        
         return params
 
 @static_data
@@ -320,7 +340,7 @@ class BugTraits:
     max_temperature_observation : float | jnp.ndarray
     temperature_sensor_noise : float | jnp.ndarray
     # - compass
-    #compass_sensor_noise : float | jnp.ndarray
+    compass_sensor_noise : float | jnp.ndarray
     # - health and internal resources
     health_sensor_noise : float | jnp.ndarray
     internal_resource_sensor_noise : float | jnp.ndarray
@@ -412,7 +432,7 @@ class BugTraits:
             max_temperature_observation = float_vector(3.),
             temperature_sensor_noise = float_vector(0.),
             # - compass
-            #compass_sensor_noise = float_vector(0.),
+            compass_sensor_noise = float_vector(0.),
             # internal resources
             health_sensor_noise = float_vector(0.),
             internal_resource_sensor_noise = float_vector(0.),
@@ -493,6 +513,9 @@ class BugObservation:
     wind : jnp.ndarray
     temperature : jnp.ndarray
     
+    # compass
+    compass : jnp.ndarray
+    
     # external resources
     external_water : jnp.ndarray
     external_energy : jnp.ndarray
@@ -503,13 +526,6 @@ class BugObservation:
     internal_water : jnp.ndarray
     internal_energy : jnp.ndarray
     internal_biomass : jnp.ndarray
-
-#@static_data
-#class BugAction:
-#    move : jnp.ndarray
-#    bite : jnp.ndarray
-#    eat : jnp.ndarray
-#    reproduce : jnp.ndarray
 
 @static_data
 class BugState:
@@ -557,7 +573,10 @@ def make_bugs(
         int(params.include_energy) +
         int(params.include_biomass)
     )
-    expell_primitives = eat_primitives
+    if params.include_expell_actions:
+        expell_primitives = eat_primitives
+    else:
+        expell_primitives = 0
     
     # - compute the total number of actions
     action_primitives = {
@@ -573,6 +592,18 @@ def make_bugs(
     }
     num_action_primitives = sum(action_primitives.values())
     max_action_primitives = max(action_primitives.values())
+    
+    if params.verbose:
+        print(f'action space (total: {sum(action_primitives.values())})')
+        print(f'  no action : 1')
+        print(f'  move : {params.movement_primitives}')
+        print(f'  attack : {params.attack_primitives}')
+        print(f'  eat : {eat_primitives}')
+        print(f'  expell : {expell_primitives}')
+        print(f'  smell : {params.odor_primitives}')
+        print(f'  audio : {params.audio_primitives}')
+        print(f'  levels : {params.levels}')
+        print(f'  reproduce : {int(params.include_reproduction)}')
     
     # - build the mapping that goes from integers to action type and primitive
     #   index, and vice-versa
@@ -1094,6 +1125,9 @@ def make_bugs(
             alive = state.hp > 0
             
             # pre-register locations where expelled resources will be placed
+            # - this is done here because of complications where bugs can die
+            #   and their slot is replaced by a new child that will have a new
+            #   position
             expelled_x = state.x
             
             # compute which bugs will reproduce
@@ -1132,18 +1166,20 @@ def make_bugs(
                 object_grid=state.object_grid,
             )
             # - finally filter by available slots
-            #   (technically, this may undercount the number of available slots
-            #   since it doesn't consider the bugs that may die in this time
-            #   step)
+            #   technically, this may undercount the number of available slots
+            #   since it doesn't consider the bugs that may die later this step
             available_slots = params.max_players - active.sum()
-            will_reproduce &= jnp.cumsum(will_reproduce) < available_slots
+            will_reproduce &= jnp.cumsum(will_reproduce) <= available_slots
             
             # charge the parents for the required birth resources
             paid_hp = birth_damage * will_reproduce
             state = state.replace(hp = state.hp - paid_hp)
             if params.include_water:
                 paid_water = birth_required_water * will_reproduce
+                expelled_moisture = birth_water_cost * will_reproduce
                 state = state.replace(water = state.water - paid_water)
+            else:
+                expelled_moisture = None
             if params.include_energy:
                 paid_energy = birth_required_energy * will_reproduce
                 state = state.replace(energy = state.energy - paid_energy)
@@ -1159,7 +1195,7 @@ def make_bugs(
                 fill_value=params.max_players,
             )
             # - compute recent deaths
-            #   (the parent dying from birth damage does not prevent birth)
+            #   the parent dying from birth damage does not prevent birth
             still_alive = state.hp > 0
             recent_deaths = active & ~still_alive
             
@@ -1204,10 +1240,6 @@ def make_bugs(
             # - update the state
             state = state.replace(x=x, r=r, object_grid=object_grid)
             
-            # everybody gets older
-            # moved this earlier so that new bugs still have age=0
-            #state = state.replace(age=(state.age + 1) * active)
-            
             # compute the child hp and resources
             child_hp = traits.child_hp[parent_locations]
             state = state.replace(
@@ -1225,17 +1257,15 @@ def make_bugs(
             state = state.replace(generation=generation)
             
             # update the resources
-            # get the resources of the dead bugs, and the resources expended
-            # in birth to return to the landscape
+            #   get the resources of the dead bugs, and the resources expended
+            #   in birth to return to the landscape
             if params.include_water:
-                expelled_moisture = paid_water
                 dead_water = state.water * recent_deaths
                 child_water = traits.child_water[parent_locations]
                 water = state.water * ~recent_deaths
                 water = water.at[child_locations].set(child_water)
                 state = state.replace(water=water)
             else:
-                expelled_moisture = None
                 dead_water = None
             if params.include_energy:
                 dead_energy = state.energy * recent_deaths
@@ -1251,12 +1281,6 @@ def make_bugs(
                 biomass = state.biomass * ~recent_deaths
                 biomass = biomass.at[child_locations].set(child_biomass)
                 state = state.replace(biomass=biomass)
-            
-            ## - update the state
-            #    water = state.water.at[child_locations].set(child_water),
-            #    energy = state.energy.at[child_locations].set(child_energy),
-            #    biomass = state.biomass.at[child_locations].set(child_biomass),
-            #)
             
             # zero negative hp
             state = state.replace(hp = jnp.clip(state.hp, min=0.))
@@ -1320,23 +1344,32 @@ def make_bugs(
             sensor_relative_altitude *= ~newborn[:,None,None]
             
             # audio
-            key, audio_key = jrng.split(key)
-            sensor_audio = noisy_sensor(
-                audio_key, audio, traits.audio_sensor_noise)
-            sensor_audio *= ~newborn[:,None]
+            if params.include_audio:
+                key, audio_key = jrng.split(key)
+                sensor_audio = noisy_sensor(
+                    audio_key, audio, traits.audio_sensor_noise)
+                sensor_audio *= ~newborn[:,None]
+            else:
+                sensor_audio = None
             
             # smell
-            key, smell_key = jrng.split(key)
-            sensor_smell = noisy_sensor(
-                smell_key, smell, traits.smell_sensor_noise)
-            sensor_smell *= ~newborn[:,None]
+            if params.include_smell:
+                key, smell_key = jrng.split(key)
+                sensor_smell = noisy_sensor(
+                    smell_key, smell, traits.smell_sensor_noise)
+                sensor_smell *= ~newborn[:,None]
+            else:
+                sensor_smell = None
             
             # weather
             key, wind_key, temperature_key = jrng.split(key, 3)
-            # - wind
-            wind = wind / params.wind_std
-            sensor_wind = noisy_sensor(
-                wind_key, wind, traits.wind_sensor_noise) * ~newborn[:,None]
+            if params.include_wind:
+                # - wind
+                wind = wind / params.wind_std
+                sensor_wind = noisy_sensor(
+                    wind_key, wind, traits.wind_sensor_noise) * ~newborn[:,None]
+            else:
+                sensor_wind = None
             # - temperature
             temperature_range = (
                 traits.max_temperature_observation -
@@ -1353,6 +1386,18 @@ def make_bugs(
                 sensor_temperature,
                 traits.temperature_sensor_noise,
             ) * ~newborn
+            
+            # compass
+            key, random_compass_key = jrng.split(key)
+            compass_one_hot = jnp.zeros(
+                (params.max_players, 4), dtype=float_dtype)
+            compass_one_hot = compass_one_hot.at[
+                jnp.arange(params.max_players), state.r].set(1.)
+            sensor_compass = noisy_sensor(
+                random_compass_key,
+                compass_one_hot,
+                traits.compass_sensor_noise,
+            )
             
             # external resources
             key, water_key, energy_key, biomass_key = jrng.split(key, 4)
@@ -1450,6 +1495,7 @@ def make_bugs(
                 external_biomass=sensor_external_biomass,
                 wind=sensor_wind,
                 temperature=sensor_temperature,
+                compass=sensor_compass,
                 health=sensor_health,
                 internal_water=sensor_internal_water,
                 internal_energy=sensor_internal_energy,

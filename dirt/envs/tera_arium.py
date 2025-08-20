@@ -41,6 +41,8 @@ from dirt.visualization.image import jax_to_image
 
 @static_data
 class TeraAriumParams:
+    verbose : bool = True
+    
     world_size : Tuple[int, int] = (1024, 1024)
     spatial_offset : Tuple[int, int] = (0,0)
     max_size : Tuple[int, int] = None
@@ -55,9 +57,14 @@ class TeraAriumParams:
     include_water : bool = True
     include_energy : bool = True
     include_biomass : bool = True
+    include_wind : bool = True
     include_temperature : bool = True
     include_rain : bool = True
     include_light : bool = True
+    include_audio : bool = True
+    audio_channels : int = 8
+    include_smell : bool = True
+    smell_channels : int = 8
     
     # observations
     max_view_distance : int = 5
@@ -240,7 +247,7 @@ def make_tera_arium(
         if params.include_biomass:
             landscape_state = landscape.add_biomass(
                 landscape_state, expelled_x, expelled_biomass)
-            
+        
         # natural landscape processes
         key, landscape_key = jrng.split(key)
         landscape_state = landscape.step(
@@ -318,20 +325,30 @@ def make_tera_arium(
         altitude_view = altitude_view - bug_altitude[:,None,None]
         
         # audio/smell
-        audio = read_grid_locations(
-            state.landscape.audio,
-            state.bugs.x,
-            params.landscape.audio_downsample,
-        )
-        smell = read_grid_locations(
-            state.landscape.smell,
-            state.bugs.x,
-            params.landscape.smell_downsample,
-        )
+        if params.include_audio:
+            audio = read_grid_locations(
+                state.landscape.audio,
+                state.bugs.x,
+                params.landscape.audio_downsample,
+            )
+        else:
+            audio = None
+        if params.include_smell:
+            smell = read_grid_locations(
+                state.landscape.smell,
+                state.bugs.x,
+                params.landscape.smell_downsample,
+            )
+        else:
+            smell = None
         
         # weather
-        wind = state.landscape.wind / state.landscape.max_wind
-        wind = jnp.repeat(wind[None,...], repeats=params.max_players, axis=0)
+        if params.include_wind:
+            wind = state.landscape.wind / state.landscape.max_wind
+            wind = jnp.repeat(
+                wind[None,...], repeats=params.max_players, axis=0)
+        else:
+            wind = None
         if params.include_temperature:
             temperature = read_grid_locations(
                 state.landscape.temperature,

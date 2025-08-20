@@ -209,6 +209,13 @@ class LandscapeParams:
     biomass_photosynthesis : float = 0.01
     photosynthesis_energy_per_biomass : float = 1.
     
+    # audio
+    include_audio: bool = True
+    audio_downsample: int=32
+    audio_channels: int=8
+    audio_diffusion_radius: int=3
+    audio_diffusion_strength: float = 1.
+    
     # smell
     include_smell: bool = True
     smell_downsample: int = 8
@@ -216,13 +223,6 @@ class LandscapeParams:
     smell_diffusion_radius: int = 1
     smell_diffusion_strength: float = 1.
     smell_dissipation: float = 0.01
-    
-    # audio
-    include_audio: bool = True
-    audio_downsample: int=32
-    audio_channels: int=8
-    audio_diffusion_radius: int=3
-    audio_diffusion_strength: float = 1.
 
     def validate(params):
         
