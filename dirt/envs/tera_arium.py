@@ -66,6 +66,9 @@ class TeraAriumParams:
     include_smell : bool = True
     smell_channels : int = 8
     
+    include_expell_actions : bool = True
+    include_violence : bool = True
+    
     # observations
     max_view_distance : int = 5
     max_view_back_distance : int = 5
