@@ -1037,11 +1037,6 @@ def make_bugs(
             # zero out the attack primitive for any non-attacking bugs
             selected_primitives = traits.attack_primitives[
                 jnp.arange(params.max_players), action_primitive]
-            #selected_primitives = jnp.where(
-            #    attack[..., None],
-            #    selected_primitives,
-            #    jnp.zeros_like(traits.attack_primitives[:,0])
-            #)
             
             # use stochastic rounding to discretize the attack primitive
             key, rounding_key = jrng.split(key)
@@ -1109,31 +1104,6 @@ def make_bugs(
             hp = state.hp - hit_map[state.x[...,0], state.x[...,1]] + hp_fix
             state = state.replace(hp=hp)
             
-            '''
-            def is_hit(attacker_idx, attack_pos):
-                hits = jnp.all(state.x == attack_pos, axis=-1)
-                hits = hits.at[attacker_idx].set(False) # ignore hit on self
-                return hits
-
-            hits = jax.vmap(is_hit, in_axes=(0, 0))(jnp.arange(state.x.shape[0]), attack_positions)
-
-            damage_amounts = params.attack_damage * attack * active_bugs
-
-            total_damage_received = jnp.sum(hits * damage_amounts[:, None], axis=0)
-
-            new_hp = state.hp - total_damage_received
-
-            if params.include_energy:
-                energy_cost = params.attack_energy_cost * attack * active_bugs
-                new_energy = state.energy - energy_cost
-            else:
-                new_energy = state.energy
-
-            state = state.replace(
-                hp=new_hp,
-                energy=new_energy
-            )
-            '''
             return state
         
         def biomass_requirement(traits):
