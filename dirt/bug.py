@@ -37,6 +37,7 @@ Expended energy when reproducing:
     energy_per_birth_mass (param)
 
 Biomass requirements:
+            f'{name}_backbone',
     min_biomass_constant (params) +
     biomass_required_for_brain = (
         brain_size (trait) * biomass_per_brain_size (param)) +
@@ -272,6 +273,9 @@ class BugParams:
     max_max_hp : float = 100.
     max_healing_rate : float = 10.
     
+    max_attack_offset : int = 5
+    max_attack_radius : int = 2
+    
     min_child_hp : float = 1.
     max_child_hp : float = 10.
     min_child_water : float = 0.01
@@ -482,11 +486,10 @@ class BugTraits:
                     [0, 0, 1],
                 ], dtype=DEFAULT_FLOAT_DTYPE)
             ),
-            attack_primitives = jnp.full(
-                (*shape, 1, 5), jnp.array([
-                    [1, 0, 0, 0, 1]
-                ], dtype=DEFAULT_FLOAT_DTYPE),
-            )
+            attack_primitives = jnp.full((*shape, 1, 5), jnp.array(
+                [[1, 0, 0, 0, 1]],
+                dtype=DEFAULT_FLOAT_DTYPE
+            ))
             #attack_primitives = jnp.array([
             #    [1, 0, 0, 0, 1] # x-offset, y-offset, width, height, damage
             #], dtype=DEFAULT_FLOAT_DTYPE),
@@ -926,7 +929,7 @@ def make_bugs(
             )
             return state
         
-        def fight(
+        def fight_pairwise(
             state : BugState,
             action : int,
             traits : BugTraits,
@@ -1007,6 +1010,130 @@ def make_bugs(
                 energy=new_energy
             )
 
+            return state
+        
+        def fight(
+            key: chex.PRNGKey,
+            state: BugState,
+            action: int,
+            traits: BugTraits,
+        ) -> BugState:
+            
+            # make no changes if violence is turned off
+            if not params.include_violence:
+                return state
+            
+            # check traits
+            assert (
+                params.attack_primitives == traits.attack_primitives.shape[-2]
+            )
+            
+            # find out who is attacking
+            action_type = action_to_primitive_map[action, 0]
+            action_primitive = action_to_primitive_map[action, 1]
+            active_bugs = family_tree.active(state.family_tree)
+            attack = (action_type == ATTACK_ACTION_TYPE) & active_bugs
+            
+            # zero out the attack primitive for any non-attacking bugs
+            selected_primitives = traits.attack_primitives[
+                jnp.arange(params.max_players), action_primitive]
+            #selected_primitives = jnp.where(
+            #    attack[..., None],
+            #    selected_primitives,
+            #    jnp.zeros_like(traits.attack_primitives[:,0])
+            #)
+            
+            # use stochastic rounding to discretize the attack primitive
+            key, rounding_key = jrng.split(key)
+            selected_primitives = stochastic_rounding(
+                rounding_key, selected_primitives)
+            attack_offsets = selected_primitives[...,:2]
+            
+            # get the shape of the attack area
+            attack_hw = selected_primitives[...,(2,3)]
+            rotated_attack_hw = selected_primitives[...,(3,2)]
+            # - rotate the attack area if necessary
+            global_attack_hw = jnp.where(
+                (state.r%2 == 0)[...,None],
+                attack_hw,
+                rotated_attack_hw,
+            )
+            # - convert the local attack offsets to global coordinates
+            attack_positions = dynamics.step(
+                state.x,
+                state.r,
+                attack_offsets,
+                jnp.zeros_like(state.r),
+                space='local',
+                world_size=params.world_size,
+            )
+            
+            # build the hit masks
+            max_diameter = params.max_attack_radius * 2 + 1
+            d = jnp.abs(jnp.arange(max_diameter) - params.max_attack_radius)
+            hit_masks = (
+                (global_attack_hw[...,0,None,None] <= d[:,None]) &
+                (global_attack_hw[...,1,None,None] <= d[None,:])
+            ) * selected_primitives[...,-1][...,None,None]
+            
+            # add the hit masks
+            # - build the rows and columns where the hit masks will be added
+            rc = jnp.stack(jnp.meshgrid(
+                jnp.arange(max_diameter),
+                jnp.arange(max_diameter),
+                indexing='ij',
+            ), axis=-1)
+            rc = rc - params.max_attack_radius
+            rc = rc[None,...] + attack_offsets[:,None,None,:]
+            # -- change all negative numbers to a large positive number so that
+            #    they will be off the grid
+            rc = jnp.where(rc >= 0, rc, max(params.world_size))
+            
+            # initialize the hit map
+            hit_map = jnp.zeros(params.world_size, dtype=float_dtype)
+            
+            # add to the hit map
+            hit_map = hit_map.at[rc[...,0], rc[...,1]].add(hit_masks)
+            
+            # figure out who would hit themselves
+            self_hit = (
+                attack &
+                (attack_offsets[:,0] >= -attack_hw[...,0]) &
+                (attack_offsets[:,0] <= attack_hw[...,0]) &
+                (attack_offsets[:,1] >= -attack_hw[...,1]) &
+                (attack_offsets[:,1] <= attack_hw[...,1])
+            )
+            hp_fix = selected_primitives[...,-1] * self_hit
+            
+            # update hp
+            hp = state.hp - hit_map[state.x[...,0], state.x[...,1]] + hp_fix
+            state = state.replace(hp=hp)
+            
+            '''
+            def is_hit(attacker_idx, attack_pos):
+                hits = jnp.all(state.x == attack_pos, axis=-1)
+                hits = hits.at[attacker_idx].set(False) # ignore hit on self
+                return hits
+
+            hits = jax.vmap(is_hit, in_axes=(0, 0))(jnp.arange(state.x.shape[0]), attack_positions)
+
+            damage_amounts = params.attack_damage * attack * active_bugs
+
+            total_damage_received = jnp.sum(hits * damage_amounts[:, None], axis=0)
+
+            new_hp = state.hp - total_damage_received
+
+            if params.include_energy:
+                energy_cost = params.attack_energy_cost * attack * active_bugs
+                new_energy = state.energy - energy_cost
+            else:
+                new_energy = state.energy
+
+            state = state.replace(
+                hp=new_hp,
+                energy=new_energy
+            )
+            '''
             return state
         
         def biomass_requirement(traits):

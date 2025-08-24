@@ -205,7 +205,8 @@ def make_tera_arium(
         bug_state, evaporated_metabolism = bugs.metabolism(bug_state, traits)
         
         # - fight
-        # bug_state = bugs.fight(bug_state, action, traits)
+        key, fight_key = jrng.split(key)
+        bug_state = bugs.fight(key, bug_state, action, traits)
         
         # - move bugs
         key, move_key = jrng.split(key)
