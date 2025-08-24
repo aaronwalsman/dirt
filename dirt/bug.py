@@ -1059,7 +1059,7 @@ def make_bugs(
                 rotated_attack_hw,
             )
             # - convert the local attack offsets to global coordinates
-            attack_positions = dynamics.step(
+            attack_positions, _ = dynamics.step(
                 state.x,
                 state.r,
                 attack_offsets,
@@ -1072,9 +1072,9 @@ def make_bugs(
             max_diameter = params.max_attack_radius * 2 + 1
             d = jnp.abs(jnp.arange(max_diameter) - params.max_attack_radius)
             hit_masks = (
-                (global_attack_hw[...,0,None,None] <= d[:,None]) &
-                (global_attack_hw[...,1,None,None] <= d[None,:])
-            ) * selected_primitives[...,-1][...,None,None]
+                (global_attack_hw[...,0,None,None] >= d[:,None]) &
+                (global_attack_hw[...,1,None,None] >= d[None,:])
+            ) * selected_primitives[...,-1][...,None,None] * attack[:,None,None]
             
             # add the hit masks
             # - build the rows and columns where the hit masks will be added
@@ -1084,7 +1084,7 @@ def make_bugs(
                 indexing='ij',
             ), axis=-1)
             rc = rc - params.max_attack_radius
-            rc = rc[None,...] + attack_offsets[:,None,None,:]
+            rc = rc[None,...] + attack_positions[:,None,None,:]
             # -- change all negative numbers to a large positive number so that
             #    they will be off the grid
             rc = jnp.where(rc >= 0, rc, max(params.world_size))
