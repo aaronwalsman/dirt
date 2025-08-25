@@ -456,6 +456,16 @@ def make_tera_arium(
             rgb = jnp.zeros((*shape, 3), dtype=float_dtype)
             return jax_to_image(rgb)
     
+    def make_video_report(state):
+        report = landscape.render_rgb(
+            state.landscape,
+            params.world_size,
+            spot_x = state.bugs.x,
+            spot_color = state.bug_traits.color,
+            use_light=False,
+        )
+        return report
+    
     @static_data
     class VisualizerReport:
         if params.include_rock:
@@ -583,6 +593,7 @@ def make_tera_arium(
         visualizer_terrain_map=landscape.visualizer_terrain_map,
         visualizer_terrain_texture=visualizer_terrain_texture,
         default_visualizer_report=default_visualizer_report,
+        make_video_report=make_video_report,
         make_visualizer_report=make_visualizer_report,
         print_player_info=print_player_info,
         num_actions=bugs.num_actions,
