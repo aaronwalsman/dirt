@@ -1,5 +1,5 @@
 import jax.numpy as jnp
-
+ 
 from mechagogue.nn.layer import make_layer
 from mechagogue.nn.sequence import layer_sequence
 from mechagogue.static import static_functions
