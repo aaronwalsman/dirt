@@ -208,6 +208,7 @@ class LandscapeParams:
     biomass_unit_scale : float = 0.0025
     biomass_photosynthesis : float = 0.01
     photosynthesis_energy_per_biomass : float = 1.
+    max_photosynthesis_per_step : float = 0.01
     
     # audio
     include_audio: bool = True
@@ -1223,6 +1224,14 @@ def make_landscape(
                         state.biomass *
                         params.biomass_photosynthesis,
                         light_mean,
+                    )
+                    max_photosynthesis_downsample = (
+                        params.max_photosynthesis_per_step *
+                        params.resource_downsample**2
+                    )
+                    photosynthesis_energy = jnp.clip(
+                        photosynthesis_energy,
+                        max=max_photosynthesis_downsample,
                     )
                     delta_energy = jnp.where(
                         add_energy_locations,
