@@ -32,8 +32,8 @@ def local_view(
     step_size_0 = [subsample,-subsample][max_0-min_0 < 0]
     step_size_1 = [subsample,-subsample][max_1-min_1 < 0]
     rc = jnp.stack(jnp.meshgrid(
-        jnp.arange(min_0, max_0, step_size_0) // downsample,
-        jnp.arange(min_1, max_1, step_size_1) // downsample,
+        jnp.arange(min_0, max_0, step_size_0),
+        jnp.arange(min_1, max_1, step_size_1),
         indexing='ij',
     ), axis=-1)
     
@@ -44,6 +44,7 @@ def local_view(
     # convert negative values in global_rc to out-of-bound indices
     too_big = max(observation_grid.shape)
     global_rc = jnp.where(global_rc >= 0, global_rc, too_big)
+    global_rc = global_rc // downsample
     
     # cut out regions of the observation grid corresponding to the computed
     # rows and columns
