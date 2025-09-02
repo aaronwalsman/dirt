@@ -3,6 +3,7 @@ from typing import Tuple, Optional
 import jax
 import jax.numpy as jnp
 import jax.random as jrng
+#from jax.experimental import checkify
 
 import chex
 
@@ -34,7 +35,8 @@ from dirt.bug import (
     make_bugs,
     action_type_names,
 )
-from dirt.gridworld2d.grid import read_grid_locations, set_grid_shape
+from dirt.gridworld2d.grid import (
+    read_grid_locations, set_grid_shape, grid_mean_to_sum, upsample_grid)
 from dirt.gridworld2d.observations import first_person_view, noisy_sensor
 import dirt.gridworld2d.spawn as spawn
 from dirt.visualization.image import jax_to_image
@@ -74,6 +76,8 @@ class TeraAriumParams:
     max_view_back_distance : int = 5
     max_view_width : int = 11
     include_compass : bool = True
+    vision_includes_rgb : bool = True
+    vision_includes_relative_altitude : bool = True
     
     # corrections
     auto_correct_biomass : bool = False
@@ -258,12 +262,12 @@ def make_tera_arium(
             landscape_key, landscape_state)
         
         # fix biomass
+        '''
         site_biomass = (
             state.step_biomass_correction *
             params.biomass_correction_overshoot /
             params.biomass_correction_sites
         )
-        #jax.debug.print('site_biomass : {sb}', sb=site_biomass)
         key, biomass_key = jrng.split(key)
         biomass_sites = spawn.uniform_x(
             biomass_key,
@@ -273,11 +277,7 @@ def make_tera_arium(
         corrected_biomass = landscape_state.biomass.at[
             biomass_sites[:,0], biomass_sites[:,1]].add(site_biomass)
         landscape_state = landscape_state.replace(biomass=corrected_biomass)
-        
-        #jax.debug.print('adding {sb} to {n} locations', sb=site_biomass, n=params.biomass_correction_sites)
-        
-        #landscape_state.replace(
-        #    biomass=landscape_state.biomass * state.step_biomass_correction)
+        '''
         
         state = state.replace(
             landscape=landscape_state,
@@ -293,40 +293,58 @@ def make_tera_arium(
     ) -> BugObservation:
         # visual
         # - rgb
-        rgb = landscape.render_rgb(
-            state.landscape,
-            params.world_size,
-            spot_x=state.bugs.x,
-            spot_color=state.bug_traits.color,
-        )
-        rgb_view = first_person_view(
-            state.bugs.x,
-            state.bugs.r,
-            rgb,
-            params.max_view_width,
-            params.max_view_distance,
-            params.max_view_back_distance,
-        )
+        if params.vision_includes_rgb:
+            rgb = landscape.render_rgb(
+                state.landscape,
+                params.world_size,
+                spot_x=state.bugs.x,
+                spot_color=state.bug_traits.color,
+            )
+            rgb_view = first_person_view(
+                state.bugs.x,
+                state.bugs.r,
+                rgb,
+                params.max_view_width,
+                params.max_view_distance,
+                params.max_view_back_distance,
+            )
+        else:
+            rgb_view = None
         
         # - relative altitude
-        if params.include_rock:
-            altitude = state.landscape.rock
+        if params.vision_includes_relative_altitude:
+            '''
+            if params.include_rock:
+                altitude = state.landscape.rock.copy()
+                #altitude = jnp.zeros_like(state.landscape.rock)
+                #altitude = jnp.ones((128,128), dtype=float_dtype)
+                #slope = jnp.arange(0, 128, dtype=float_dtype)
+                #slope = slope - 64
+                #slope = slope * 4
+                #altitude = altitude * slope * 0.1
+                #altitude = grid_mean_to_sum(altitude, 4)
+            else:
+                altitude = jnp.zeros((1,1), dtype=float_dtype)
+            if params.include_water:
+                altitude += state.landscape.water
+            '''
+            
+            altitude = landscape.get_altitude(state.landscape)
+            
+            bug_altitude = read_grid_locations(
+                altitude, state.bugs.x, params.landscape.terrain_downsample)
+            altitude_view = first_person_view(
+                state.bugs.x,
+                state.bugs.r,
+                altitude,
+                params.max_view_width,
+                params.max_view_distance,
+                params.max_view_back_distance,
+                downsample=params.landscape.terrain_downsample,
+            )
+            altitude_view = altitude_view - bug_altitude[:,None,None]
         else:
-            altitude = jnp.zeros((1,1), dtype=float_dtype)
-        if params.include_water:
-            altitude += state.landscape.water
-        bug_altitude = read_grid_locations(
-            altitude, state.bugs.x, params.landscape.terrain_downsample)
-        altitude_view = first_person_view(
-            state.bugs.x,
-            state.bugs.r,
-            altitude,
-            params.max_view_width,
-            params.max_view_distance,
-            params.max_view_back_distance,
-            downsample=params.landscape.terrain_downsample,
-        )
-        altitude_view = altitude_view - bug_altitude[:,None,None]
+            altitude_view = None
         
         # audio/smell
         if params.include_audio:
@@ -364,13 +382,6 @@ def make_tera_arium(
         
         # external resources
         if params.include_water:
-            '''
-            external_water = read_grid_locations(
-                state.landscape.water,
-                state.bugs.x,
-                params.landscape.terrain_downsample,
-            )
-            '''
             external_water = landscape.get_water(state.landscape, state.bugs.x)
         else:
             external_water = None
