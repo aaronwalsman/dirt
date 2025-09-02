@@ -1110,7 +1110,11 @@ def make_bugs(
             
             if params.include_energy:
                 attack_area = attack_hw[...,0] * attack_hw[...,1]
-                energy_cost = attack_area * params.attack_energy_cost
+                energy_cost = (
+                    attack_area *
+                    params.attack_energy_cost *
+                    selected_primitives[...,-1]
+                )
                 energy_cost = energy_cost * attack
                 energy = state.energy - energy_cost
                 energy = jnp.clip(energy, min=0.)
