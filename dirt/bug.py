@@ -252,6 +252,8 @@ class BugParams:
     max_view_back_distance : int = 5
     max_view_width : int = 11
     include_compass : bool = True
+    vision_includes_rgb : bool = True
+    vision_includes_relative_altitude : bool = True
     max_max_altitude_observation : float = 5.
     max_max_water_observation : float = 5.
     max_max_energy_observation : float = 5.
@@ -487,7 +489,7 @@ class BugTraits:
                 ], dtype=DEFAULT_FLOAT_DTYPE)
             ),
             attack_primitives = jnp.full((*shape, 1, 5), jnp.array(
-                [[1, 0, 0, 0, 1]],
+                [[1, 0, 0, 0, 5]],
                 dtype=DEFAULT_FLOAT_DTYPE
             ))
             #attack_primitives = jnp.array([
@@ -919,7 +921,8 @@ def make_bugs(
             state : BugState,
             traits : BugTraits,
         ):
-            healable_hp = traits.max_hp - state.hp
+            healable_hp = jnp.minimum(
+                traits.max_hp - state.hp, traits.healing_rate)
             healing_energy_cost = healable_hp / params.hp_healed_per_energy
             usable_energy_cost = jnp.minimum(healing_energy_cost, state.energy)
             hp_to_heal = usable_energy_cost * params.hp_healed_per_energy
@@ -1102,7 +1105,16 @@ def make_bugs(
             
             # update hp
             hp = state.hp - hit_map[state.x[...,0], state.x[...,1]] + hp_fix
+            hp = jnp.clip(hp, min=0.)
             state = state.replace(hp=hp)
+            
+            if params.include_energy:
+                attack_area = attack_hw[...,0] * attack_hw[...,1]
+                energy_cost = attack_area * params.attack_energy_cost
+                energy_cost = energy_cost * attack
+                energy = state.energy - energy_cost
+                energy = jnp.clip(energy, min=0.)
+                state = state.replace(energy=energy)
             
             return state
         
@@ -1160,10 +1172,11 @@ def make_bugs(
             # change color
             #state = state.replace(color=traits.color)
             
+            alive = Bugs.active_players(state)
+            mass = Bugs.get_mass(state.water, state.biomass)
+            
             # energy cost
             if params.include_energy:
-                alive = Bugs.active_players(state)
-                mass = Bugs.get_mass(state.water, state.biomass)
                 energy_cost = (
                     params.resting_energy_cost +
                     params.resting_energy_cost_per_mass * mass +
@@ -1198,12 +1211,11 @@ def make_bugs(
             # Vincent's pass to check biomass requirements
             biomass_req = Bugs.biomass_requirement(traits)
             # check if the biomass requirement is met
-            #jax.debug.print(state.biomass - biomass_req)
             lack_biomass = jnp.maximum(biomass_req - state.biomass, 0)
             # if not, apply damage
             # turning this off momentarily until we tune the parameters
             damage += lack_biomass * params.lack_biomass_damage
-                       
+            
             state = state.replace(
                 hp=state.hp - damage,
                 energy=energy,
@@ -1420,25 +1432,33 @@ def make_bugs(
             
             # vision
             # - rgb
-            key, rgb_key = jrng.split(key)
-            sensor_rgb = noisy_sensor(rgb_key, rgb, traits.visual_sensor_noise)
-            sensor_rgb *= ~newborn[:,None,None,None]
+            if params.vision_includes_rgb:
+                key, rgb_key = jrng.split(key)
+                sensor_rgb = noisy_sensor(
+                    rgb_key, rgb, traits.visual_sensor_noise)
+                sensor_rgb *= ~newborn[:,None,None,None]
+            else:
+                sensor_rgb = None
             
             # - altitude
-            sensor_relative_altitude = jnp.clip(
-                relative_altitude/traits.max_altitude_observation[:,None,None],
-                min=-1.,
-                max=1.,
-            )
-            key, altitude_key = jrng.split(key)
-            sensor_relative_altitude = noisy_sensor(
-                altitude_key,
-                relative_altitude,
-                traits.visual_sensor_noise,
-                minval=-1.,
-                maxval=1.,
-            )
-            sensor_relative_altitude *= ~newborn[:,None,None]
+            if params.vision_includes_relative_altitude:
+                normalizer = traits.max_altitude_observation[:,None,None]
+                sensor_relative_altitude = jnp.clip(
+                    relative_altitude/normalizer,
+                    min=-1.,
+                    max=1.,
+                )
+                key, altitude_key = jrng.split(key)
+                sensor_relative_altitude = noisy_sensor(
+                    altitude_key,
+                    sensor_relative_altitude,
+                    traits.visual_sensor_noise,
+                    minval=-1.,
+                    maxval=1.,
+                )
+                sensor_relative_altitude *= ~newborn[:,None,None]
+            else:
+                sensor_relative_altitude = None
             
             # audio
             if params.include_audio:
@@ -1485,16 +1505,19 @@ def make_bugs(
             ) * ~newborn
             
             # compass
-            key, random_compass_key = jrng.split(key)
-            compass_one_hot = jnp.zeros(
-                (params.max_players, 4), dtype=float_dtype)
-            compass_one_hot = compass_one_hot.at[
-                jnp.arange(params.max_players), state.r].set(1.)
-            sensor_compass = noisy_sensor(
-                random_compass_key,
-                compass_one_hot,
-                traits.compass_sensor_noise,
-            )
+            if params.include_compass:
+                key, random_compass_key = jrng.split(key)
+                compass_one_hot = jnp.zeros(
+                    (params.max_players, 4), dtype=float_dtype)
+                compass_one_hot = compass_one_hot.at[
+                    jnp.arange(params.max_players), state.r].set(1.)
+                sensor_compass = noisy_sensor(
+                    random_compass_key,
+                    compass_one_hot,
+                    traits.compass_sensor_noise,
+                )
+            else:
+                sensor_compass = None
             
             # external resources
             key, water_key, energy_key, biomass_key = jrng.split(key, 4)
@@ -1691,8 +1714,6 @@ def make_bugs(
                 dr_noise_std *
                 do_mutate
             )
-            #jax.debug.print('dx noise std {dx}', dx=dx_noise_std)
-            #jax.debug.print('dr noise std {dr}', dr=dr_noise_std)
             dx = traits.movement_primitives[:,:2]
             dx = dx.at[mutate_primitive].add(dx_noise)
             dx = jnp.clip(dx, min=-params.max_movement, max=params.max_movement)
