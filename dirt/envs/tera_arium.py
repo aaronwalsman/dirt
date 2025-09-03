@@ -608,6 +608,8 @@ def make_tera_arium(
         make_visualizer_report=make_visualizer_report,
         print_player_info=print_player_info,
         num_actions=bugs.num_actions,
+        action_primitive_count=bugs.action_primitive_count,
+        action_to_primitive=bugs.action_to_primitive,
         biomass_requirement=bugs.biomass_requirement,
         correct=correct,
     )

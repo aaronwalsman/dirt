@@ -100,6 +100,7 @@ SMELL_ACTION_TYPE = 5
 AUDIO_ACTION_TYPE = 6
 LEVEL_ACTION_TYPE = 7
 REPRODUCE_ACTION_TYPE = 8
+
 NUM_ACTION_TYPES = 9
 
 action_type_names = {
@@ -640,6 +641,8 @@ def make_bugs(
     @static_functions
     class Bugs:
         num_actions = num_action_primitives
+        action_primitive_count = action_primitives
+        action_to_primitive = action_to_primitive_map
         
         def init(
             key : chex.PRNGKey,
