@@ -7,8 +7,9 @@ import glfw
 import splendor.core as core
 import splendor.contexts.glfw_context as glfw_context
 from splendor.interactive_camera_glfw import InteractiveCameraGLFW
+from splendor.frame_buffer import FrameBufferWrapper
 import splendor.camera as camera
-from splendor.masks import color_index_to_float
+from splendor.masks import color_index_to_float, color_byte_to_index
 import splendor.primitives as primitives
 from splendor.image import save_image
 
@@ -17,6 +18,7 @@ from mechagogue.serial import load_example_data
 from mechagogue.standardize import standardize_args
 #from mechagogue.arg_wrappers import ignore_unused_args
 
+from dirt.gridworld2d.grid import read_grid_locations
 from dirt.visualization.height_map import (
     make_height_map_vertices_and_normals, make_height_map_mesh)
 
@@ -31,15 +33,23 @@ default_get_terrain_map = lambda params : jnp.zeros(
 #    xz = jnp.sin(jnp.linspace(0, 2*2*jnp.pi, w))
 #    return yz[:,None] + xz[None,:]
 #default_get_water_map = lambda : None
-default_get_player_color = lambda player_id : color_index_to_float(player_id+1)
+#default_get_player_color = lambda player_id : color_index_to_float(player_id+1)
+def default_get_player_color(player_id, report):
+    if hasattr(report, 'player_color'):
+        return report.player_color[player_id]
+    else:
+        return color_index_to_float(player_id+1)
+
+def default_print_player_info(player_id):
+    print(player_id)
 
 PLAYER_RADIUS=0.4
 
 class Viewer:
     def __init__(
         self,
-        example_params,
-        params_file,
+        #example_params,
+        #params_file,
         example_report,
         report_files,
         world_size,
@@ -48,6 +58,7 @@ class Viewer:
         start_step=0,
         terrain_texture_resolution=None,
         max_render_players=512,
+        get_report_block=lambda report : report,
         get_active_players=default_get_active_players,
         get_player_x=default_get_player_x,
         get_player_r=default_get_player_r,
@@ -57,44 +68,59 @@ class Viewer:
         get_water_map=None,
         get_player_color=default_get_player_color,
         get_sun_direction=None,
+        print_player_info=default_print_player_info,
     ):
         
+        self.get_report_block = standardize_args(
+            get_report_block, ('report',))
         if get_active_players is not None:
             self.get_active_players = standardize_args(
-                get_active_players, ('params', 'report'))
+                #get_active_players, ('params', 'report'))
+                get_active_players, ('report',))
         else:
             self.get_active_players = get_active_players
         self.get_player_x = standardize_args(
-            get_player_x, ('params', 'report'))
+        #    get_player_x, ('params', 'report'))
+            get_player_x, ('report',))
         self.get_player_r = standardize_args(
-            get_player_r, ('params', 'report'))
+        #    get_player_r, ('params', 'report'))
+            get_player_r, ('report',))
         self.get_player_energy = get_player_energy
         if get_player_energy:
             self.get_player_energy = standardize_args(
-                self.get_player_energy, ('params', 'report'))
+                #self.get_player_energy, ('params', 'report'))
+                self.get_player_energy, ('report',))
         self.get_terrain_map = standardize_args(
-            get_terrain_map, ('params', 'report'))
+            #get_terrain_map, ('params', 'report'))
+            get_terrain_map, ('report',))
         self.get_terrain_texture = get_terrain_texture
         if self.get_terrain_texture:
             self.get_terrain_texture = standardize_args(
                 self.get_terrain_texture,
-                ('params', 'report', 'texture_size', 'display_mode'),
+                #('params', 'report', 'shape', 'display_mode'),
+                ('report', 'shape', 'display_mode',),
             )
         self.get_water_map = get_water_map
         if self.get_water_map:
             self.get_water_map = standardize_args(
-                get_water_map, ('params', 'report'))
+                #get_water_map, ('params', 'report'))
+                get_water_map, ('report',))
         self.get_player_color = standardize_args(
-            get_player_color, ('player_id', 'params', 'report'))
+            #get_player_color, ('player_id', 'params', 'report'))
+            get_player_color, ('player_id', 'report'))
         if get_sun_direction:
             self.get_sun_direction = standardize_args(
-                get_sun_direction, ('params', 'report'))
+                #get_sun_direction, ('params', 'report'))
+                get_sun_direction, ('report',))
+        if print_player_info:
+            self.print_player_info = standardize_args(
+                print_player_info, ('player_id', 'report',))
         
         self.world_size = world_size
         
         self._init_params_and_reports(
-            example_params,
-            params_file,
+            #example_params,
+            #params_file,
             example_report,
             report_files,
             step_0=step_0,
@@ -116,8 +142,8 @@ class Viewer:
     
     def _init_params_and_reports(
         self,
-        example_params,
-        params_file,
+        #example_params,
+        #params_file,
         example_report,
         report_files,
         step_0,
@@ -126,11 +152,13 @@ class Viewer:
         self.step_0 = step_0
         self.current_step = start_step
         self.block_index = 0
+        self._example_report = example_report
         
-        self.params = load_example_data(example_params, params_file)
+        #self.params = load_example_data(example_params, params_file)
         self.report_files = report_files
-        self.current_report_block = load_example_data(
-            example_report, self.report_files[self.block_index])
+        report_block = load_example_data(
+            self._example_report, self.report_files[self.block_index])
+        self.current_report_block = self.get_report_block(report_block)
         self.report = tree_getitem(
             self.current_report_block, 0)
         self.reports_per_block = tree_len(self.current_report_block)
@@ -145,6 +173,11 @@ class Viewer:
             anti_alias=False,
             anti_alias_samples=0,
         )
+        #self._mask_framebuffer = FrameBufferWrapper(
+        #    width=window_width,
+        #    height=window_height,
+        #    anti_alias=False,
+        #)
     
     def _init_splendor_render(self):
         self.renderer = core.SplendorRender()
@@ -156,7 +189,8 @@ class Viewer:
         ])
     
     def _init_landscape(self, terrain_texture_resolution):
-        self.terrain_map = self.get_terrain_map(self.params, self.report)
+        #self.terrain_map = self.get_terrain_map(self.params, self.report)
+        self.terrain_map = self.get_terrain_map(self.report)
         h, w = self.terrain_map.shape
         if terrain_texture_resolution is None:
             terrain_texture_resolution = self.world_size
@@ -202,7 +236,8 @@ class Viewer:
         )
         
         if self.get_water_map is not None:
-            water_map = self.get_water_map(self.params, self.report)
+            #water_map = self.get_water_map(self.params, self.report)
+            water_map = self.get_water_map(self.report)
             self.total_height_map = self.terrain_map + water_map
             (
                 water_vertices,
@@ -260,7 +295,8 @@ class Viewer:
     
     def _update_sun_position(self):
         if hasattr(self, 'get_sun_direction'):
-            sun_direction = self.get_sun_direction(self.params, self.report)
+            #sun_direction = self.get_sun_direction(self.params, self.report)
+            sun_direction = self.get_sun_direction(self.report)
             max_size = max(self.world_size)
             sun_transform = np.eye(4)
             sun_transform[:3,3] = sun_direction * max_size * 1
@@ -276,8 +312,10 @@ class Viewer:
             self.renderer.set_instance_transform('sun', sun_transform)
     
     def _init_players(self, max_render_players):
-        active_players = self.get_active_players(self.params, self.report)
+        #active_players = self.get_active_players(self.params, self.report)
+        active_players = self.get_active_players(self.report)
         self.max_players = min(active_players.shape[0], max_render_players)
+        self.selected_player = None
         
         # make player cube
         self.renderer.load_mesh(
@@ -391,13 +429,16 @@ class Viewer:
                 rough=1.,
                 metal=0.,
             )
-        
+            
+            player_mask_color = color_index_to_float(player_id+1)
+            
             player_name = f'player_{player_id}'
             self.renderer.add_instance(
                 name=player_name,
                 mesh_name='player_mesh',
                 material_name=material_name,
                 transform=np.eye(4),
+                mask_color=player_mask_color,
                 hidden=True,
             )
             
@@ -407,6 +448,7 @@ class Viewer:
                 mesh_name='eye_white_mesh',
                 material_name='eye_white_material',
                 transform=np.eye(4),
+                mask_color=player_mask_color,
                 hidden=True,
             )
             
@@ -416,6 +458,7 @@ class Viewer:
                 mesh_name='eye_pupil_mesh',
                 material_name='eye_pupil_material',
                 transform=np.eye(4),
+                mask_color=player_mask_color,
                 hidden=True,
             )
             
@@ -491,11 +534,35 @@ class Viewer:
             #(106./255., 223/255., 255./255.),
             (188./255., 225./255., 242./255.),
         )
-        
+    
+    def mouse_button_callback(self, window, button, action, mods):
+        if self._ctrl_down:
+            if action == glfw.PRESS:
+                mask = self.window.read_pixels()
+                x, y = self.camera_control.get_mouse_pixel_position(window)
+                fbw, fbh = self.window.framebuffer_size()
+                y = fbh - y
+                mask_color = mask[y,x]
+                render_id = color_byte_to_index(mask_color) - 1
+                if render_id in self._render_players:
+                    player_id = self._render_players[render_id]
+                    self.selected_player = player_id
+                    self.print_player_info(player_id, self.report)
+                else:
+                    self.selected_player = None
+                self._update_players()
+                #self.window.set_active()
+        else:
+            return self.camera_control.mouse_callback(
+                window, button, action, mods)
+    
     def _init_callbacks(self):
         self._shift_down = False
+        self._ctrl_down = False
+        #self.window.set_mouse_button_callback(
+        #    self.camera_control.mouse_callback)
         self.window.set_mouse_button_callback(
-            self.camera_control.mouse_callback)
+            self.mouse_button_callback)
         self.window.set_cursor_pos_callback(
             self.camera_control.mouse_move)
         self.window.set_scroll_callback(
@@ -513,8 +580,9 @@ class Viewer:
         block_index, block_step = self.step_to_block(step)
         if block_index != self.block_index:
             self.block_index = block_index
-            self.current_report_block = load_example_data(
-                self.current_report_block, self.report_files[self.block_index])
+            report_block = load_example_data(
+                self._example_report, self.report_files[self.block_index])
+            self.current_report_block = self.get_report_block(report_block)
         self.current_step = step
         
         print(f'Current Step: {step} '
@@ -529,16 +597,23 @@ class Viewer:
         #self._update_water()
         if self.get_active_players is not None:
             self._update_players()
+        
+        if self.selected_player is not None:
+            self.print_player_info(self.selected_player, self.report)
     
     def _update_players(self):
-        active_players = self.get_active_players(self.params, self.report)
+        #active_players = self.get_active_players(self.params, self.report)
+        active_players = self.get_active_players(self.report)
         if not self.show_players:
             active_players = jnp.zeros_like(active_players)
         
-        player_x = self.get_player_x(self.params, self.report)
-        player_r = self.get_player_r(self.params, self.report)
+        #player_x = self.get_player_x(self.params, self.report)
+        #player_r = self.get_player_r(self.params, self.report)
+        player_x = self.get_player_x(self.report)
+        player_r = self.get_player_r(self.report)
         if self.get_player_energy is not None:
-            player_energy = self.get_player_energy(self.params, self.report)
+            #player_energy = self.get_player_energy(self.params, self.report)
+            player_energy = self.get_player_energy(self.report)
         else:
             player_energy = np.zeros(player_r.shape)
         player_transforms = self._player_transform(player_x, player_r)
@@ -546,10 +621,7 @@ class Viewer:
         print(f'Active Players: {jnp.sum(active_players)}')
         
         # figure out which players are in the frustum, and z sort them
-        render_players = {i : -1 for i in range(self.max_players)}
-        #if self.max_players >= scene_players:
-        #    render_players = {i:i for i in range(self.max_players)}
-        #else:
+        self._render_players = {i : -1 for i in range(self.max_players)}
         projection = self.renderer.get_projection()
         view_matrix = self.renderer.get_view_matrix()
         local_transforms = projection @ view_matrix @ player_transforms
@@ -570,14 +642,14 @@ class Viewer:
         scene_players, = active_players.shape
         for player_id in best_players: #range(scene_players):
             if active_players[player_id] & in_bounds[player_id]:
-                render_players[next_render_id] = player_id
+                self._render_players[next_render_id] = player_id
                 next_render_id += 1
-                if next_render_id not in render_players:
+                if next_render_id not in self._render_players:
                     break
         
         #for player_id in range(self.max_players):
         #for render_id, player_id in render_players.items():
-        for render_id, player_id in render_players.items():
+        for render_id, player_id in self._render_players.items():
             player_name = f'player_{render_id}'
             eye_white_name = f'player_eye_white_{render_id}'
             eye_pupil_name = f'player_eye_pupil_{render_id}'
@@ -594,8 +666,14 @@ class Viewer:
                 self.renderer.set_instance_transform(
                     eye_pupil_name, player_transforms[player_id])
                 
-                player_color = self.get_player_color(
-                    player_id, self.params, self.report)
+                if (self.selected_player is not None and
+                    player_id == self.selected_player
+                ):
+                    player_color = np.array([1., 0., 0.])
+                else:
+                    player_color = self.get_player_color(
+                    #    player_id, self.params, self.report)
+                        player_id, self.report)
                 material_name = f'player_material_{render_id}'
                 self.renderer.set_material_flat_color(
                     material_name, player_color)
@@ -636,7 +714,7 @@ class Viewer:
         self._update_sun_position()
         if self.get_terrain_texture is not None:
             texture = self.get_terrain_texture(
-                self.params,
+                #self.params,
                 self.report,
                 self.terrain_texture_resolution,
                 self.display_mode,
@@ -647,7 +725,8 @@ class Viewer:
             )
         
         if self.get_terrain_map:
-            self.terrain_map = self.get_terrain_map(self.params, self.report)
+            #self.terrain_map = self.get_terrain_map(self.params, self.report)
+            self.terrain_map = self.get_terrain_map(self.report)
             (
                 terrain_vertices,
                 terrain_normals,
@@ -664,7 +743,8 @@ class Viewer:
             )
         
         if self.get_water_map:
-            water_map = self.get_water_map(self.params, self.report)
+            #water_map = self.get_water_map(self.params, self.report)
+            water_map = self.get_water_map(self.report)
             self.total_height_map = self.terrain_map + water_map
             (
                 water_vertices,
@@ -687,11 +767,11 @@ class Viewer:
     
     def _player_transform(self, player_x, player_r):
         height, width = self.world_size
-        zy = player_x[..., 0] // self.mesh_spacing
-        zx = player_x[..., 1] // self.mesh_spacing
+        zy = (player_x[..., 0] // self.mesh_spacing).astype(jnp.int32)
+        zx = (player_x[..., 1] // self.mesh_spacing).astype(jnp.int32)
         z = self.total_height_map[zy, zx] + PLAYER_RADIUS
-        y = player_x[..., 0] - height/2.  #y - height/2.
-        x = player_x[..., 1] - width/2. #x - width/2.
+        y = player_x[..., 0] - height/2. + 0.5
+        x = player_x[..., 1] - width/2. + 0.5
         
         cs = np.array((( 1, 0), ( 0, 1), (-1, 0), ( 0,-1)))[player_r]
         c = cs[...,0]
@@ -714,7 +794,7 @@ class Viewer:
         
         return self.upright @ transforms
     
-    def begin(self):
+    def start(self):
         self.window.show_window()
         self.window.enable_window()
         
@@ -726,10 +806,12 @@ class Viewer:
         glfw_context.terminate()
     
     def render(self):
-        #instances = ['terrain', 'tmp_sphere']
         fbw, fbh = self.window.framebuffer_size()
         self.renderer.viewport_scissor(0,0,fbw,fbh)
-        self.renderer.color_render(flip_y=False)
+        if self._ctrl_down:
+            self.renderer.mask_render(flip_y=False)
+        else:
+            self.renderer.color_render(flip_y=False)
     
     def key_callback(self, window, key, scancode, action, mods):
         # 0-9 sets various display modes
@@ -737,15 +819,21 @@ class Viewer:
             self.display_mode = (key - 48)
             print(f'display mode: {self.display_mode}')
             self.change_step(self.current_step)
+        # -
         if action == glfw.PRESS and key == 45:
             self.step_size = max(1, self.step_size-1)
             print(f'step size: {self.step_size}')
+        # +
         if action == glfw.PRESS and key == 61:
             self.step_size += 1
             print(f'step size: {self.step_size}')
+        # shift
         if key in (340, 344):
             self._shift_down = action
-        
+        # ctrl
+        if key in (341, 345):
+            self._ctrl_down = action
+        # a
         if key == 65 and action:
              self.show_players = not self.show_players
              self.change_step(self.current_step)

@@ -1,0 +1,17 @@
+_bugparam_type_: BugParams
+
+world_size: [1024, 1024]
+max_players: 16384
+include_water: true
+include_energy: true
+include_biomass: true
+levels: 0
+zero_water_damage: 0.1
+
+body_size_energy_cost: 0.01
+brain_size_energy_cost: 0.01
+move_energy_cost: 0.01
+climb_energy_cost: 0.01
+birth_energy_cost: 0.01
+
+photosynthesis_energy_gain: 0.005

@@ -1,7 +1,7 @@
 from dirt.gridworld2d.geology import fractal_noise
 from dirt.gridworld2d.water import flow_step_twodir
 from dirt.gridworld2d.erosion import simulate_erosion_step, reset_erosion_status
-#from dirt.gridworld2d.naive_weather_system import weather_step
+# from dirt.gridworld2d.naive_weather_system import weather_step
 import jax.random as jrng
 import jax.numpy as jnp
 import jax
@@ -36,7 +36,8 @@ def get_day_status(
 def get_angle(
     day_length: int,
     day_light_length: int,
-    time: int
+    time: int,
+    season_angle: float = 0.0
 ) -> float:
     '''
     Based on the status of the day and the time now, determine the angle of the light
@@ -45,9 +46,9 @@ def get_angle(
     '''
     t = (time % day_length)
     frac = t / day_length
-    angle = 2 * jnp.pi * frac
-    return angle
-    
+    day_angle = 2 * jnp.pi * frac
+    return day_angle, season_angle
+
 def terrain_gradient(
     terrain: jnp.ndarray
 ) -> jnp.ndarray:
@@ -73,21 +74,26 @@ def light_step(
     day_length: int,
     #altitude: jnp.array,
     normals : jnp.array,
-    light_strength: float,
+    #light_strength: float,
     day_light_length: int,
     time: int,
+    season_angle: float = 0.0,
     night_effect = 0.1
 ) -> jnp.ndarray:
     '''
-    light_strength: determined by the distance between the terrain and the Sun
+    Instead of using light strength as a hyperparamter, we could represent the strength with season angle and distance from the sun
 
     returns the light of every pixel
 
     Get the Idea from website: https://learnopengl.com/Lighting/Basic-Lighting
     '''
-    angle = get_angle(day_length, day_light_length, time)
+    day_angle, season_angle = get_angle(day_length, day_light_length, time, season_angle)
     #light_direction = jnp.array([jnp.cos(angle), jnp.sin(angle), 0.0])
-    light_direction = jnp.array([jnp.cos(angle), 0., jnp.sin(angle)])
+    light_direction = jnp.array([
+        jnp.cos(day_angle) * jnp.cos(season_angle),  # x
+        jnp.sin(season_angle),                      # y（仰角/高度）
+        jnp.sin(day_angle) * jnp.cos(season_angle)  # z
+    ])
     #normals = terrain_gradient(altitude)
     light_direction = light_direction.reshape(1, 1, 3).astype(normals.dtype)
     dot_products = jnp.einsum('ijk,ijk->ij', normals, light_direction)
@@ -208,7 +214,9 @@ def simulate_full_weather_day(
     night_effect: float, 
     water_effect: float, 
     rain_effect: float, 
-    evaporation_effect: float
+    evaporation_effect: float,
+    year_length: int,
+    max_season_angle: float
 ) -> jnp.ndarray:
     '''
     Simulate the light and temperature change in one full weather day
@@ -217,6 +225,9 @@ def simulate_full_weather_day(
         terrain, water, current_evaporation, rain_status, current_erosion, day_status, light_intensity, current_temperature = carry
         
         current_time = step_idx
+        # 0. Update the season angle based on the time
+        total_steps_per_year = year_length * day_length
+        season_angle = max_season_angle * jnp.sin(2 * jnp.pi * current_time / total_steps_per_year)
         # 1. Water flow
         water = flow_step_twodir(terrain, water, flow_rate)
         
@@ -226,7 +237,7 @@ def simulate_full_weather_day(
 
         # 3. light
         new_day_status = get_day_status(day_length, light_length, current_time)
-        new_light_intensity = light_step(day_length, terrain, water, light_strength, light_length, current_time) #Porblem of getting None
+        new_light_intensity = light_step(day_length, terrain, water, light_strength, light_length, current_time, season_angle=season_angle)
 
         # 4. Temperature
         new_temperature = temperature_step(day_length, current_time, water, current_temperature, rain_status, light_intensity, current_evaporation, day_light_length, night_effect, water_effect, rain_effect, evaporation_effect)
@@ -258,6 +269,8 @@ if __name__ == '__main__':
     terrain = fractal_noise(world_size=world_size, octaves = 6, persistence = 0.5, lacunarity = 2.0, key = key)
     water = jnp.full(world_size, water_initial)
     time = 500
+    year_length = 360
+    max_season_angle = 0.41 # approximately 23.5 degrees, Earth's axial tilt
     rain_initial = jnp.full(world_size, rain_initial_value)
     evaporation_initial = jnp.full(world_size, evaporation_initial_value)
     light_intensity_initial = jnp.full(world_size, light_intensity_initial_value)
@@ -282,6 +295,7 @@ if __name__ == '__main__':
         erosion_initial, rain_initial, evaporation_initial, day_status_initial, light_intensity_initial, day_light_length,
         evaporate_rate, air_up_limit, air_down_limit, rain,
         flow_rate, erosion_ratio, erosion_endurance, light_strength, light_length, night_effect, water_effect, rain_effect, evaporation_effect
+        , year_length, max_season_angle
     )
     total_water = final_water + left_evaporation
     print(terrain.sum()) # -349.00833

@@ -1,4 +1,4 @@
-from typing import Tuple, TypeVar
+from typing import Tuple, Optional
 
 import jax
 import jax.numpy as jnp
@@ -6,331 +6,487 @@ import jax.random as jrng
 
 import chex
 
-from mechagogue.static_dataclass import static_dataclass
-from mechagogue.dp.pomdp import pomdp
+from mechagogue.tree import tree_getitem
+from mechagogue.static import static_data, static_functions
+from mechagogue.dp.pomdp import make_pomdp
+from mechagogue.tree import tree_getitem
 
-from dirt.gridworld2d import dynamics, observations, spawn
-from dirt.wrappers import make_step_auto_reset
+from dirt.constants import (
+    ROCK_COLOR,
+    WATER_COLOR,
+    ICE_COLOR,
+    ENERGY_TINT,
+    BIOMASS_TINT,
+    BIOMASS_AND_ENERGY_TINT,
+    DEFAULT_FLOAT_DTYPE,
+)
+import dirt.gridworld2d.grid as grid
+from dirt.gridworld2d.landscape import (
+    LandscapeParams,
+    LandscapeState,
+    make_landscape,
+)
+from dirt.bug import (
+    BugParams,
+    BugTraits,
+    BugObservation,
+    BugState,
+    make_bugs,
+    action_type_names,
+)
+from dirt.gridworld2d.grid import read_grid_locations, set_grid_shape
+from dirt.gridworld2d.observations import first_person_view, noisy_sensor
+from dirt.visualization.image import jax_to_image
 
-TNomParams = TypeVar('TNomParams', bound='NomParams')
-TNomState = TypeVar('TNomState', bound='NomState')
-TNomAction = TypeVar('TNomAction', bound='NomAction')
-TNomObservation = TypeVar('TNomObservation', bound='NomObservation')
-
-@static_dataclass
+@static_data
 class NomParams:
-    '''
-    Configuration parameters for the Nom environment that will remain constant
-    for each episode.
-    '''
-    world_size : Tuple = (32,32)
+    world_size : Tuple[int, int] = (16, 16)
     
-    mean_initial_food : float = 32
-    max_initial_food : float = 36
-    mean_food_growth : float = 2
-    max_food_growth : float = 4
+    initial_players : int = 1
+    max_players : int = 1
     
-    initial_energy : float = 1.
-    max_energy : float = 3.
-    move_metabolism : float = 0.2
-    wait_metabolism : float = 0.1
+    include_rock : bool = False
+    include_water : bool = False
+    include_energy : bool = True
+    include_biomass : bool = False
+    include_temperature : bool = False
+    include_rain : bool = False
+    include_light : bool = False
     
-    view_width : int = 5
-    view_distance : int = 5
+    # observations
+    max_view_distance : int = 10
+    max_view_back_distance : int = 10
+    max_view_width : int = 21
+    
+    # reporting
+    report_bug_actions : bool = False
+    report_bug_internals : bool = False
+    report_bug_traits : bool = False
+    report_object_grid : bool = False
+    
+    landscape : LandscapeParams = LandscapeParams()
+    bugs : BugParams = BugParams()
 
-@static_dataclass
+@static_data
 class NomState:
-    '''
-    State information about a single Nom environment.
-    '''
-    food_grid : jnp.ndarray
-    agent_x : jnp.ndarray
-    agent_r : jnp.ndarray
-    agent_energy : jnp.ndarray
-    
-    @property
-    def agent_alive(self):
-        return self.agent_energy > 0.
+    landscape : LandscapeState
+    bugs : BugState
+    bug_traits : BugTraits = BugTraits.default((1,))
 
-@static_dataclass
-class NomAction:
-    '''
-    An action in the Nom environment.
-    '''
-    forward : bool
-    rotate : int
+NomTraits = BugTraits
 
-@static_dataclass
-class NomObservation:
-    '''
-    An observation in the Nom environment.
-    '''
-    view : jnp.ndarray
-    energy : jnp.ndarray
-    
-    @classmethod
-    def zero(cls, params: TNomParams):
-        return NomObservation(
-            view=jnp.zeros(
-                (params.view_distance, params.view_width),
-                dtype=jnp.int32,
-            ),
-            energy=jnp.zeros(1, dtype=jnp.float32),
-        )
-
-def nom_init(key, params):
-    '''
-    Reset function for the Nom environment.  Returns a Nom environment
-    observation and state representing the start of a new episode.
-    
-    When used inside a jit compiled program, params must come from a static
-    variable as it controls the shapes of various arrays.
-    '''
-    # initialize the agent
-    key, xr_key = jrng.split(key)
-    agent_x, agent_r = spawn.unique_xr(xr_key, 1, params.world_size)
-    agent_x = agent_x[0]
-    agent_r = agent_r[0]
-    agent_energy = jnp.full((), params.initial_energy)
-    
-    # initialize the food grid
-    key, foodkey = jrng.split(key)
-    food_grid = spawn.poisson_grid(
-        foodkey,
-        params.mean_initial_food,
-        params.max_initial_food,
-        params.world_size,
-    )
-    
-    state =  NomState(food_grid, agent_x, agent_r, agent_energy)
-    
-    return state
-
-def nom_transition(
-    key: chex.PRNGKey,
-    params: TNomParams,
-    state: TNomState,
-    action: TNomAction,
-) -> TNomState :
-    '''
-    Transition function for the Nom environment.  Returns a new state given
-    the environment params, a previous state and an action.
-    
-    When used inside a jit compiled program, params must come from a static
-    variable as it controls the shapes of various arrays.
-    '''
-    
-    # move
-    agent_x, agent_r = dynamics.forward_rotate_step(
-        state.agent_x,
-        state.agent_r,
-        action.forward,
-        action.rotate,
-        world_size=params.world_size,
-    )
-    
-    # eat
-    eaten_food = state.food_grid[agent_x[...,0], agent_x[...,1]]
-    agent_energy = jnp.clip(
-        state.agent_energy + eaten_food, 0, params.max_energy)
-    food_grid = state.food_grid.at[agent_x[...,0], agent_x[...,1]].set(False)
-    
-    # digest
-    moved = action.forward | (action.rotate != 0)
-    agent_energy = (
-        agent_energy -
-        moved * params.move_metabolism -
-        (1. - moved) * params.wait_metabolism
-    )
-    
-    # grow food
-    key, food_key = jrng.split(key)
-    food_grid = state.food_grid | spawn.poisson_grid(
-        food_key,
-        params.mean_food_growth,
-        params.max_food_growth,
-        params.world_size,
-    )
-
-    # compute new state
-    state = NomState(food_grid, agent_x, agent_r, agent_energy)
-    
-    return state
-
-def nom_observe(
-    key: chex.PRNGKey,
-    params: TNomParams,
-    state: TNomState,
-) -> TNomObservation :
-    '''
-    Computes the observation of a Nom environment given the environment params
-    and state.
-    
-    When used inside a jit compiled program, params must come from a static
-    variable as it controls the shapes of various arrays.
-    '''
-    view = observations.first_person_view(
-        state.agent_x,
-        state.agent_r,
-        state.food_grid.astype(jnp.uint8),
-        params.view_width,
-        params.view_distance,
-        out_of_bounds=2,
-    )
-    return NomObservation(view, state.agent_energy)
-
-def nom_reward(
-    key: chex.PRNGKey,
-    state: TNomState,
-) -> TNomState :
-    #dead = state.agent_energy <= 0
-    #reward = -(dead.astype(jnp.float32))
-    return state.agent_alive.astype(jnp.float32) - 1.
-
-def nom_terminal(
-    key: chex.PRNGKey,
-    state: TNomState,
-) -> TNomState :
-    return jnp.logical_not(state.agent_alive)
-
-def nom(
-    params : TNomParams = NomParams()
+def make_nom(
+    params : NomParams = NomParams(),
+    float_dtype=DEFAULT_FLOAT_DTYPE,
 ):
     
-    reset, step = pomdp(
-        params,
-        nom_init,
-        nom_transition,
-        nom_observe,
-        nom_reward,
-        nom_terminal,
-        reward_format='__n',
-        done_format='__n',
+    params = params.replace(
+        include_energy=True,
+        include_biomass=False,
+        include_temperature=False,
+        include_rain=False,
+        include_light=False,
+        bugs=params.bugs.replace(include_reproduction=False),
+        landscape=params.landscape.replace(
+            include_energy=True,
+            energy_fractal_mask=False,
+        )
     )
     
-    return reset, step
-
-
-#def reset(
-#    key: chex.PRNGKey,
-#    params: TNomParams,
-#) -> Tuple[TNomObservation, TNomState] :
-#    '''
-#    Reset function for the Nom environment.  Returns a Nom environment
-#    observation and state representing the start of a new episode.
-#    
-#    When used inside a jit compiled program, params must come from a static
-#    variable as it controls the shapes of various arrays.
-#    '''
-#    # initialize the agent
-#    key, xr_key = jrng.split(key)
-#    agent_x, agent_r = spawn.unique_xr(
-#        xr_key, 1, params.world_size)
-#    agent_x = agent_x[0]
-#    agent_r = agent_r[0]
-#    agent_energy = jnp.full((1,), params.initial_energy)
-#    
-#    # initialize the food grid
-#    key, foodkey = jrng.split(key)
-#    food_grid = spawn.poisson_grid(
-#        foodkey,
-#        params.mean_initial_food,
-#        params.max_initial_food,
-#        params.world_size,
-#    )
-#    
-#    state =  NomState(food_grid, agent_x, agent_r, agent_energy)
-#    obs = observe(params, state)
-#    
-#    return obs, state
-#
-#def step(
-#    key: chex.PRNGKey,
-#    params: TNomParams,
-#    state: TNomState,
-#    action: TNomAction,
-#) -> Tuple[TNomObservation, TNomState, jnp.ndarray, jnp.ndarray] :
-#    '''
-#    Transition function for the Nom environment.  Returns a new observation,
-#    state, reward and done given the environment params, a previous state
-#    and an action.
-#    
-#    When used inside a jit compiled program, params must come from a static
-#    variable as it controls the shapes of various arrays.
-#    '''
-#    
-#    # move
-#    agent_x, agent_r = dynamics.forward_rotate_step(
-#        state.agent_x,
-#        state.agent_r,
-#        action.forward,
-#        action.rotate,
-#        world_size=params.world_size,
-#    )
-#    
-#    # eat
-#    eaten_food = food_grid[agent_x[...,0], agent_x[...,1]]
-#    agent_energy = jnp.clip(
-#        state.agent_energy + eaten_food, 0, params.max_energy)
-#    food_grid = food_grid.at[agent_x[...,0], agent_x[...,1]].set(False)
-#    
-#    # digest
-#    moved = action.forward | action.rotate
-#    agent_energy = (
-#        agent_energy -
-#        moved * params.move_metabolism -
-#        ~moved * params.wait_metabolism
-#    )
-#
-#    # grow food
-#    key, food_key = jrng.split(key)
-#    food_grid = state.food_grid | spawn.poisson_grid(
-#        food_key,
-#        params.mean_food_growth,
-#        params.max_food_growth,
-#        params.world_size,
-#    )
-#
-#    # compute new state
-#    state = NomState(food_grid, agent_x, agent_r, agent_energy)
-#    
-#    # compute observation
-#    obs = observe(params, state)
-#    
-#    # compute reward and done
-#    done = agent_energy <= 0
-#    reward = -(done.astype(jnp.float32))
-#    
-#    return obs, state, reward, done
-
-def test_run(key, params, steps):
-    key, reset_key = jrng.split(key)
-    step_auto_reset = make_step_auto_reset(step, reset)
-    obs, state = reset(reset_key, params)
+    landscape = make_landscape(params.landscape, float_dtype=float_dtype)
+    bugs = make_bugs(params.bugs)
     
-    def single_step(key_obs_state, _):
-        key, obs, state = key_obs_state
-        key, action_key, step_key = jrng.split(key, 3)
-        action = NomAction.sample(action_key, state)
-        obs, state, reward, done = step_auto_reset(
-            step_key, params, state, action)
+    def init_state(
+        key : chex.PRNGKey,
+    ) -> NomState :
         
-        return (key, obs, state), None
+        key, landscape_key = jrng.split(key)
+        landscape_state = landscape.init(landscape_key)
+        
+        key, bug_key = jrng.split(key)
+        bug_state = bugs.init(bug_key)
+        bug_traits = BugTraits.default(params.max_players)
+        
+        state = NomState(landscape_state, bug_state, bug_traits)
+        
+        return state
     
-    jax.lax.scan(single_step, (key, obs, state), length=steps)
+    def transition(
+        key : chex.PRNGKey,
+        state : NomState,
+        action : int,
+        #traits : BugTraits,
+    ) -> NomState :
+        
+        # bugs
+        bug_state = state.bugs
+        
+        # - eat
+        #   do this before anything else happens so that the food an agent
+        #   observed in the last time step is still in the right location
+        # -- pull resources out of the environment
+        landscape_state = state.landscape
+        if params.include_water:
+            landscape_state, bug_water = landscape.take_water(
+                landscape_state, bug_state.x)
+        else:
+            bug_water = None
+        if params.include_energy:
+            landscape_state, bug_energy = landscape.take_energy(
+                landscape_state, bug_state.x)
+        else:
+            bug_energy = None
+        if params.include_biomass:
+            landscape_state, bug_biomass = landscape.take_biomass(
+                landscape_state, bug_state.x)
+        else:
+            bug_biomass = None
+        # -- feed the resources to the bugs
+        bug_state, leftover_water, leftover_energy, leftover_biomass = bugs.eat(
+            bug_state,
+            action,
+            state.bug_traits,
+            external_water=bug_water,
+            external_energy=bug_energy,
+            external_biomass=bug_biomass,
+        )
+        # -- put the leftovers back in the environment
+        if params.include_water:
+            landscape_state = landscape.add_water(
+                landscape_state, bug_state.x, leftover_water)
+        if params.include_energy:
+            landscape_state = landscape.add_energy(
+                landscape_state, bug_state.x, leftover_energy)
+        if params.include_biomass:
+            landscape_state = landscape.add_biomass(
+                landscape_state, bug_state.x, leftover_biomass)
+        
+        # - metabolism
+        bug_state, evaporated_metabolism = bugs.metabolism(
+            bug_state, state.bug_traits)
+        
+        # - move bugs
+        key, move_key = jrng.split(key)
+        altitude = landscape.get_altitude(landscape_state)
+        bug_state, evaporated_move = bugs.move(
+            move_key,
+            bug_state,
+            action,
+            state.bug_traits,
+            altitude,
+            params.landscape.terrain_downsample,
+        )
+        
+        # - birth and death
+        (
+            bug_state,
+            expelled_x,
+            evaporated_birth,
+            expelled_water,
+            expelled_energy,
+            expelled_biomass,
+        ) = bugs.birth_and_death(bug_state, action, state.bug_traits)
+        
+        # - add evaporated water to the atmosphere/ground
+        if params.include_water:
+            evaporated_moisture = (
+                evaporated_move + evaporated_metabolism + evaporated_birth)
+            if params.landscape.include_rain:
+                landscape_state = landscape.add_moisture(
+                    landscape_state, expelled_x, evaporated_moisture)
+            else:
+                landscape_state = landscape.add_water(
+                    landscape_state, expelled_x, evaporated_moisture)
+            landscape_state = landscape.add_water(
+                landscape_state, expelled_x, expelled_water)
+        if params.include_energy:
+            landscape_state = landscape.add_energy(
+                landscape_state, expelled_x, expelled_energy)
+        if params.include_biomass:
+            landscape_state = landscape.add_biomass(
+                landscape_state, expelled_x, expelled_biomass)
+        
+        # natural landscape processes
+        key, landscape_key = jrng.split(key)
+        landscape_state = landscape.step(
+            landscape_key, landscape_state)
+        
+        state = state.replace(
+            landscape=landscape_state,
+            bugs=bug_state,
+            bug_traits=state.bug_traits,
+        )
+        
+        return state
     
-
-if __name__ == '__main__':
-    import time
+    def observe(
+        key : chex.PRNGKey,
+        state : NomState,
+    ) -> BugObservation:
+        # visual
+        # - rgb
+        rgb = landscape.render_rgb(
+            state.landscape,
+            params.world_size,
+            spot_x=state.bugs.x,
+            spot_color=state.bug_traits.color,
+        )
+        rgb_view = first_person_view(
+            state.bugs.x,
+            state.bugs.r,
+            rgb,
+            params.max_view_width,
+            params.max_view_distance,
+            params.max_view_back_distance,
+        )
+        
+        # - relative altitude
+        if params.include_rock:
+            altitude = state.landscape.rock
+        else:
+            altitude = jnp.zeros((1,1), dtype=float_dtype)
+        if params.include_water:
+            altitude += state.landscape.water
+        bug_altitude = read_grid_locations(
+            altitude, state.bugs.x, params.landscape.terrain_downsample)
+        altitude_view = first_person_view(
+            state.bugs.x,
+            state.bugs.r,
+            altitude,
+            params.max_view_width,
+            params.max_view_distance,
+            params.max_view_back_distance,
+            downsample=params.landscape.terrain_downsample,
+        )
+        altitude_view = altitude_view - bug_altitude[:,None,None]
+        
+        # audio/smell
+        audio = read_grid_locations(
+            state.landscape.audio,
+            state.bugs.x,
+            params.landscape.audio_downsample,
+        )
+        smell = read_grid_locations(
+            state.landscape.smell,
+            state.bugs.x,
+            params.landscape.smell_downsample,
+        )
+        
+        # weather
+        wind = state.landscape.wind / state.landscape.max_wind
+        wind = jnp.repeat(wind[None,...], repeats=params.max_players, axis=0)
+        if params.include_temperature:
+            temperature = read_grid_locations(
+                state.landscape.temperature,
+                state.bugs.x,
+                params.landscape.temperature_downsample,
+            )
+        else:
+            temperature = 0.
+        
+        # external resources
+        if params.include_water:
+            '''
+            external_water = read_grid_locations(
+                state.landscape.water,
+                state.bugs.x,
+                params.landscape.terrain_downsample,
+            )
+            '''
+            external_water = landscape.get_water(state.landscape, state.bugs.x)
+        else:
+            external_water = None
+        if params.include_energy:
+            external_energy = read_grid_locations(
+                state.landscape.energy,
+                state.bugs.x,
+                params.landscape.resource_downsample,
+            )
+        else:
+            external_energy = None
+        if params.include_biomass:
+            external_biomass = read_grid_locations(
+                state.landscape.biomass,
+                state.bugs.x,
+                params.landscape.resource_downsample,
+            )
+        else:
+            external_biomass = None
+        
+        obs = bugs.observe(
+            key,
+            state.bugs,
+            state.bug_traits,
+            rgb_view,
+            altitude_view,
+            audio,
+            smell,
+            wind,
+            temperature,
+            external_water,
+            external_energy,
+            external_biomass,
+        )
+        return tree_getitem(obs, 0)
     
-    key = jrng.key(1234)
-    keys = jrng.split(key, 16)
-    params = NomParams()
-    steps = 1000
+    def reward(key, state, action, next_state):
+        return jnp.where(
+            next_state.bugs.energy > state.bugs.energy, 1., 0.).flatten()
     
-    jit_test_run = jax.jit(test_run, static_argnums=(1,2))
+    def terminal(state):
+        dead_bug = (state.bugs.hp[0] <= 0.)
+        no_energy = state.landscape.energy.sum() == 0
+        return dead_bug | no_energy
     
-    t0 = time.time()
-    jit_test_run(key, params, steps)
-    t1 = time.time()
-    print(steps/(t1-t0), 'hz')
+    def visualizer_terrain_texture(report, shape, display_mode):
+        if display_mode in (1,2,3,4,5):
+            return landscape.render_display_mode(
+                report,
+                shape,
+                display_mode,
+                spot_x=report.player_x,
+                spot_color=report.player_color,
+                convert_to_image=True,
+            )
+        elif display_mode == 6 and params.report_object_grid:
+            occupied = report.object_grid != -1
+            rgb = jnp.stack((occupied, occupied, occupied), axis=-1)
+            rgb = set_grid_shape(rgb, *shape, preserve_mass=False)
+            return jax_to_image(rgb)
+        else:
+            rgb = jnp.zeros((*shape, 3), dtype=float_dtype)
+            return jax_to_image(rgb)
+    
+    @static_data
+    class VisualizerReport:
+        if params.include_rock:
+            rock : jnp.ndarray = False
+        if params.include_water:
+            water : jnp.ndarray = False
+        if params.include_light:
+            light : jnp.ndarray = False
+        if params.include_temperature:
+            temperature : jnp.ndarray = False
+        if params.include_rain:
+            moisture : jnp.ndarray = False
+            raining : jnp.ndarray = False
+        if params.include_energy:
+            energy : jnp.ndarray = False
+        if params.include_biomass:
+            biomass : jnp.ndarray = False
+     
+        players : jnp.ndarray = False
+        player_x : jnp.ndarray = False
+        player_r : jnp.ndarray = False 
+        object_grid : jnp.ndarray = False
+        player_color : jnp.ndarray = False
+        
+        if params.report_bug_actions:
+            actions : jnp.ndarray = False
+        if params.report_bug_internals:
+            age : jnp.ndarray = False
+            hp : jnp.ndarray = False
+            if params.include_water:
+                player_water : jnp.ndarray = False
+            if params.include_energy:
+                player_energy : jnp.ndarray = False
+            if params.include_biomass:
+                player_biomass : jnp.ndarray = False
+        #if params.report_bug_traits:
+        #    traits : BugTraits = BugTraits.default(())
+    
+    def default_visualizer_report():
+        return VisualizerReport()
+    
+    def make_visualizer_report(state, actions):
+        report = VisualizerReport(
+            players=active_players(state),
+            player_x=state.bugs.x,
+            player_r=state.bugs.r,
+            player_color=state.bug_traits.color,
+        )
+        if params.include_rock:
+            report = report.replace(rock=state.landscape.rock)
+        if params.include_water:
+            report = report.replace(water=state.landscape.water)
+        if params.include_light:
+            report = report.replace(light=state.landscape.light)
+        if params.include_temperature:
+            report = report.replace(temperature=state.landscape.temperature)
+        if params.include_rain:
+            report = report.replace(
+                moisture=state.landscape.moisture,
+                raining=state.landscape.raining,
+            )
+        if params.include_energy:
+            report = report.replace(energy=state.landscape.energy)
+        if params.include_biomass:
+            report = report.replace(biomass=state.landscape.biomass)
+        
+        if params.report_bug_actions:
+            report = report.replace(actions=actions)
+        if params.report_bug_internals:
+            report = report.replace(age=state.bugs.age)
+            report = report.replace(hp=state.bugs.hp)
+            if params.include_water:
+                report = report.replace(player_water=state.bugs.water)
+            if params.include_energy:
+                report = report.replace(player_energy=state.bugs.energy)
+            if params.include_biomass:
+                report = report.replace(player_biomass=state.bugs.biomass)
+        
+        #if params.report_bug_traits:
+        #    report = report.replace(traits=state.bug_traits)
+        
+        if params.report_object_grid:
+            report = report.replace(object_grid=state.bugs.object_grid)
+        
+        return report
+    
+    def print_player_info(player_id, report):
+        print(f'ID:        {player_id}')
+        if params.report_bug_actions:
+            action_type, action_primitive = bugs.get_action_type_and_primitive(
+                report.actions[player_id]) 
+            print(
+                f'  actions: '
+                f'{action_type_names[int(action_type)]} '
+                f'{action_primitive} '
+                f'({report.actions[player_id]})'
+            )
+        if params.report_bug_internals:
+            print(f'  age:     {report.age[player_id]}')
+            print(f'  hp:      {report.hp[player_id]}')
+            if params.include_water:
+                print(f'  water:   {report.player_water[player_id]}')
+            if params.include_energy:
+                print(f'  energy:  {report.player_energy[player_id]}')
+            if params.include_biomass:
+                print(f'  biomass: {report.player_biomass[player_id]}')
+        
+        #if params.report_bug_traits:
+        #    bug_traits = tree_getitem(report.traits, player_id)
+        #    for key, value in bug_traits.__dict__.items():
+        #        if not callable(value):
+        #            print(f'  {key}: {value}')
+    
+    game = make_pomdp(
+        init_state,
+        transition,
+        observe,
+        terminal,
+        reward,
+        #mutate_traits=bugs.mutate_traits,
+        #empty_family_tree_state=bugs.empty_family_tree_state,
+        #visualizer_terrain_map=landscape.visualizer_terrain_map,
+        #visualizer_terrain_texture=visualizer_terrain_texture,
+        #default_visualizer_report=default_visualizer_report,
+        #make_visualizer_report=make_visualizer_report,
+        #print_player_info=print_player_info,
+        #num_actions=bugs.num_actions,
+        #biomass_requirement=bugs.biomass_requirement,
+    )
+    
+    game.num_actions = bugs.num_actions
+    
+    return game

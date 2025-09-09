@@ -1,6 +1,7 @@
 from typing import Tuple
 
 import jax.numpy as jnp
+import jax.random as jrng
 
 from dirt.gridworld2d.dynamics import rotate
 
@@ -10,6 +11,8 @@ def local_view(
     observation_grid : jnp.ndarray,
     view_shape : Tuple[Tuple[int, int], Tuple[int, int]],
     subsample : int = 1,
+    downsample : int = 1,
+    downsample_scale : bool = True,
     out_of_bounds : int | float | jnp.ndarray = 0,
 ) -> jnp.ndarray :
     '''
@@ -41,11 +44,15 @@ def local_view(
     # convert negative values in global_rc to out-of-bound indices
     too_big = max(observation_grid.shape)
     global_rc = jnp.where(global_rc >= 0, global_rc, too_big)
+    global_rc = global_rc // downsample
     
     # cut out regions of the observation grid corresponding to the computed
     # rows and columns
     fpv = observation_grid.at[global_rc[...,0], global_rc[...,1]].get(
         mode='fill', fill_value=out_of_bounds)
+    
+    if downsample_scale:
+        fpv = fpv / (downsample**2)
     
     # return
     return fpv
@@ -58,6 +65,8 @@ def first_person_view(
     view_distance : int,
     view_back_distance : int = 0,
     subsample : int = 1,
+    downsample : int = 1,
+    downsample_scale : bool = True,
     out_of_bounds : int | float | jnp.ndarray = 0,
 ) -> jnp.ndarray :
     '''
@@ -75,15 +84,23 @@ def first_person_view(
         outside the viewing area
     '''
     w = (view_width-1)//2
-    view_shape = ((-view_back_distance,-w), (view_distance,w+1))
+    view_shape = ((-view_back_distance,-w), (view_distance+1,w+1))
     return local_view(
         x,
         r,
         observation_grid,
         view_shape,
         subsample=subsample,
+        downsample=downsample,
+        downsample_scale=downsample_scale,
         out_of_bounds=out_of_bounds,
     )
+
+def noisy_sensor(key, x, noise, minval=0., maxval=1.):
+    while len(noise.shape) < len(x.shape):
+        noise = noise[...,None]
+    r = jrng.uniform(key, x.shape, dtype=x.dtype, minval=minval, maxval=maxval)
+    return x * (1.-noise) + r * noise
 
 if __name__ == '__main__':
     observation_grid = jnp.arange(5*5).reshape(5,5)

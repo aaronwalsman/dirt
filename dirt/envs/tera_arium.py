@@ -1,13 +1,16 @@
-from typing import Tuple
+from typing import Tuple, Optional
 
 import jax
 import jax.numpy as jnp
 import jax.random as jrng
+#from jax.experimental import checkify
 
 import chex
 
-from mechagogue.static import static_data
+from mechagogue.tree import tree_getitem
+from mechagogue.static import static_data, static_functions
 from mechagogue.dp.poeg import make_poeg
+from mechagogue.debug import conditional_print
 
 from dirt.constants import (
     ROCK_COLOR,
@@ -16,27 +19,76 @@ from dirt.constants import (
     ENERGY_TINT,
     BIOMASS_TINT,
     BIOMASS_AND_ENERGY_TINT,
+    DEFAULT_FLOAT_DTYPE,
 )
-from dirt.envs.landscape import (
+import dirt.gridworld2d.grid as grid
+from dirt.gridworld2d.landscape import (
     LandscapeParams,
     LandscapeState,
     make_landscape,
 )
 from dirt.bug import (
     BugParams,
-    BugAction,
     BugTraits,
+    BugObservation,
     BugState,
     make_bugs,
+    action_type_names,
 )
-from dirt.consumable import Consumable
+from dirt.gridworld2d.grid import (
+    read_grid_locations, set_grid_shape, grid_mean_to_sum, upsample_grid)
+from dirt.gridworld2d.observations import first_person_view, noisy_sensor
+import dirt.gridworld2d.spawn as spawn
+from dirt.visualization.image import jax_to_image
 
 @static_data
 class TeraAriumParams:
+    verbose : bool = True
+    
     world_size : Tuple[int, int] = (1024, 1024)
+    spatial_offset : Tuple[int, int] = (0,0)
+    max_size : Tuple[int, int] = None
+    
+    landscape_seed : int = None
+    bug_seed : int = None
     
     initial_players : int = 1024
     max_players : int = 16384
+    
+    include_rock : bool = True
+    include_water : bool = True
+    include_energy : bool = True
+    include_biomass : bool = True
+    include_wind : bool = True
+    include_temperature : bool = True
+    include_rain : bool = True
+    include_light : bool = True
+    include_audio : bool = True
+    audio_channels : int = 8
+    include_smell : bool = True
+    smell_channels : int = 8
+    
+    include_expell_actions : bool = True
+    include_violence : bool = True
+    
+    # observations
+    max_view_distance : int = 5
+    max_view_back_distance : int = 5
+    max_view_width : int = 11
+    include_compass : bool = True
+    vision_includes_rgb : bool = True
+    vision_includes_relative_altitude : bool = True
+    
+    # corrections
+    auto_correct_biomass : bool = False
+    biomass_correction_sites : int = 32
+    biomass_correction_overshoot : float = 1
+    
+    # reporting
+    report_bug_actions : bool = False
+    report_bug_internals : bool = False
+    report_bug_traits : bool = False
+    report_object_grid : bool = False
     
     landscape : LandscapeParams = LandscapeParams()
     bugs : BugParams = BugParams()
@@ -45,194 +97,521 @@ class TeraAriumParams:
 class TeraAriumState:
     landscape : LandscapeState
     bugs : BugState
-
-@static_data
-class TeraAriumObservation:
-    # grid external
-    rgb : jnp.ndarray
-    height : jnp.ndarray
+    bug_traits : BugTraits
     
-    # single channel external
-    audio : jnp.ndarray
-    smell : jnp.ndarray
-    taste : Consumable
-    moisture : jnp.ndarray
-    wind : jnp.ndarray
-    temperature : jnp.ndarray
-    
-    # single channel internal   
-    health : jnp.ndarray
-    water : jnp.ndarray
-    energy : jnp.ndarray
-    biomass : jnp.ndarray
+    initial_biomass : jnp.array
+    step_biomass_correction : jnp.array
 
-TeraAriumAction = BugAction
 TeraAriumTraits = BugTraits
 
-def make_tera_arium(params : TeraAriumParams = TeraAriumParams()):
+def make_tera_arium(
+    params : TeraAriumParams = TeraAriumParams(),
+    float_dtype=DEFAULT_FLOAT_DTYPE,
+):
     
-    landscape = make_landscape(params.landscape)
+    landscape = make_landscape(params.landscape, float_dtype=float_dtype)
     bugs = make_bugs(params.bugs)
     
-    def init(
+    def init_state(
         key : chex.PRNGKey,
-        initial_players : int,
-        parent_traits : BugTraits,
-        bug_x : Optional[jnp.ndarray],
-        bug_r : Optional[jnp.ndarray],
     ) -> TeraAriumState :
         
-        key, landscape_key = jrng.split(key)
+        if params.landscape_seed is None:
+            key, landscape_key = jrng.split(key)
+        else:
+            landscape_key = jrng.key(params.landscape_seed)
         landscape_state = landscape.init(landscape_key)
         
-        key, bug_key = jrng.split(key)
-        bug_state = init_bugs(
-            bug_key, initial_players, parent_traits, x=bug_x, r=bug_r)
+        if params.bug_seed is None:
+            key, bug_key = jrng.split(key)
+        else:
+            bug_key = jrng.key(params.bug_seed)
+        bug_state = bugs.init(bug_key)
+        bug_traits = BugTraits.default(params.max_players)
         
-        state = TeraAriumState(landscape_state, bug_state)
+        initial_biomass = (
+            jnp.sum(landscape_state.biomass, dtype=jnp.float32) +
+            jnp.sum(bug_state.biomass, dtype=jnp.float32)
+        )
+        
+        state = TeraAriumState(
+            landscape_state,
+            bug_state,
+            bug_traits,
+            initial_biomass = initial_biomass,
+            step_biomass_correction = jnp.zeros((), dtype=jnp.float32)
+        )
         
         return state
-    
-    def observe(
-        key : chex.PRNGKey,
-        state : TeraAriumState,
-    ) -> TeraAriumObservation:
-        # TODO
-        # player internal state
-        
-        # player external observation
-        return None
     
     def transition(
         key : chex.PRNGKey,
         state : TeraAriumState,
-        action : BugAction,
+        action : int,
         traits : BugTraits,
     ) -> TeraAriumState :
         
         # bugs
         bug_state = state.bugs
         
-        max_players = state.bugs.family_tree.parents.shape[0]
-        deaths = jnp.zeros(max_players, dtype=jnp.bool)
-        
         # - eat
         #   do this before anything else happens so that the food an agent
         #   observed in the last time step is still in the right location
         # -- pull resources out of the environment
         landscape_state = state.landscape
-        landscape_state, bug_water = landscape.take_water(
-            landscape_state, bug_state.x)
-        landscape_state, bug_energy = landscape.take_energy(
-            landscape_state, bug_state.x)
-        landscape_state, bug_biomass = landscape.take_biomass(
-            landscape_state, bug_state.x)
-        # -- feed them to the bugs
+        if params.include_water:
+            landscape_state, bug_water = landscape.take_water(
+                landscape_state, bug_state.x)
+        else:
+            bug_water = None
+        if params.include_energy:
+            landscape_state, bug_energy = landscape.take_energy(
+                landscape_state, bug_state.x)
+        else:
+            bug_energy = None
+        if params.include_biomass:
+            landscape_state, bug_biomass = landscape.take_biomass(
+                landscape_state, bug_state.x)
+        else:
+            bug_biomass = None
+        # -- feed the resources to the bugs
         bug_state, leftover_water, leftover_energy, leftover_biomass = bugs.eat(
-            bug_state, bug_water, bug_energy, bug_biomass)
-        # -- put the leftovers back in the environment
-        landscape_state = landscape.add_water(
-            landscape_state, bug_state.x, leftover_water)
-        landscape_state = landscape.add_energy(
-            landscape_state, bug_state.x, leftover_energy)
-        landscape_state = landscape.add_biomass(
-            landscape_state, bug_state.x, leftover_biomass)
-        
-        # - fight
-        pass
-        
-        # - move bugs
-        next_bug_state = bugs.move(bug_state, action)
-        
-        # - metabolize and reproduce
-        # TODO: does this need to be all in the same place?
-        bug_state, expelled_water, expelled_energy, expelled_biomass, expelled_locations = bug_metabolism(
             bug_state,
             action,
-            next_bug_state,
             traits,
-            landscape_state.terrain,
-            landscape_state.water,
-            landscape_state.light,
+            external_water=bug_water,
+            external_energy=bug_energy,
+            external_biomass=bug_biomass,
         )
-        # -- put the expelled resources back into the landscape
-        #next_landscape_state = landscape.add_consumable(
-        #    next_landscape_state, expelled_locations, expelled)
+        # -- put the leftovers back in the environment
+        if params.include_water:
+            landscape_state = landscape.add_water(
+                landscape_state, bug_state.x, leftover_water)
+        if params.include_energy:
+            landscape_state = landscape.add_energy(
+                landscape_state, bug_state.x, leftover_energy)
+        if params.include_biomass:
+            landscape_state = landscape.add_biomass(
+                landscape_state, bug_state.x, leftover_biomass)
+        
+        # - photosynthesis
+        if params.include_light:
+            bug_light = grid.read_grid_locations(
+                state.landscape.light,
+                bug_state.x,
+                params.landscape.light_downsample,
+            )
+        else:
+            bug_light = jnp.ones((params.max_players,), dtype=float_dtype) 
+        bug_state = bugs.photosynthesis(bug_state, traits, bug_light)
+        
+        # - heal
+        bug_state = bugs.heal(bug_state, traits)
+        
+        # - metabolism
+        bug_state, evaporated_metabolism = bugs.metabolism(bug_state, traits)
+        
+        # - fight
+        key, fight_key = jrng.split(key)
+        bug_state = bugs.fight(key, bug_state, action, traits)
+        
+        # - move bugs
+        key, move_key = jrng.split(key)
+        altitude = landscape.get_altitude(landscape_state)
+        bug_state, evaporated_move = bugs.move(
+            move_key,
+            bug_state,
+            action,
+            traits,
+            altitude,
+            params.landscape.terrain_downsample,
+        )
+        
+        # - birth and death
+        (
+            bug_state,
+            expelled_x,
+            evaporated_birth,
+            expelled_water,
+            expelled_energy,
+            expelled_biomass,
+        ) = bugs.birth_and_death(bug_state, action, traits)
+        
+        # - add evaporated water to the atmosphere/ground
+        if params.include_water:
+            evaporated_moisture = (
+                evaporated_move + evaporated_metabolism + evaporated_birth)
+            if params.landscape.include_rain:
+                landscape_state = landscape.add_moisture(
+                    landscape_state, expelled_x, evaporated_moisture)
+            else:
+                landscape_state = landscape.add_water(
+                    landscape_state, expelled_x, evaporated_moisture)
+            landscape_state = landscape.add_water(
+                landscape_state, expelled_x, expelled_water)
+        if params.include_energy:
+            landscape_state = landscape.add_energy(
+                landscape_state, expelled_x, expelled_energy)
+        if params.include_biomass:
+            landscape_state = landscape.add_biomass(
+                landscape_state, expelled_x, expelled_biomass)
         
         # natural landscape processes
         key, landscape_key = jrng.split(key)
-        next_landscape_state = landscape.step(
-            landscape_key, next_landscape_state)
+        landscape_state = landscape.step(
+            landscape_key, landscape_state)
         
-        next_state = next_state.replace(
-            landscape=next_landscape_state,
-            bugs=next_bug_state
+        # fix biomass
+        '''
+        site_biomass = (
+            state.step_biomass_correction *
+            params.biomass_correction_overshoot /
+            params.biomass_correction_sites
+        )
+        key, biomass_key = jrng.split(key)
+        biomass_sites = spawn.uniform_x(
+            biomass_key,
+            params.biomass_correction_sites,
+            params.landscape.resource_downsample,
+        )
+        corrected_biomass = landscape_state.biomass.at[
+            biomass_sites[:,0], biomass_sites[:,1]].add(site_biomass)
+        landscape_state = landscape_state.replace(biomass=corrected_biomass)
+        '''
+        
+        state = state.replace(
+            landscape=landscape_state,
+            bugs=bug_state,
+            bug_traits=traits,
         )
         
-        return next_state
+        return state
+    
+    def observe(
+        key : chex.PRNGKey,
+        state : TeraAriumState,
+    ) -> BugObservation:
+        # visual
+        # - rgb
+        if params.vision_includes_rgb:
+            rgb = landscape.render_rgb(
+                state.landscape,
+                params.world_size,
+                spot_x=state.bugs.x,
+                spot_color=state.bug_traits.color,
+            )
+            rgb_view = first_person_view(
+                state.bugs.x,
+                state.bugs.r,
+                rgb,
+                params.max_view_width,
+                params.max_view_distance,
+                params.max_view_back_distance,
+            )
+        else:
+            rgb_view = None
+        
+        # - relative altitude
+        if params.vision_includes_relative_altitude:
+            '''
+            if params.include_rock:
+                altitude = state.landscape.rock.copy()
+                #altitude = jnp.zeros_like(state.landscape.rock)
+                #altitude = jnp.ones((128,128), dtype=float_dtype)
+                #slope = jnp.arange(0, 128, dtype=float_dtype)
+                #slope = slope - 64
+                #slope = slope * 4
+                #altitude = altitude * slope * 0.1
+                #altitude = grid_mean_to_sum(altitude, 4)
+            else:
+                altitude = jnp.zeros((1,1), dtype=float_dtype)
+            if params.include_water:
+                altitude += state.landscape.water
+            '''
+            
+            altitude = landscape.get_altitude(state.landscape)
+            
+            bug_altitude = read_grid_locations(
+                altitude, state.bugs.x, params.landscape.terrain_downsample)
+            altitude_view = first_person_view(
+                state.bugs.x,
+                state.bugs.r,
+                altitude,
+                params.max_view_width,
+                params.max_view_distance,
+                params.max_view_back_distance,
+                downsample=params.landscape.terrain_downsample,
+            )
+            altitude_view = altitude_view - bug_altitude[:,None,None]
+        else:
+            altitude_view = None
+        
+        # audio/smell
+        if params.include_audio:
+            audio = read_grid_locations(
+                state.landscape.audio,
+                state.bugs.x,
+                params.landscape.audio_downsample,
+            )
+        else:
+            audio = None
+        if params.include_smell:
+            smell = read_grid_locations(
+                state.landscape.smell,
+                state.bugs.x,
+                params.landscape.smell_downsample,
+            )
+        else:
+            smell = None
+        
+        # weather
+        if params.include_wind:
+            wind = state.landscape.wind / state.landscape.max_wind
+            wind = jnp.repeat(
+                wind[None,...], repeats=params.max_players, axis=0)
+        else:
+            wind = None
+        if params.include_temperature:
+            temperature = read_grid_locations(
+                state.landscape.temperature,
+                state.bugs.x,
+                params.landscape.temperature_downsample,
+            )
+        else:
+            temperature = 0.
+        
+        # external resources
+        if params.include_water:
+            external_water = landscape.get_water(state.landscape, state.bugs.x)
+        else:
+            external_water = None
+        external_energy = read_grid_locations(
+            state.landscape.energy,
+            state.bugs.x,
+            params.landscape.resource_downsample,
+        )
+        external_biomass = read_grid_locations(
+            state.landscape.biomass,
+            state.bugs.x,
+            params.landscape.resource_downsample,
+        )
+        
+        return bugs.observe(
+            key,
+            state.bugs,
+            state.bug_traits,
+            rgb_view,
+            altitude_view,
+            audio,
+            smell,
+            wind,
+            temperature,
+            external_water,
+            external_energy,
+            external_biomass,
+        )
     
     def active_players(state):
-        return active_bugs(state.bugs)
+        return bugs.active_players(state.bugs)
     
     def family_info(state):
-        return bug_family_info(state.bugs)
+        return bugs.family_info(state.bugs)
     
-    def render(
-        water,
-        temperature,
-        energy,
-        biomass,
-        bug_x,
-        bug_color,
-        light,
-    ):
-        h, w = water.shape
-
-        # start with a baseline rock color of 50% gray
-        rgb = jnp.full((h,w,3), ROCK_COLOR, dtype=water.dtype)
-
-        # overlay the water as blue and ice as white
-        while len(temperature.shape) < 3:
-            temperature = temperature[..., None]
-        water_color = jnp.where(
-            temperature <= 0,
-            ICE_COLOR,
-            WATER_COLOR,
+    def correct(state, steps):
+        if params.auto_correct_biomass:
+            #state_biomass = (
+            #    jnp.sum(state.landscape.biomass, dtype=jnp.float32) +
+            #    jnp.sum(state.bugs.biomass, dtype=jnp.float32)
+            #)
+            state_landscape_biomass = jnp.sum(
+                state.landscape.biomass, dtype=jnp.float32)
+            state_bugs_biomass = jnp.sum(
+                state.bugs.biomass, dtype=jnp.float32)
+            state_biomass = state_landscape_biomass + state_bugs_biomass
+            
+            missing_biomass = jnp.clip(
+                state.initial_biomass - state_biomass, min=0.)
+            #step_biomass_correction = (
+            #    missing_biomass / steps).astype(float_dtype)
+            step_biomass_correction = jnp.where(
+                missing_biomass > 0., params.biomass_correction_sites, 0.)
+            state = state.replace(
+                step_biomass_correction=step_biomass_correction)
+            
+            #target_landscape_biomass = state_biomass - next_state_bugs_biomass
+            #loss_ratio = next_state_landscape_biomass / target_landscape_biomass
+            #step_biomass_loss_ratio = loss_ratio ** (20./params.steps_per_epoch)
+            #step_biomass_correcton = (
+            #    1. / step_biomass_loss_ratio).astype(float_dtype)
+            #next_state = next_state.replace(
+            #    step_biomass_correction = step_biomass_correction)
+        
+        return state
+    
+    def visualizer_terrain_texture(report, shape, display_mode):
+        if display_mode in (1,2,3,4,5):
+            return landscape.render_display_mode(
+                report,
+                shape,
+                display_mode,
+                spot_x=report.player_x,
+                spot_color=report.player_color,
+                convert_to_image=True,
+            )
+        elif display_mode == 6 and params.report_object_grid:
+            occupied = report.object_grid != -1
+            rgb = jnp.stack((occupied, occupied, occupied), axis=-1)
+            rgb = set_grid_shape(rgb, *shape, preserve_mass=False)
+            return jax_to_image(rgb)
+        else:
+            rgb = jnp.zeros((*shape, 3), dtype=float_dtype)
+            return jax_to_image(rgb)
+    
+    def make_video_report(state):
+        report = landscape.render_rgb(
+            state.landscape,
+            params.world_size,
+            spot_x = state.bugs.x,
+            spot_color = state.bug_traits.color,
+            use_light=False,
         )
-        rgb = jnp.where(water[..., None] > 0.05, water_color, rgb)
+        return report
+    
+    @static_data
+    class VisualizerReport:
+        if params.include_rock:
+            rock : jnp.ndarray = False
+        if params.include_water:
+            water : jnp.ndarray = False
+        if params.include_light:
+            light : jnp.ndarray = False
+        if params.include_temperature:
+            temperature : jnp.ndarray = False
+        if params.include_rain:
+            moisture : jnp.ndarray = False
+            raining : jnp.ndarray = False
+        if params.include_energy:
+            energy : jnp.ndarray = False
+        if params.include_biomass:
+            biomass : jnp.ndarray = False
+     
+        players : jnp.ndarray = False
+        player_x : jnp.ndarray = False
+        player_r : jnp.ndarray = False 
+        object_grid : jnp.ndarray = False
+        player_color : jnp.ndarray = False
         
-        # apply the energy and biomass tint
-        clipped_energy = jnp.clip(energy, min=0., max=1.)
-        clipped_biomass = jnp.clip(biomass, min=0., max=1.)
-        biomass_and_energy = jnp.minimum(
-            clipped_energy, clipped_biomass)
-        just_energy = clipped_energy - biomass_and_energy
-        just_biomass = clipped_biomass - biomass_and_energy
-        rgb = rgb + biomass_and_energy[..., None] * BIOMASS_AND_ENERGY_TINT
-        rgb = rgb + just_energy[..., None] * ENERGY_TINT
-        rgb = rgb + just_biomass[..., None] * BIOMASS_TINT
-        '''
-        # apply the energy tint
-        rgb = rgb + clipped_energy[..., None] * ENERGY_TINT
-
-        # apply the biomass tint
-        rgb = rgb + clipped_biomass[..., None] * BIOMASS_TINT
-        '''
+        if params.report_bug_actions:
+            actions : jnp.ndarray = False
+        if params.report_bug_internals:
+            age : jnp.ndarray = False
+            generation : jnp.ndarray = False
+            hp : jnp.ndarray = False
+            if params.include_water:
+                player_water : jnp.ndarray = False
+            if params.include_energy:
+                player_energy : jnp.ndarray = False
+            if params.include_biomass:
+                player_biomass : jnp.ndarray = False
+        if params.report_bug_traits:
+            traits : BugTraits = BugTraits.default(())
+    
+    def default_visualizer_report():
+        return VisualizerReport()
+    
+    def make_visualizer_report(state, actions):
+        report = VisualizerReport(
+            players=active_players(state),
+            player_x=state.bugs.x,
+            player_r=state.bugs.r,
+            player_color=state.bug_traits.color,
+        )
+        if params.include_rock:
+            report = report.replace(rock=state.landscape.rock)
+        if params.include_water:
+            report = report.replace(water=state.landscape.water)
+        if params.include_light:
+            report = report.replace(light=state.landscape.light)
+        if params.include_temperature:
+            report = report.replace(temperature=state.landscape.temperature)
+        if params.include_rain:
+            report = report.replace(
+                moisture=state.landscape.moisture,
+                raining=state.landscape.raining,
+            )
+        if params.include_energy:
+            report = report.replace(energy=state.landscape.energy)
+        if params.include_biomass:
+            report = report.replace(biomass=state.landscape.biomass)
         
-        # overlay the bug colors
-        rgb = rgb.at[bug_x[...,0], bug_x[...,1]].set(bug_color)
+        if params.report_bug_actions:
+            report = report.replace(actions=actions)
+        if params.report_bug_internals:
+            report = report.replace(age=state.bugs.age)
+            report = report.replace(generation=state.bugs.generation)
+            report = report.replace(hp=state.bugs.hp)
+            if params.include_water:
+                report = report.replace(player_water=state.bugs.water)
+            if params.include_energy:
+                report = report.replace(player_energy=state.bugs.energy)
+            if params.include_biomass:
+                report = report.replace(player_biomass=state.bugs.biomass)
         
-        # apply lighting
-        rgb = rgb * light[..., None]
+        if params.report_bug_traits:
+            report = report.replace(traits=state.bug_traits)
         
-        # clip between 0 and 1
-        rgb = jnp.clip(rgb, min=0., max=1.)
+        if params.report_object_grid:
+            report = report.replace(object_grid=state.bugs.object_grid)
         
-        return rgb
+        return report
+    
+    def print_player_info(player_id, report):
+        print(f'ID:        {player_id}')
+        if params.report_bug_actions:
+            action_type, action_primitive = bugs.get_action_type_and_primitive(
+                report.actions[player_id]) 
+            print(
+                f'  actions: '
+                f'{action_type_names[int(action_type)]} '
+                f'{action_primitive} '
+                f'({report.actions[player_id]})'
+            )
+        if params.report_bug_internals:
+            print(f'  age:         {report.age[player_id]}')
+            print(f'  generation:  {report.generation[player_id]}')
+            print(f'  hp:          {report.hp[player_id]}')
+            if params.include_water:
+                print(f'  water:       {report.player_water[player_id]}')
+            if params.include_energy:
+                print(f'  energy:      {report.player_energy[player_id]}')
+            if params.include_biomass:
+                print(f'  biomass:     {report.player_biomass[player_id]}')
+        
+        if params.report_bug_traits:
+            bug_traits = tree_getitem(report.traits, player_id)
+            for key, value in bug_traits.__dict__.items():
+                if not callable(value):
+                    print(f'  {key}: {value}')
     
     game = make_poeg(
-        init_state, transition, observe, active_players, family_info)
-    
-    game.render = staticmethod(render)
+        init_state,
+        transition,
+        observe,
+        active_players,
+        family_info,
+        mutate_traits=bugs.mutate_traits,
+        empty_family_tree_state=bugs.empty_family_tree_state,
+        visualizer_terrain_map=landscape.visualizer_terrain_map,
+        visualizer_terrain_texture=visualizer_terrain_texture,
+        default_visualizer_report=default_visualizer_report,
+        make_video_report=make_video_report,
+        make_visualizer_report=make_visualizer_report,
+        print_player_info=print_player_info,
+        num_actions=bugs.num_actions,
+        action_primitive_count=bugs.action_primitive_count,
+        action_to_primitive=bugs.action_to_primitive,
+        biomass_requirement=bugs.biomass_requirement,
+        correct=correct,
+    )
     
     return game
