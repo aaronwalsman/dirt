@@ -468,13 +468,13 @@ def make_tera_arium(
             return jax_to_image(rgb)
     
     def make_video_report(state):
-        report = landscape.render_rgb(
+        report = (landscape.render_rgb(
             state.landscape,
             params.world_size,
             spot_x = state.bugs.x,
             spot_color = state.bug_traits.color,
             use_light=False,
-        )
+        ) * 255).astype(jnp.uint8)
         return report
     
     @static_data

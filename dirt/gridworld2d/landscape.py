@@ -564,6 +564,14 @@ def make_landscape(
                     rock = grid_mean_to_sum(rock, params.terrain_downsample)
                     state = state.replace(rock=rock)
                 
+                elif params.rock_mode == 'constant':
+                    rock_size = downsample_grid_shape(
+                        *params.world_size, params.terrain_downsample)
+                    rock = jnp.full(
+                        rock_size, params.rock_bias, dtype=float_dtype)
+                    rock = grid_mean_to_sum(rock, params.terrain_downsample)
+                    state = state.replace(rock=rock)
+                
                 # -- erosion
                 if params.include_erosion:
                     erosion = jnp.zeros(terrain_size, dtype=float_dtype)
