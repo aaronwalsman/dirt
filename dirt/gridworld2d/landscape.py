@@ -575,7 +575,7 @@ def make_landscape(
                     cx, cy = rock_size[0] // 2, rock_size[1] // 2
                     xx = (xx - cx) * params.terrain_downsample
                     yy = (yy - cy) * params.terrain_downsample
-                    rock = jnp.sqrt(xx**2 + yy**2) * params.rock_slope_angle
+                    rock = jnp.sqrt(xx**2 + yy**2) / 1.5 * params.rock_slope_angle
                     rock = rock - jnp.mean(rock)
                     rock = grid_mean_to_sum(rock, params.terrain_downsample)
 
