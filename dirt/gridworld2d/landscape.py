@@ -575,8 +575,10 @@ def make_landscape(
                     cx, cy = rock_size[0] // 2, rock_size[1] // 2
                     xx = (xx - cx) * params.terrain_downsample
                     yy = (yy - cy) * params.terrain_downsample
-                    rock = jnp.sqrt(xx**2 + yy**2) / 1.5 * params.rock_slope_angle
-                    rock = rock - jnp.mean(rock)
+
+                    rock = jnp.sqrt(xx**2 + yy**2)
+
+                    rock = rock - jnp.median(rock)
                     rock = grid_mean_to_sum(rock, params.terrain_downsample)
 
                     state = state.replace(rock=rock)
@@ -594,14 +596,14 @@ def make_landscape(
                     yy = (yy - cy) * params.terrain_downsample
 
                     r = jnp.sqrt(xx**2 + yy**2)
-                    peak_height = 20.0
-                    hill_radius = 50.0
-                    rock = peak_height * jnp.exp(- (r**2) / (2 * hill_radius**2))
-                    water_offset = 1.0
-                    rock = rock - water_offset
+
+                    rock = jnp.exp(- (r**2))
+
+                    rock = rock - jnp.median(rock)
                     rock = grid_mean_to_sum(rock, params.terrain_downsample)
 
                     state = state.replace(rock=rock)
+
 
                 
                 elif params.rock_mode == 'constant':
