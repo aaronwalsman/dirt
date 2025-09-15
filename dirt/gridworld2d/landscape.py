@@ -597,9 +597,10 @@ def make_landscape(
 
                     r = jnp.sqrt(xx**2 + yy**2)
 
-                    rock = jnp.exp(- (r**2))
+                    rock = jnp.exp(-0.01 * (r**2))
 
                     rock = rock - jnp.median(rock)
+
                     rock = grid_mean_to_sum(rock, params.terrain_downsample)
 
                     state = state.replace(rock=rock)
