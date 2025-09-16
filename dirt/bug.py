@@ -213,7 +213,7 @@ class BugParams:
     # trait mutation parameters
     # - mutation noise rates
     # -- global
-    mutate_trait_probability : float = 0.1 
+    mutate_trait_probability : float = 1.0
     mutate_default_noise : float = 3e-2
     mutate_default_lognoise : float = 0.05
     # -- specific
@@ -1540,6 +1540,8 @@ def make_bugs(
                 compass_one_hot = compass_one_hot.at[
                     jnp.arange(params.max_players), state.r].set(1.)
                 
+                ##########
+                #sensor_compass = jnp.zeros_like(compass_one_hot)
                 ##########
                 #sensor_compass = compass_one_hot * (1.-traits.compass_sensor_noise[:,None])
                 ##########
