@@ -563,6 +563,51 @@ def make_landscape(
                     rock = rock * params.rock_slope_angle
                     rock = grid_mean_to_sum(rock, params.terrain_downsample)
                     state = state.replace(rock=rock)
+
+                elif params.rock_mode == 'lake':
+                    rock_size = downsample_grid_shape(
+                        *params.world_size, params.terrain_downsample
+                    )
+
+                    yy, xx = jnp.meshgrid(
+                        jnp.arange(rock_size[0]), jnp.arange(rock_size[1]), indexing="ij"
+                    )
+                    cx, cy = rock_size[0] // 2, rock_size[1] // 2
+                    xx = (xx - cx) * params.terrain_downsample
+                    yy = (yy - cy) * params.terrain_downsample
+
+                    r = jnp.sqrt(xx**2 + yy**2)
+
+                    rock = r * params.rock_slope_angle
+
+                    rock = rock - jnp.median(rock)
+                    rock = grid_mean_to_sum(rock, params.terrain_downsample)
+
+                    state = state.replace(rock=rock)
+
+                elif params.rock_mode == 'island':
+                    rock_size = downsample_grid_shape(
+                        *params.world_size, params.terrain_downsample
+                    )
+
+                    yy, xx = jnp.meshgrid(
+                        jnp.arange(rock_size[0]), jnp.arange(rock_size[1]), indexing="ij"
+                    )
+                    cx, cy = rock_size[0] // 2, rock_size[1] // 2
+                    xx = (xx - cx) * params.terrain_downsample
+                    yy = (yy - cy) * params.terrain_downsample
+
+                    r = jnp.sqrt(xx**2 + yy**2)
+
+                    rock = -r * params.rock_slope_angle
+
+                    rock = rock - jnp.median(rock)
+                    rock = grid_mean_to_sum(rock, params.terrain_downsample)
+
+                    state = state.replace(rock=rock)
+
+
+
                 
                 elif params.rock_mode == 'constant':
                     rock_size = downsample_grid_shape(
