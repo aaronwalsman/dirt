@@ -1565,7 +1565,7 @@ def make_bugs(
                     random_compass_key,
                     compass_one_hot,
                     traits.compass_sensor_noise,
-                )
+                ) 
                 ##########
                 #jax.debug.print('compass: {c} {sc} {n}', c=compass_one_hot, sc=sensor_compass, n=traits.compass_sensor_noise)
             else:
