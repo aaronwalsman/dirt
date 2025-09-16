@@ -607,6 +607,49 @@ def make_landscape(
                     state = state.replace(rock=rock)
 
 
+                elif params.rock_mode == 'isthmus':
+                    rock_size = downsample_grid_shape(
+                        *params.world_size, params.terrain_downsample
+                    )
+                    yy, xx = jnp.meshgrid(
+                        jnp.arange(rock_size[0]), jnp.arange(rock_size[1]), indexing="ij"
+                    )
+
+                    dist = jnp.abs(xx - rock_size[1] // 2)
+                    dist = dist * params.terrain_downsample
+
+                    slope = -dist * params.rock_slope_angle
+                    mask = (jnp.abs(xx - rock_size[1] // 2) <= rock_size[1] // 4).astype(float_dtype)
+                    rock = slope * mask + (-jnp.abs(slope)) * (1 - mask)
+
+                    rock = rock - jnp.median(rock)
+                    rock = grid_mean_to_sum(rock, params.terrain_downsample)
+                    state = state.replace(rock=rock)
+
+
+                elif params.rock_mode == 'channel':
+                    rock_size = downsample_grid_shape(
+                        *params.world_size, params.terrain_downsample
+                    )
+                    yy, xx = jnp.meshgrid(
+                        jnp.arange(rock_size[0]), jnp.arange(rock_size[1]), indexing="ij"
+                    )
+
+                    dist = jnp.abs(xx - rock_size[1] // 2)
+                    dist = dist * params.terrain_downsample
+
+                    slope = dist * params.rock_slope_angle
+                    mask = (jnp.abs(xx - rock_size[1] // 2) <= rock_size[1] // 4).astype(float_dtype)
+                    rock = -slope * mask + (jnp.abs(slope)) * (1 - mask)
+
+                    rock = rock - jnp.median(rock)
+                    rock = grid_mean_to_sum(rock, params.terrain_downsample)
+                    state = state.replace(rock=rock)
+
+
+
+
+
 
                 
                 elif params.rock_mode == 'constant':
