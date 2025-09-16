@@ -214,9 +214,30 @@ class BugParams:
     # - mutation noise rates
     # -- global
     mutate_trait_probability : float = 0.1 
-    mutate_default_noise : float = 0.05
+    mutate_default_noise : float = 3e-2
     mutate_default_lognoise : float = 0.05
     # -- specific
+    #mutate_color : bool = True,
+    #mutate_photosynthesis : bool = True,
+    #mutate_age_sensing : bool = True,
+    #mutate_vision_sensing : bool = True,
+    #mutate_audio_sensing : bool = True,
+    #mutate_smell_sensing : bool = True,
+    #mutate_external_resource_sensing : bool = True,
+    #mutate_wind_sensing : bool = True,
+    #mutate_temperature_sensing : bool = True,
+    #mutate_compass_sensing : bool = True,
+    #mutate_internal_resource_sensing : bool = True,
+    #mutate_efficiency : bool = True,
+    #mutate_stomach : bool = True,
+    #mutate_insulation : bool = True
+    #mutate_armor : bool = True
+    #mutate_senescence : bool = True
+    #mutate_health : bool = True
+    #mutate_reproduction : bool = True
+    #mutate_movement_primitives : bool = True
+    #mutate_attack_primitives : bool = True
+    
     #mutate_max_age_observation_noise : float = 1.
     #mutate_view_distance_noise : float = 0.1
     #mutate_view_back_distance_noise : float = 0.1
@@ -386,7 +407,7 @@ class BugTraits:
     child_water : float | jnp.ndarray
     child_energy : float | jnp.ndarray
     child_biomass : float | jnp.ndarray
-    child_color : Tuple[float, float, float] | jnp.ndarray
+    #child_color : Tuple[float, float, float] | jnp.ndarray
     
     # actions
     movement_primitives : jnp.ndarray
@@ -478,8 +499,8 @@ class BugTraits:
             child_energy = float_vector(1.0),
             child_biomass = float_vector(0.9),
             child_water = float_vector(0.1),
-            child_color = jnp.full(
-                (*shape,3), DEFAULT_BUG_COLOR, dtype=DEFAULT_FLOAT_DTYPE),
+            #child_color = jnp.full(
+            #    (*shape,3), DEFAULT_BUG_COLOR, dtype=DEFAULT_FLOAT_DTYPE),
             
             # actions
             movement_primitives = jnp.full(
@@ -1513,16 +1534,38 @@ def make_bugs(
             
             # compass
             if params.include_compass:
-                key, random_compass_key = jrng.split(key)
+                key, random_compass_key, random_choice_key = jrng.split(key, 3)
                 compass_one_hot = jnp.zeros(
                     (params.max_players, 4), dtype=float_dtype)
                 compass_one_hot = compass_one_hot.at[
                     jnp.arange(params.max_players), state.r].set(1.)
+                
+                ##########
+                #sensor_compass = compass_one_hot * (1.-traits.compass_sensor_noise[:,None])
+                ##########
+                #random_orientation = jrng.randint(
+                #    random_compass_key,
+                #    (params.max_players, 4),
+                #    0,
+                #    4,
+                #)
+                #random_choice = jrng.bernoulli(
+                #    random_choice_key,
+                #    p=traits.compass_sensor_noise,
+                #)[:,None]
+                #sensor_compass = jnp.where(
+                #    random_choice,
+                #    random_orientation,
+                #    compass_one_hot,
+                #)
+                ##########
                 sensor_compass = noisy_sensor(
                     random_compass_key,
                     compass_one_hot,
                     traits.compass_sensor_noise,
                 )
+                ##########
+                #jax.debug.print('compass: {c} {sc} {n}', c=compass_one_hot, sc=sensor_compass, n=traits.compass_sensor_noise)
             else:
                 sensor_compass = None
             
@@ -1631,27 +1674,31 @@ def make_bugs(
         
         def get_action_type_and_primitive(action):
             return action_to_primitive_map[action]
+        
+        def normal_mutate_trait(key, traits, trait_name):
+            do_key, noise_key = jrng.split(key)
+            do_mutate = jrng.bernoulli(
+                do_key, p=params.mutate_trait_probability, shape=())
+            trait = getattr(traits, trait_name)
+            max_trait = getattr(params, f'max_{trait_name}', 1.)
+            min_trait = getattr(params, f'min_{trait_name}', 0.)
+            noise_std = getattr(
+                params,
+                f'mutate_{trait_name}_noise',
+                params.mutate_default_noise,
+            )
+            if noise_std is None:
+                noise_std = params.mutate_default_noise
+            noise_std = noise_std * (max_trait - min_trait)
+            noise = jrng.normal(
+                noise_key, shape=trait.shape, dtype=float_dtype
+            ) * noise_std * do_mutate
+            trait = jnp.clip(trait + noise, min=min_trait, max=max_trait)
+            
+            traits = traits.replace(**{trait_name : trait})
+            return traits
     
         def mutate_traits(key, traits):
-            def normal_mutate_trait(key, traits, trait_name):
-                do_key, noise_key = jrng.split(key)
-                do_mutate = jrng.bernoulli(
-                    do_key, p=params.mutate_trait_probability, shape=())
-                trait = getattr(traits, trait_name)
-                max_trait = getattr(params, f'max_{trait_name}', 1.)
-                min_trait = getattr(params, f'min_{trait_name}', 0.)
-                noise_std = getattr(
-                    params,
-                    f'mutate_{trait_name}_noise',
-                    params.mutate_default_noise * (max_trait - min_trait),
-                )
-                noise = jrng.normal(
-                    noise_key, shape=trait.shape, dtype=float_dtype
-                ) * noise_std * do_mutate
-                trait = jnp.clip(trait + noise, min=min_trait, max=max_trait)
-                
-                traits = traits.replace(**{trait_name : trait})
-                return traits
             
             all_trait_names = set(
                 key for key, value in traits.__dict__.items()
@@ -1668,7 +1715,7 @@ def make_bugs(
             
             for trait_name in standard_trait_names:
                 key, trait_key = jrng.split(key)
-                traits = normal_mutate_trait(trait_key, traits, trait_name)
+                traits = Bugs.normal_mutate_trait(trait_key, traits, trait_name)
             
             def lognormal_mutate_trait(key, traits, trait_name):
                 do_key, noise_key = jrng.split(key)

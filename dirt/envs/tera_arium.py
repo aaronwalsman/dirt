@@ -600,6 +600,7 @@ def make_tera_arium(
         active_players,
         family_info,
         mutate_traits=bugs.mutate_traits,
+        normal_mutate_trait=bugs.normal_mutate_trait,
         empty_family_tree_state=bugs.empty_family_tree_state,
         visualizer_terrain_map=landscape.visualizer_terrain_map,
         visualizer_terrain_texture=visualizer_terrain_texture,
