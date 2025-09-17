@@ -579,10 +579,13 @@ def make_landscape(
                     r = jnp.sqrt(xx**2 + yy**2)
 
                     rock = r * params.rock_slope_angle
-
                     rock = rock - jnp.median(rock)
-                    rock = grid_mean_to_sum(rock, params.terrain_downsample)
 
+                    # Make water (rock < 0) strongly negative
+                    water_scale = 20.0   # adjust this factor to taste
+                    rock = jnp.where(rock < 0, rock * water_scale, rock)
+
+                    rock = grid_mean_to_sum(rock, params.terrain_downsample)
                     state = state.replace(rock=rock)
 
                 elif params.rock_mode == 'island':
