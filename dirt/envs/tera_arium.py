@@ -89,6 +89,8 @@ class TeraAriumParams:
     report_bug_internals : bool = False
     report_bug_traits : bool = False
     report_object_grid : bool = False
+    report_homicides : bool = False
+    display_hit_map : bool = False
     
     landscape : LandscapeParams = LandscapeParams()
     bugs : BugParams = BugParams()
@@ -101,6 +103,10 @@ class TeraAriumState:
     
     initial_biomass : jnp.array
     step_biomass_correction : jnp.array
+    
+    homicides : jnp.array = None
+    homicide_locations : jnp.array = None
+    hit_map : jnp.array = None
 
 TeraAriumTraits = BugTraits
 
@@ -134,12 +140,19 @@ def make_tera_arium(
             jnp.sum(bug_state.biomass, dtype=jnp.float32)
         )
         
+        hit_map = jnp.zeros(params.world_size, dtype=float_dtype)
+        homicides = jnp.zeros(params.max_players, dtype=jnp.bool)
+        homicide_locations = jnp.zeros((params.max_players, 2), dtype=jnp.int32)
+        
         state = TeraAriumState(
             landscape_state,
             bug_state,
             bug_traits,
-            initial_biomass = initial_biomass,
-            step_biomass_correction = jnp.zeros((), dtype=jnp.float32)
+            initial_biomass=initial_biomass,
+            step_biomass_correction=jnp.zeros((), dtype=jnp.float32),
+            hit_map=hit_map,
+            homicides=homicides,
+            homicide_locations=homicide_locations,
         )
         
         return state
@@ -213,7 +226,8 @@ def make_tera_arium(
         
         # - fight
         key, fight_key = jrng.split(key)
-        bug_state = bugs.fight(key, bug_state, action, traits)
+        bug_state, homicides, homicide_locations, hit_map = bugs.fight(
+            key, bug_state, action, traits)
         
         # - move bugs
         key, move_key = jrng.split(key)
@@ -283,7 +297,11 @@ def make_tera_arium(
             landscape=landscape_state,
             bugs=bug_state,
             bug_traits=traits,
+            homicides=homicides,
+            homicide_locations=homicide_locations,
         )
+        if params.display_hit_map:
+            state = state.replace(hit_map=hit_map)
         
         return state
     
@@ -475,6 +493,28 @@ def make_tera_arium(
             spot_color = state.bug_traits.color,
             use_light=False,
         ) * 255).astype(jnp.uint8)
+        
+        if params.display_hit_map:
+            hit_mask = state.hit_map[...,None] > 0.
+            report = jnp.where(
+                hit_mask,
+                jnp.array([255,255,255], dtype=jnp.uint8),
+                report,
+            )
+            existing_colors = report[
+                state.homicide_locations[...,0],
+                state.homicide_locations[...,1],
+            ]
+            spot_color = jnp.where(
+                state.homicides[...,None],
+                jnp.array([255,0,0], dtype=jnp.uint8),
+                existing_colors,
+            )
+            report = report.at[
+                state.homicide_locations[...,0],
+                state.homicide_locations[...,1],
+            ].set(spot_color) 
+        
         return report
     
     @static_data

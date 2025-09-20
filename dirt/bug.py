@@ -156,7 +156,8 @@ class BugParams:
     climb_water_cost : float = 0.0001
     climb_energy_cost : float = 0.001
     # - attack
-    attack_energy_cost : float = 0.01
+    #attack_energy_cost : float = 0.01
+    attack_energy_cost : float = 0.0001
     # - reproduction
     birth_energy_cost : float = 0.001
     birth_water_cost : float = 0.0001
@@ -167,7 +168,7 @@ class BugParams:
     min_biomass_constant : float = 0.2
     biomass_per_brain_size : float = 3e-6 # 3e-5  # ≈ 0.5 biomass/tick at 16,713 brain_size
     biomass_per_movement_primitive : float = 0.02
-    biomass_per_attack_primitive : float = 0.03
+    biomass_per_attack_primitive : float = 0.0001 # TMP
 
     biomass_per_photosynthesis : float = 0.1
     biomass_per_max_climb : float = 0.01
@@ -1048,7 +1049,7 @@ def make_bugs(
             
             # make no changes if violence is turned off
             if not params.include_violence:
-                return state
+                return state, 0
             
             # check traits
             assert (
@@ -1128,9 +1129,13 @@ def make_bugs(
             hp_fix = selected_primitives[...,-1] * self_hit
             
             # update hp
+            previous_alive = state.hp > 0
             hp = state.hp - hit_map[state.x[...,0], state.x[...,1]] + hp_fix
             hp = jnp.clip(hp, min=0.)
             state = state.replace(hp=hp)
+            now_alive = state.hp > 0
+            homicides = previous_alive & ~now_alive
+            homicide_locations = state.x
             
             if params.include_energy:
                 attack_area = attack_hw[...,0] * attack_hw[...,1]
@@ -1144,7 +1149,7 @@ def make_bugs(
                 energy = jnp.clip(energy, min=0.)
                 state = state.replace(energy=energy)
             
-            return state
+            return state, homicides, homicide_locations, hit_map
         
         def biomass_requirement(traits):
             """
