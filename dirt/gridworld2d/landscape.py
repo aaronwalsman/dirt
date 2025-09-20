@@ -579,10 +579,13 @@ def make_landscape(
                     r = jnp.sqrt(xx**2 + yy**2)
 
                     rock = r * params.rock_slope_angle
-
                     rock = rock - jnp.median(rock)
-                    rock = grid_mean_to_sum(rock, params.terrain_downsample)
 
+                    # Make water (rock < 0) strongly negative
+                    water_scale = 20.0   # adjust this factor to taste
+                    rock = jnp.where(rock < 0, rock * water_scale, rock)
+
+                    rock = grid_mean_to_sum(rock, params.terrain_downsample)
                     state = state.replace(rock=rock)
 
                 elif params.rock_mode == 'island':
@@ -605,6 +608,54 @@ def make_landscape(
                     rock = grid_mean_to_sum(rock, params.terrain_downsample)
 
                     state = state.replace(rock=rock)
+
+
+                elif params.rock_mode == 'isthmus':
+                    rock_size = downsample_grid_shape(
+                        *params.world_size, params.terrain_downsample
+                    )
+                    yy, xx = jnp.meshgrid(
+                        jnp.arange(rock_size[0]), jnp.arange(rock_size[1]), indexing="ij"
+                    )
+
+                    dist = jnp.abs(xx - rock_size[1] // 2)
+                    dist = dist * params.terrain_downsample
+
+                    slope = -dist * params.rock_slope_angle
+
+                    mask = (jnp.abs(xx - rock_size[1] // 2) <= rock_size[1] // 4).astype(float_dtype)
+
+                    rock = slope * mask + (-jnp.abs(slope)) * (1 - mask)
+
+                    rock = rock - jnp.median(rock)
+                    rock = grid_mean_to_sum(rock, params.terrain_downsample)
+                    state = state.replace(rock=rock)
+
+                elif params.rock_mode == "channel":
+                    rock_size = downsample_grid_shape(
+                        *params.world_size, params.terrain_downsample
+                    )
+                    rock = jnp.zeros(rock_size, dtype=float_dtype)
+
+                    left = rock_size[1] // 4
+                    right = 3 * rock_size[1] // 4
+
+                    rock = rock.at[:, left:right].set(-1.0)
+
+                    slope_left = jnp.linspace(1.0, -1.0, left, dtype=float_dtype)
+                    slope_left = slope_left * params.rock_slope_angle
+                    rock = rock.at[:, :left].set(slope_left)
+
+                    slope_right = jnp.linspace(-1.0, 1.0, rock_size[1] - right, dtype=float_dtype)
+                    slope_right = slope_right * params.rock_slope_angle
+                    rock = rock.at[:, right:].set(slope_right)
+
+                    rock = rock - jnp.median(rock)
+                    rock = grid_mean_to_sum(rock, params.terrain_downsample)
+
+                    state = state.replace(rock=rock)
+
+
 
 
 
