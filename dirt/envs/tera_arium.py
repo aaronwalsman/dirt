@@ -55,6 +55,9 @@ class TeraAriumParams:
     initial_players : int = 1024
     max_players : int = 16384
     
+    rock_mode : str = 'fractal'
+    rock_bias : float = 0
+    
     include_rock : bool = True
     include_water : bool = True
     include_energy : bool = True
