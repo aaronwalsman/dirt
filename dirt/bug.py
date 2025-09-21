@@ -1149,7 +1149,7 @@ def make_bugs(
                 energy = jnp.clip(energy, min=0.)
                 state = state.replace(energy=energy)
             
-            return state, homicides, homicide_locations, hit_map
+            return state, attack, homicides, homicide_locations, hit_map
         
         def biomass_requirement(traits):
             """

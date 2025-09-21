@@ -105,6 +105,7 @@ class TeraAriumState:
     step_biomass_correction : jnp.array
     
     homicides : jnp.array = None
+    attacks : jnp.array = None
     homicide_locations : jnp.array = None
     hit_map : jnp.array = None
 
@@ -142,6 +143,7 @@ def make_tera_arium(
         
         hit_map = jnp.zeros(params.world_size, dtype=float_dtype)
         homicides = jnp.zeros(params.max_players, dtype=jnp.bool)
+        attacks = jnp.zeros(params.max_players, dtype=jnp.bool)
         homicide_locations = jnp.zeros((params.max_players, 2), dtype=jnp.int32)
         
         state = TeraAriumState(
@@ -152,6 +154,7 @@ def make_tera_arium(
             step_biomass_correction=jnp.zeros((), dtype=jnp.float32),
             hit_map=hit_map,
             homicides=homicides,
+            attacks=attacks,
             homicide_locations=homicide_locations,
         )
         
@@ -226,7 +229,7 @@ def make_tera_arium(
         
         # - fight
         key, fight_key = jrng.split(key)
-        bug_state, homicides, homicide_locations, hit_map = bugs.fight(
+        bug_state, attacks, homicides, homicide_locations, hit_map = bugs.fight(
             key, bug_state, action, traits)
         
         # - move bugs
@@ -297,6 +300,7 @@ def make_tera_arium(
             landscape=landscape_state,
             bugs=bug_state,
             bug_traits=traits,
+            attacks=attacks,
             homicides=homicides,
             homicide_locations=homicide_locations,
         )
