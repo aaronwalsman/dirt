@@ -522,7 +522,7 @@ class BugTraits:
             # dummy
             dummy_traits = jax.random.normal(
                 jax.random.PRNGKey(0),
-                shape + (100,), 
+                shape + (10,), 
                 dtype=DEFAULT_FLOAT_DTYPE
             )
         )
