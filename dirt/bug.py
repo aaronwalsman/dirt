@@ -414,6 +414,9 @@ class BugTraits:
     movement_primitives : jnp.ndarray
     attack_primitives : jnp.ndarray
     
+    # dummy
+    dummy_traits : jnp.ndarray
+    
     @staticmethod
     def default(shape, init_brain_size=0.):
         if isinstance(shape, int):
@@ -514,10 +517,14 @@ class BugTraits:
             attack_primitives = jnp.full((*shape, 1, 5), jnp.array(
                 [[1, 0, 0, 0, 5]],
                 dtype=DEFAULT_FLOAT_DTYPE
-            ))
-            #attack_primitives = jnp.array([
-            #    [1, 0, 0, 0, 1] # x-offset, y-offset, width, height, damage
-            #], dtype=DEFAULT_FLOAT_DTYPE),
+            )),
+            
+            # dummy
+            dummy_traits = jax.random.normal(
+                jax.random.PRNGKey(0),
+                shape + (100,), 
+                dtype=DEFAULT_FLOAT_DTYPE
+            )
         )
 
 @static_data
