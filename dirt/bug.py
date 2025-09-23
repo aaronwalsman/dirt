@@ -1049,7 +1049,12 @@ def make_bugs(
             
             # make no changes if violence is turned off
             if not params.include_violence:
-                return state, 0
+                #return state, 0
+                attack = jnp.zeros((params.max_players,), dtype=jnp.bool)
+                homicides = jnp.zeros_like(attack)
+                homicide_locations = state.x
+                hit_map = jnp.zeros(params.world_size, dtype=float_dtype)
+                return state, attack, homicides, homicide_locations, hit_map
             
             # check traits
             assert (
