@@ -111,7 +111,7 @@ class TeraAriumState:
     attacks : jnp.array = None
     homicide_locations : jnp.array = None
     hit_map : jnp.array = None
-
+    
 TeraAriumTraits = BugTraits
 
 def make_tera_arium(

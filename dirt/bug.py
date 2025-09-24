@@ -582,6 +582,12 @@ class BugState:
     
     # tracking
     family_tree : Any
+    
+    no_actions : jnp.ndarray
+    move_actions : jnp.ndarray
+    attack_actions : jnp.ndarray
+    eat_actions : jnp.ndarray
+    reproduce_actions : jnp.ndarray
 
 @hydra.main(config_path="configs", config_name="config", version_base="1.3")
 def make_bugs(
@@ -735,6 +741,12 @@ def make_bugs(
                 level=level,
                 
                 family_tree=family_tree_state,
+                
+                no_actions=jnp.zeros((n,), dtype=jnp.int32),
+                move_actions=jnp.zeros((n,), dtype=jnp.int32),
+                attack_actions=jnp.zeros((n,), dtype=jnp.int32),
+                eat_actions=jnp.zeros((n,), dtype=jnp.int32),
+                reproduce_actions=jnp.zeros((n,), dtype=jnp.int32),
             )
         
         def get_mass(water, biomass):
@@ -773,6 +785,7 @@ def make_bugs(
             action_type = action_to_primitive_map[action, 0]
             action_primitive = action_to_primitive_map[action, 1]
             move = (action_type == MOVE_ACTION_TYPE)
+            
             all_players = jnp.arange(params.max_players)
             player_movement_primitives = (
                 traits.movement_primitives[all_players, action_primitive])
@@ -789,6 +802,10 @@ def make_bugs(
                 check_collisions=True,
                 object_grid=g0,
             )
+            
+            # record move actions
+            state = state.replace(
+                move_actions=state.move_actions + move * active_bugs)
             
             # compute the energy and water costs
             dx = dynamics.distance_x(x1, x0)
@@ -861,6 +878,9 @@ def make_bugs(
             active = Bugs.active_players(state)
             eat = (action_type == EAT_ACTION_TYPE) & active
             expell = (action_type == EXPELL_ACTION_TYPE) & active
+            
+            state = state.replace(
+                eat_actions=state.eat_actions + eat)
             
             # water
             if params.include_water:
@@ -1066,6 +1086,13 @@ def make_bugs(
             action_primitive = action_to_primitive_map[action, 1]
             active_bugs = family_tree.active(state.family_tree)
             attack = (action_type == ATTACK_ACTION_TYPE) & active_bugs
+            
+            # doing NOOP here randomly
+            no_actions = (action_type == NO_ACTION_TYPE) & active_bugs
+            state = state.replace(
+                attack_actions=state.attack_actions + attack,
+                no_actions=state.no_actions + no_actions,
+            )
             
             # zero out the attack primitive for any non-attacking bugs
             selected_primitives = traits.attack_primitives[
@@ -1318,6 +1345,9 @@ def make_bugs(
             available_slots = params.max_players - active.sum()
             will_reproduce &= jnp.cumsum(will_reproduce) <= available_slots
             
+            state = state.replace(reproduce_actions=(
+                state.reproduce_actions + wants_to_reproduce * active))
+            
             # charge the parents for the required birth resources
             paid_hp = birth_damage * will_reproduce
             state = state.replace(hp = state.hp - paid_hp)
@@ -1359,6 +1389,14 @@ def make_bugs(
             state = state.replace(
                 age = age,
                 family_tree = family_tree_state,
+            )
+            
+            state = state.replace(
+                attack_actions=state.attack_actions * still_alive,
+                move_actions=state.move_actions * still_alive,
+                eat_actions=state.eat_actions * still_alive,
+                reproduce_actions=state.reproduce_actions * still_alive,
+                no_actions=state.no_actions * still_alive,
             )
             
             # update the bug physical positions and rotations
