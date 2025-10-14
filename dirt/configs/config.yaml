@@ -1,8 +1,0 @@
-defaults:
-  - params: default
-  - traits: default
-  - override hydra/sweeper: basic
-
-hydra:
-  run:
-    dir: ./outputs/${now:%Y-%m-%d}_${now:%H-%M-%S}
