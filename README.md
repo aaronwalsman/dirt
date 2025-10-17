@@ -55,6 +55,33 @@ cd ../dirt/dirt/examples/landscape
 python landscape.py
 ```
 
+## Viewer Controls
+
+### Navigation
+- **`.` (period)** - Move forward one step
+- **`,` (comma)** - Move backward one step  
+- **`+` (plus)** - Increase step size
+- **`-` (minus)** - Decrease step size
+- **Shift + `.`** - Move forward by one full block of reports
+- **Shift + `,`** - Move backward by one full block of reports
+
+### Bug Inspection
+- Hold `Ctrl` - Enable bug inspection. Click on a bug to print its traits to stdout.
+
+### Display Modes
+- **`0`** - Not implemented
+- **`1`** - RGB with lighting (default); shows terrain, water, energy, biomass with day/night lighting
+- **`2`** - RGB without lighting; same as mode 1 but always bright
+- **`3`** - Temperature map; red (hot), blue (cold), useful for thermal dynamics
+- **`4`** - Weather/moisture map; blue (moisture), purple (raining), useful for weather patterns
+- **`5`** - Altitude map; white (high), black (low), useful for terrain topology
+- **`6-9`** - Not implemented
+
+### Other Controls
+- **`A`** - Toggle player visibility on/off
+- **Mouse drag** - Rotate camera view
+- **Mouse scroll** - Zoom in/out
+- **Shift key** - Hold to shift instead of rotate the camera view
 
 ## Landscape
 ### Rock
