@@ -1,7 +1,7 @@
-# DIRT
+# Distributed Intelligent Replicator Toolkit (DIRT)
 
 ## Overview
-Dirt is a set of tools for building large dynamic gridworlds.
+DIRT is a set of tools for building large dynamic gridworlds.
 
 ## Setup
 

@@ -8,7 +8,6 @@ from jax import vmap
 
 import chex
 
-import dirt.variable_length as vl
 import dirt.gridworld2d.dynamics as dynamics
 
 def poisson_vector(
@@ -282,105 +281,6 @@ def spawn_from_parents(
         child_x,
         child_r,
     )
-
-def reproduce_from_parents_old(
-    reproduce,
-    child_start_id,
-    player_id,
-    player_parents,
-    player_x,
-    player_r,
-    player_data,
-    child_data,
-    world_size=None,
-    object_grid=None,
-    child_x_offset=jnp.array([[-1,0]]),
-    child_r_offset=jnp.array([2]),
-    empty=-1,
-):
-    n = player_id.shape[0]
-    
-    # if an object grid was provided, use the world_size implied by the
-    # object grid
-    if object_grid is not None:
-        world_size = object_grid.shape
-    
-    # find the new child positions and rotations
-    #child_x = player_x + child_x_offset
-    #child_r = player_r + child_r_offset
-    child_x, child_r = dynamics.step(
-        player_x,
-        player_r,
-        child_x_offset,
-        child_r_offset,
-        space='local',
-        out_of_bounds='none',
-    )
-    
-    # figure out who is able to reproduce
-    # first, make sure the reproduce locations would be inside the world
-    if world_size is not None:
-        inbounds = (
-            (child_x[:,0] >= 0) & (child_x[:,0] < world_size[0]) &
-            (child_x[:,1] >= 0) & (child_x[:,1] < world_size[1])
-        )
-        reproduce = reproduce & inbounds
-    
-    # second make sure the children will not be on top of any existing objects
-    if object_grid is not None:
-        child_colliders = object_grid[child_x[:,0], child_x[:,1]]
-        no_collisions = (child_colliders == empty)
-        reproduce = reproduce & (child_colliders == empty)
-    
-    # update the non-reproduced child_x locations to be off the grid so they
-    # don't overwrite important values in the object array
-    out_of_bounds_x = jnp.array(world_size)[None,:]
-    child_x = jnp.where(reproduce[:,None], child_x, out_of_bounds_x)
-    
-    # also update the empty player_x locations to be off the grid
-    player_x = jnp.where(
-        (player_id != empty)[:,None], player_x, out_of_bounds_x)
-    
-    # concatenate and compact the arrays
-    child_id_offsets = jnp.cumsum(reproduce) - 1
-    child_id = child_start_id + child_id_offsets
-    next_child_start_id = child_id[-1] + 1
-    child_id = jnp.where(reproduce, child_id, -1)
-    child_parents = player_id
-    player_new = jnp.zeros_like(reproduce)
-    all_id, (all_parents, all_x, all_r, all_data, all_new) = vl.concatenate(
-        (player_id, child_id),
-        (
-            (player_parents, player_x, player_r, player_data, player_new),
-            (child_parents, child_x, child_r, child_data, reproduce),
-        ),
-    )
-    
-    # update the object grid
-    if object_grid is not None:
-        object_grid = object_grid.at[all_x[...,0], all_x[...,1]].set(
-            all_id)
-        return (
-            next_child_start_id,
-            all_new,
-            all_id,
-            all_parents,
-            all_x,
-            all_r,
-            all_data,
-            object_grid,
-        )
-    
-    else:
-        return (
-            next_child_start_id,
-            all_new,
-            all_id,
-            all_parents,
-            all_x,
-            all_r,
-            all_data,
-        )
 
 def test_poisson_grid():
     key = jrng.key(1234)
