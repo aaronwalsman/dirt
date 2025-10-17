@@ -1,4 +1,5 @@
 # DIRT
+![alt text](https://github.com/aaronwalsman/dirt/blob/main/images/fig1.png?raw=true)
 
 ## Overview
 Dirt is a set of tools for building large dynamic gridworlds.
