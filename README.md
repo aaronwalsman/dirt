@@ -1,8 +1,8 @@
-# DIRT
-![alt text](https://github.com/aaronwalsman/dirt/blob/main/images/fig1.png?raw=true)
+# DIRT: The Distributed Intelligent Replicator Toolkit
+![Fig1](https://github.com/aaronwalsman/dirt/blob/main/images/fig1.png?raw=true)
 
 ## Overview
-Dirt is a set of tools for building large dynamic gridworlds.
+DIRT is a set of tools for building large dynamic gridworlds.
 
 ## Setup
 
