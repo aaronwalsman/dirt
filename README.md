@@ -1,5 +1,9 @@
 # DIRT: The Distributed Intelligent Replicator Toolkit
 ![Fig1](https://github.com/aaronwalsman/dirt/blob/main/images/fig1.png?raw=true)
+_Simulator Overview: This map contains 1024 × 1024
+grid cells and 10,000 individual agents, which are too small to see
+when fully zoomed out. The inset areas progressively zoom in on
+one patch of terrain to reveal detail._
 
 ## Overview
 DIRT is a set of tools for building large dynamic gridworlds.
