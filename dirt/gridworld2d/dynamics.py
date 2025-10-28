@@ -327,5 +327,5 @@ def make_object_grid(world_size, x, active, empty=-1):
     n, _ = x.shape
     object_grid = jnp.full(world_size, empty, dtype=jnp.int32)
     object_grid = object_grid.at[x[...,0], x[...,1]].set(
-        jnp.where(active, jnp.arange(n), -1))
+        jnp.where(active, jnp.arange(n), empty))
     return object_grid

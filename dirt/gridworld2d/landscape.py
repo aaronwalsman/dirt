@@ -25,12 +25,7 @@ from dirt.distribution.ou import make_ou_process
 from dirt.gridworld2d.geology import fractal_noise
 from dirt.gridworld2d.erosion import simulate_erosion_step, reset_erosion_status
 from dirt.gridworld2d.water import flow_step, flow_step_twodir
-#from dirt.gridworld2d.weather import WeatherParams, weather
-# from dirt.gridworld2d.climate_pattern_day import (
-#     temperature_step, light_step, get_day_status)
 from dirt.gridworld2d.gas import make_gas
-# from dirt.gridworld2d.climate_pattern_day_cont import (
-#     light_step, get_day_status)
 from dirt.gridworld2d.climate_pattern_day_year import (
     light_step, get_day_status)
 from dirt.gridworld2d.climate_pattern_year import (

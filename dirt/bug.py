@@ -1399,6 +1399,8 @@ def make_bugs(
             
             # update the bug physical positions and rotations
             # - empty the positions of the dead bugs in the object grid
+            #   TODO: this seems redundant with the one below that updates for
+            #   new children
             object_grid = (
                 state.object_grid.at[state.x[...,0], state.x[...,1]].set(
                     jnp.where(still_alive, jnp.arange(params.max_players), -1)))
