@@ -29,3 +29,8 @@ dependencies = [
 [project.urls]
 Homepage = "https://github.com/aaronwalsman/dirt"
 Issues = "https://github.com/aaronwalsman/dirt/issues"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["dirt*"]
+exclude = ["images*"]
