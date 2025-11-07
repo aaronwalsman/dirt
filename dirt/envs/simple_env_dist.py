@@ -66,6 +66,8 @@ class SimpleEnvDistParams:
     
     # Debug/test params
     test_mode : bool = False  # Simple test without full simulation
+    allow_migration : bool = False  # Allow bugs to move between devices
+    migration_freq : int = 10  # Migration frequency (every N steps)
     
     # Visualization
     save_video : bool = True
@@ -126,6 +128,181 @@ def make_food_halo_copy(H: int, W: int, halo: int, ndev: int):
 
     return halo_copy
 
+# ---------------- Bug Migration System ----------------
+def make_bug_migration_system(H: int, W: int, halo: int, ndev: int, max_players: int):
+    """
+    Enable actual bug migration between adjacent devices.
+    """
+    L = halo  # Left boundary of interior
+    R = halo + W  # Right boundary of interior
+    
+    perm_right_shift = [(i, (i + 1) % ndev) for i in range(ndev)]
+    perm_left_shift  = [(i, (i - 1) % ndev) for i in range(ndev)]
+
+    def migrate_bugs(bug_x, bug_r, bug_stomach, active, models, role):
+        """Process bug migration between devices"""
+        dev = lax.axis_index(AXIS)
+        
+        # Identify bugs that want to migrate (in halo regions)
+        migrate_left = (bug_x[:, 1] < L) & active  # In left halo
+        migrate_right = (bug_x[:, 1] >= R) & active  # In right halo
+        
+        # Package migrant data
+        def package_bug_data(mask, x_offset):
+            # Only package data for bugs that are migrating
+            migrant_x = jnp.where(mask, bug_x[:, 0], -1)  # y position (-1 for inactive)
+            migrant_x_new = jnp.where(mask, bug_x[:, 1] + x_offset, -1)  # adjusted x position
+            migrant_r = jnp.where(mask, bug_r, 0)
+            migrant_stomach = jnp.where(mask, bug_stomach, 0.0)
+            migrant_models = jnp.where(mask[:, None], models, 0.0)
+            
+            return jnp.stack([migrant_x, migrant_x_new, migrant_r, migrant_stomach], axis=1), migrant_models, mask
+        
+        # Package left and right migrants  
+        left_data, left_models, left_mask = package_bug_data(migrate_left, W)  # Move to right side of left neighbor
+        right_data, right_models, right_mask = package_bug_data(migrate_right, -W)  # Move to left side of right neighbor
+        
+        # Exchange with neighbors (corrected topology)
+        # Send left migrants to left neighbor (device i-1)
+        left_payload_data = lax.cond(dev == 0, lambda _: jnp.zeros_like(left_data), lambda _: left_data, operand=None)
+        left_payload_models = lax.cond(dev == 0, lambda _: jnp.zeros_like(left_models), lambda _: left_models, operand=None)
+        
+        # Left migrants go to left neighbor, so they arrive as immigrants from the right
+        incoming_from_right_data = lax.ppermute(left_payload_data, axis_name=AXIS, perm=perm_left_shift)
+        incoming_from_right_models = lax.ppermute(left_payload_models, axis_name=AXIS, perm=perm_left_shift)
+        
+        # Send right migrants to right neighbor (device i+1)
+        right_payload_data = lax.cond(dev == (ndev-1), lambda _: jnp.zeros_like(right_data), lambda _: right_data, operand=None)
+        right_payload_models = lax.cond(dev == (ndev-1), lambda _: jnp.zeros_like(right_models), lambda _: right_models, operand=None)
+        
+        # Right migrants go to right neighbor, so they arrive as immigrants from the left  
+        incoming_from_left_data = lax.ppermute(right_payload_data, axis_name=AXIS, perm=perm_right_shift)
+        incoming_from_left_models = lax.ppermute(right_payload_models, axis_name=AXIS, perm=perm_right_shift)
+        
+        # Remove emigrants from current device
+        stay_mask = ~(migrate_left | migrate_right)
+        new_bug_x = jnp.where(stay_mask[:, None], bug_x, jnp.array([H+10, W+halo+10]))  # Move emigrants off-grid
+        new_bug_r = jnp.where(stay_mask, bug_r, 0)
+        new_bug_stomach = jnp.where(stay_mask, bug_stomach, 0.0)
+        new_models = jnp.where(stay_mask[:, None], models, 0.0)
+        new_active = stay_mask & active
+        
+        # Process incoming migrants
+        def place_immigrants(incoming_data, incoming_models):
+            # Find valid incoming bugs (y >= 0 indicates valid data)
+            valid_incoming = incoming_data[:, 0] >= 0
+            
+            # Find available slots (inactive bugs)
+            available_slots = ~new_active
+            
+            # Place immigrants in available slots
+            def place_one_immigrant(i, carry):
+                bug_x_c, bug_r_c, bug_stomach_c, models_c, active_c, available_slots_c = carry
+                
+                # Check if this immigrant should be placed
+                immigrant_valid = valid_incoming[i]
+                slot_available = jnp.sum(available_slots_c) > 0
+                should_place = immigrant_valid & slot_available
+                
+                # Find first available slot
+                slot_idx = jnp.argmax(available_slots_c)
+                
+                # Place immigrant
+                immigrant_pos = jnp.array([incoming_data[i, 0], incoming_data[i, 1]], dtype=jnp.int32)
+                bug_x_c = lax.cond(should_place, 
+                                 lambda x: x.at[slot_idx].set(immigrant_pos),
+                                 lambda x: x, bug_x_c)
+                bug_r_c = lax.cond(should_place,
+                                 lambda r: r.at[slot_idx].set(incoming_data[i, 2]),
+                                 lambda r: r, bug_r_c)
+                bug_stomach_c = lax.cond(should_place,
+                                       lambda s: s.at[slot_idx].set(incoming_data[i, 3]),
+                                       lambda s: s, bug_stomach_c)
+                models_c = lax.cond(should_place,
+                                  lambda m: m.at[slot_idx].set(incoming_models[i]),
+                                  lambda m: m, models_c)
+                active_c = lax.cond(should_place,
+                                  lambda a: a.at[slot_idx].set(True),
+                                  lambda a: a, active_c)
+                
+                # Update available slots
+                available_slots_c = lax.cond(should_place,
+                                           lambda a: a.at[slot_idx].set(False),
+                                           lambda a: a, available_slots_c)
+                
+                return bug_x_c, bug_r_c, bug_stomach_c, models_c, active_c, available_slots_c
+            
+            # Process immigrants using JAX-compatible loop
+            def process_immigrant(i, carry):
+                return place_one_immigrant(i, carry)
+            
+            carry = (new_bug_x, new_bug_r, new_bug_stomach, new_models, new_active, available_slots)
+            carry = lax.fori_loop(0, min(32, max_players), process_immigrant, carry)
+            
+            new_bug_x, new_bug_r, new_bug_stomach, new_models, new_active, _ = carry
+            return new_bug_x, new_bug_r, new_bug_stomach, new_models, new_active
+        
+        # Step 1: Remove emigrants (bugs that moved to halo regions)
+        stay_mask = ~(migrate_left | migrate_right)
+        
+        # Keep only staying bugs by masking their active status
+        new_active = active & stay_mask
+        
+        # Clear data for emigrated bugs
+        new_bug_x = jnp.where(stay_mask[:, None], bug_x, jnp.array([0, 0]))
+        new_bug_r = jnp.where(stay_mask, bug_r, 0)
+        new_bug_stomach = jnp.where(stay_mask, bug_stomach, 0.0)
+        new_models = jnp.where(stay_mask[:, None], models, 0.0)
+        
+        # Step 2: Place immigrants in available slots (simplified)
+        available_slots = ~new_active
+        
+        # Process left immigrants (place first valid one)
+        valid_left = jnp.all(incoming_from_left_data != -1, axis=1)
+        has_left_immigrant = jnp.any(valid_left)
+        has_available_slot = jnp.any(available_slots)
+        can_place_left = has_left_immigrant & has_available_slot
+        
+        # Find first valid immigrant and first available slot
+        first_immigrant_idx = jnp.argmax(valid_left)
+        first_slot_idx = jnp.argmax(available_slots)
+        
+        # Place the immigrant
+        new_bug_x = lax.cond(
+            can_place_left,
+            lambda x: x.at[first_slot_idx].set(jnp.array([incoming_from_left_data[first_immigrant_idx, 0], incoming_from_left_data[first_immigrant_idx, 1]], dtype=jnp.int32)),
+            lambda x: x,
+            new_bug_x
+        )
+        new_bug_r = lax.cond(
+            can_place_left,
+            lambda r: r.at[first_slot_idx].set(incoming_from_left_data[first_immigrant_idx, 2]),
+            lambda r: r,
+            new_bug_r
+        )
+        new_bug_stomach = lax.cond(
+            can_place_left,
+            lambda s: s.at[first_slot_idx].set(incoming_from_left_data[first_immigrant_idx, 3]),
+            lambda s: s,
+            new_bug_stomach
+        )
+        new_models = lax.cond(
+            can_place_left,
+            lambda m: m.at[first_slot_idx].set(incoming_from_left_models[first_immigrant_idx]),
+            lambda m: m,
+            new_models
+        )
+        new_active = lax.cond(
+            can_place_left,
+            lambda a: a.at[first_slot_idx].set(True),
+            lambda a: a,
+            new_active
+        )
+        
+        return new_bug_x, new_bug_r, new_bug_stomach, new_models, new_active
+    
+    return migrate_bugs
+
 # ---------------- Simplified Environment ----------------
 def make_simple_env_distributed(params: SimpleEnvDistParams):
     
@@ -140,6 +317,7 @@ def make_simple_env_distributed(params: SimpleEnvDistParams):
         player_family_tree = make_player_family_tree(player_list)
         
         food_halo_copy = make_food_halo_copy(H, W, halo, ndev)
+        bug_migration = make_bug_migration_system(H, W, halo, ndev, params.max_players)
         
         @static_data
         class SimpleEnvDistState:
@@ -154,14 +332,24 @@ def make_simple_env_distributed(params: SimpleEnvDistParams):
         def init_local_state(key: jax.Array, role: jax.Array):
             """Initialize state for one device"""
             
-            family_tree_state = player_family_tree.init(params.initial_players)
+            family_tree_state = player_family_tree.init(params.max_players)
             active = player_family_tree.active(family_tree_state)
+            
+            # Only activate the first initial_players
+            active = active.at[params.initial_players:].set(False)
             
             # Initialize bugs in interior region only [halo, halo+W)
             key, xr_key = jrng.split(key)
             interior_size = (H, W)
-            bug_x, bug_r = spawn.unique_xr(
-                xr_key, params.max_players, interior_size, active)
+            active_slice = active[:params.initial_players]
+            bug_x_active, bug_r_active = spawn.unique_xr(
+                xr_key, params.initial_players, interior_size, active_slice)
+            
+            # Pad to full size
+            bug_x = jnp.zeros((params.max_players, 2), dtype=jnp.int32)
+            bug_r = jnp.zeros(params.max_players, dtype=jnp.int32)
+            bug_x = bug_x.at[:params.initial_players].set(bug_x_active)
+            bug_r = bug_r.at[:params.initial_players].set(bug_r_active)
             
             # Offset bug positions to interior region
             bug_x = bug_x + jnp.array([0, halo])
@@ -255,16 +443,26 @@ def make_simple_env_distributed(params: SimpleEnvDistParams):
                 object_grid=bug_object_grid,
             )
             
-            # Constrain movement to interior region [halo, halo+W)
+            # Handle boundary crossings 
             L, R = halo, halo + W
-            def constrain_movement(new_x, old_x):
-                # Keep bugs within their device's interior
-                constrained_x = jnp.clip(new_x, 
-                                       jnp.array([0, L]), 
-                                       jnp.array([H-1, R-1]))
-                return constrained_x
             
-            bug_x = constrain_movement(bug_x, state.bug_x)
+            def handle_movement_boundaries(new_x, old_x):
+                # Vertical constraints remain the same
+                y_constrained = jnp.clip(new_x[:, 0], 0, H-1)
+                x_pos = new_x[:, 1]
+                
+                if params.allow_migration:
+                    # Allow movement into halo regions (step 1 towards full migration)
+                    # This allows bugs to move closer to boundaries and interact across them
+                    x_constrained = jnp.clip(x_pos, 0, W + 2*halo - 1)
+                else:
+                    # Allow bugs to reach the rightmost interior position (R-1)
+                    # Bugs trying to go further get stuck at the boundary
+                    x_constrained = jnp.clip(x_pos, L, R - 1)
+                
+                return jnp.stack([y_constrained, x_constrained], axis=1)
+            
+            bug_x = handle_movement_boundaries(bug_x, state.bug_x)
             
             # Reproduction
             wants_to_reproduce = (action == REPRODUCE_ACTION) & active
@@ -280,8 +478,8 @@ def make_simple_env_distributed(params: SimpleEnvDistParams):
                 object_grid=bug_object_grid,
             )
             
-            # Constrain child positions to interior
-            child_x = constrain_movement(child_x, bug_x)
+            # Handle child boundary crossings  
+            child_x = handle_movement_boundaries(child_x, bug_x)
             
             # Filter will reproduce based on available slots
             available_slots = params.max_players - active.sum()
@@ -398,7 +596,7 @@ def make_simple_env_distributed(params: SimpleEnvDistParams):
             
             return jnp.clip(image, 0.0, 1.0)
         
-        return init_local_state, transition_with_halo, observe, active_players, family_info, render
+        return init_local_state, transition_with_halo, observe, active_players, family_info, render, bug_migration
     
     return make_device_env
 
@@ -422,8 +620,11 @@ def parse_args():
     parser.add_argument('--food_burn_rate', type=float, default=0.01, help='Food burn rate per step')
     parser.add_argument('--starting_food', type=float, default=0.5, help='Starting food per bug')
     parser.add_argument('--seed', type=int, default=1234, help='Random seed')
+    parser.add_argument('--allow_migration', action='store_true', help='Allow bugs to move between devices')
+    parser.add_argument('--migration_freq', type=int, default=10, help='Migration frequency (every N steps)')
     parser.add_argument('--test_mode', action='store_true', help='Test mode - init only')
     parser.add_argument('--save_video', action='store_true', default=True, help='Save video')
+    parser.add_argument('--no_video', action='store_true', help='Disable video generation')
     parser.add_argument('--video_path', type=str, default='./simple_env_distributed.mp4', help='Video path')
     parser.add_argument('--video_fps', type=int, default=30, help='Video framerate')
     parser.add_argument('--video_length', type=int, default=30, help='Target video length in seconds')
@@ -434,6 +635,17 @@ def main():
     print("=== Simplified Distributed Simple Environment ===")
     
     args = parse_args()
+    
+    # Validate parameters
+    world_positions = args.world_height * args.world_width
+    if args.initial_players >= world_positions:
+        print(f"ERROR: initial_players ({args.initial_players}) >= world positions ({world_positions})")
+        print(f"Adjusting initial_players to {world_positions // 4}")
+        args.initial_players = world_positions // 4
+    
+    # Handle video settings
+    if args.no_video:
+        args.save_video = False
     
     # Create params from args
     params = SimpleEnvDistParams(
@@ -449,6 +661,8 @@ def main():
         food_burn_rate=args.food_burn_rate,
         starting_food=args.starting_food,
         seed=args.seed,
+        allow_migration=args.allow_migration,
+        migration_freq=args.migration_freq,
         test_mode=args.test_mode,
         save_video=args.save_video,
         video_path=args.video_path,
@@ -467,8 +681,8 @@ def main():
     assert jax.device_count() >= ndev, f"Need >= {ndev} devices; found {jax.device_count()}"
     devices = jax.devices()[:ndev]
     print(f"Using {ndev} devices:", devices)
-    print(f"Each device: {H}×{W} interior + {params.halo} halo")
-    print(f"Global domain: {H}×{W*ndev}")
+    print(f"Each device: {H}x{W} interior + {params.halo} halo")
+    print(f"Global domain: {H}x{W*ndev}")
     print("=== Starting initialization ===")
     
     # Create distributed environment
@@ -479,7 +693,7 @@ def main():
     # Get device-specific functions
     print("Getting device-specific functions...")
     device_fns = [make_device_env(i) for i in range(ndev)]
-    init_fn, transition_fn, observe_fn, active_fn, family_fn, render_fn = device_fns[0]
+    init_fn, transition_fn, observe_fn, active_fn, family_fn, render_fn, migrate_fn = device_fns[0]
     print("Device functions created successfully")
     
     # pmap the functions
@@ -499,7 +713,7 @@ def main():
     print("Initializing distributed environment...")
     print("This may take a while for JIT compilation...")
     sharded_state = init_pm(init_keys, roles)
-    print("✓ Distributed environment initialized!")
+    print("SUCCESS: Distributed environment initialized!")
     
     # Test mode: just verify initialization and exit
     if params.test_mode:
@@ -515,10 +729,13 @@ def main():
         sharded_renders = render_pm(sharded_state)
         global_image = stitch_global_image(sharded_renders, ndev)
         print(f"Global image shape: {global_image.shape}")
-        print("✓ Test mode complete!")
+        print("SUCCESS: Test mode complete!")
         return
     
     print(f"Running {params.steps} distributed steps...")
+    
+    import time
+    start_time = time.time()
     
     # Initialize models (neural network weights for each bug)
     key, model_key = jrng.split(key)
@@ -586,6 +803,25 @@ def main():
         sharded_next_state = transition_pm(
             env_keys, sharded_state, sharded_actions, None, roles)
         
+        # Bug migration step (if enabled and at right frequency)
+        if params.allow_migration and (step % params.migration_freq == 0):
+            def migrate_step(state, models, role):
+                active = active_fn(state)
+                new_bug_x, new_bug_r, new_bug_stomach, new_models, new_active = migrate_fn(
+                    state.bug_x, state.bug_r, state.bug_stomach, active, models, role)
+                
+                # Update family tree to reflect new active status
+                # For now, keep it simple - just update positions
+                new_state = state.replace(
+                    bug_x=new_bug_x,
+                    bug_r=new_bug_r, 
+                    bug_stomach=new_bug_stomach
+                )
+                return new_state, new_models
+            
+            migrate_pm = pmap(migrate_step, in_axes=(0, 0, 0), axis_name=AXIS, devices=devices)
+            sharded_next_state, sharded_models = migrate_pm(sharded_next_state, sharded_models, roles)
+        
         # Get next observations
         key, obs_key = jrng.split(key)
         obs_keys = jrng.split(obs_key, ndev)
@@ -607,8 +843,11 @@ def main():
             global_image = stitch_global_image(sharded_renders, ndev)
             video_frames.append(global_image)
         
+        # Progress logging
         if (step + 1) % max(1, params.steps // 10) == 0:
-            print(f"Step {step + 1}/{params.steps}")
+            elapsed = time.time() - start_time
+            steps_per_sec = (step + 1) / elapsed if elapsed > 0 else 0
+            print(f"Step {step + 1}/{params.steps} ({steps_per_sec:.1f} steps/sec)")
     
     print("Simulation complete!")
     
@@ -634,15 +873,37 @@ def main():
         print(f"Video saved: {params.video_path}")
     
     # Final statistics
-    # sharded_state is already a pytree with one element per device
     host_states = [jax.device_get(jtu.tree_map(lambda x: x[i], sharded_state)) for i in range(ndev)]
     total_active = sum(np.sum(active_fn(s)) for s in host_states)
-    total_food = sum(np.mean(s.food) for s in host_states) / ndev
     
-    print(f"Final stats:")
-    print(f"  Total active players: {total_active}")
-    print(f"  Average food density: {total_food:.4f}")
-    print(f"  Per-device active: {[np.sum(active_fn(s)) for s in host_states]}")
+    print(f"Final stats: {total_active} total active players")
 
 if __name__ == '__main__':
     main()
+
+
+
+# python simple_env_dist.py \
+#   --world_height 256 \
+#   --world_width 256 \
+#   --ndev 4 \
+#   --halo 3 \
+#   --steps 10000 \
+#   --initial_players 1024 \
+#   --max_players 8192 \
+#   --learning_rate 0.01 \
+#   --initial_food_density 0.1 \
+#   --per_step_food_density 0.0005 \
+#   --food_burn_rate 0.01 \
+#   --starting_food 0.5 \
+#   --seed 1234 \
+#   --allow_migration \
+#   --migration_freq 10 \
+#   --save_video \
+#   --video_path ./my_simulation.mp4 \
+#   --video_fps 30 \
+#   --video_length 60 \
+#   --max_video_frames 1800
+
+
+# python simple_env_dist.py   --world_height 256   --world_width 256   --ndev 4   --halo 3   --steps 10000   --initial_players 1024   --max_players 8192   --learning_rate 0.01   --initial_food_density 0.1   --per_step_food_density 0.0005   --food_burn_rate 0.01   --starting_food 0.5   --seed 1234   --allow_migration   --migration_freq 10   --save_video   --video_path ./my_simulation.mp4   --video_fps 30   --video_length 60   --max_video_frames 1800
