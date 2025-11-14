@@ -136,10 +136,68 @@ def make_food_halo_copy(H: int, W: int, halo: int, ndev: int):
 
     return halo_copy
 
+# ---------------- Halo Exchange for Bug Object Grid ----------------
+def make_bug_object_halo_copy(H: int, W: int, halo: int, ndev: int):
+    """
+    Copy neighbor bug_object_grid border strips into local ghost cells.
+    This allows bugs to see neighbors across device boundaries for collision detection.
+    """
+    L = halo
+    R = halo + W
+    
+    perm_right_shift = [(i, (i + 1) % ndev) for i in range(ndev)]
+    perm_left_shift  = [(i, (i - 1) % ndev) for i in range(ndev)]
+
+    def halo_copy(bug_grid: jnp.ndarray, role: jnp.ndarray) -> jnp.ndarray:
+        dev = lax.axis_index(AXIS)
+
+        # Real border strips (columns) - use -1 for empty cells
+        my_left_real  = bug_grid[:, L : L + halo]
+        my_right_real = bug_grid[:, R - halo : R]
+
+        # Exchange with neighbors (use -1 for empty boundaries)
+        payload_right = lax.cond(
+            dev == (ndev - 1),
+            lambda _: jnp.full_like(my_right_real, -1),
+            lambda _: my_right_real,
+            operand=None,
+        )
+        left_neighbor_right = lax.ppermute(payload_right, axis_name=AXIS, perm=perm_right_shift)
+
+        payload_left = lax.cond(
+            dev == 0,
+            lambda _: jnp.full_like(my_left_real, -1),
+            lambda _: my_left_real,
+            operand=None,
+        )
+        right_neighbor_left = lax.ppermute(payload_left, axis_name=AXIS, perm=perm_left_shift)
+
+        # Write ghosts (edge-guarded)
+        bug_grid = lax.cond(
+            role > 0,
+            lambda x: x.at[:, 0:L].set(left_neighbor_right),
+            lambda x: x,
+            operand=bug_grid,
+        )
+        bug_grid = lax.cond(
+            role < (ndev - 1), 
+            lambda x: x.at[:, R:R + halo].set(right_neighbor_left),
+            lambda x: x,
+            operand=bug_grid,
+        )
+        return bug_grid
+
+    return halo_copy
+
 # ---------------- Bug Migration System ----------------
-def make_bug_migration_system(H: int, W: int, halo: int, ndev: int, max_players: int):
+def make_bug_migration_system(H: int, W: int, halo: int, ndev: int, max_players: int, bug_object_halo_copy):
     """
     Enable actual bug migration between adjacent devices.
+    Uses bug_object_grid halo exchange to check for collisions before migrating.
+    Migration rules:
+    - Bugs can only migrate to empty cells
+    - If destination is occupied, bug stays on current device
+    - Local moves have priority (handled by normal movement first)
     """
     L = halo  # Left boundary of interior
     R = halo + W  # Right boundary of interior
@@ -147,84 +205,138 @@ def make_bug_migration_system(H: int, W: int, halo: int, ndev: int, max_players:
     perm_right_shift = [(i, (i + 1) % ndev) for i in range(ndev)]
     perm_left_shift  = [(i, (i - 1) % ndev) for i in range(ndev)]
 
-    def migrate_bugs(bug_x, bug_r, bug_stomach, active, models, role):
-        """Process bug migration between devices"""
+    # Migration statistics counters
+    migration_stats = jnp.zeros((ndev, 2), dtype=jnp.int32)  # [device, left/right]
+    
+    def migrate_bugs(bug_x, bug_r, bug_stomach, active, models, bug_object_grid, stats, role):
+        """
+        Process bug migration between devices with collision detection.
+        
+        Args:
+            bug_x: Bug positions (max_players, 2)
+            bug_r: Bug rotations (max_players,)
+            bug_stomach: Bug food storage (max_players,)
+            active: Bug active status (max_players,)
+            models: Bug neural network weights (max_players, NUM_ACTIONS)
+            bug_object_grid: Object grid with halo (H, W+2*halo)
+            stats: Migration statistics array (ndev, 2)
+            role: Device role (0 to ndev-1)
+        
+        Returns:
+            Updated bug_x, bug_r, bug_stomach, models, active, bug_object_grid, stats
+        """
         dev = lax.axis_index(AXIS)
         
-        # Identify bugs that want to migrate (in halo regions)
+        # First, exchange bug_object_grid halos to see neighbors
+        bug_object_grid_with_neighbors = bug_object_halo_copy(bug_object_grid, role)
+        
+        # Identify bugs in halo regions that want to migrate
         migrate_left = (bug_x[:, 1] < L) & active  # In left halo
         migrate_right = (bug_x[:, 1] >= R) & active  # In right halo
         
-        # Package migrant data
-        def package_bug_data(mask, x_offset):
-            # Only package data for bugs that are migrating
-            migrant_x = jnp.where(mask, bug_x[:, 0], -1)  # y position (-1 for inactive)
-            migrant_x_new = jnp.where(mask, bug_x[:, 1] + x_offset, -1)  # adjusted x position
-            migrant_r = jnp.where(mask, bug_r, 0)
-            migrant_stomach = jnp.where(mask, bug_stomach, 0.0)
-            migrant_models = jnp.where(mask[:, None], models, 0.0)
+        # For each migrating bug, check if destination cell is free
+        # Left migrants: destination is in left neighbor's right interior border
+        # Right migrants: destination is in right neighbor's left interior border
+        
+        # Vectorized collision checking
+        # For bugs in left halo: check if their current cell is free in the global view
+        # For bugs in right halo: check if their current cell is free in the global view
+        left_dest_free = bug_object_grid_with_neighbors[bug_x[:, 0], bug_x[:, 1]] == -1
+        right_dest_free = bug_object_grid_with_neighbors[bug_x[:, 0], bug_x[:, 1]] == -1
+        
+        can_migrate_left = migrate_left & left_dest_free
+        can_migrate_right = migrate_right & right_dest_free
+        
+        # Package migrant data (only for bugs that CAN migrate)
+        def package_migrants(can_migrate_mask, x_offset):
+            """Package bug data for migration"""
+            # Create migrant data arrays
+            migrant_y = jnp.where(can_migrate_mask, bug_x[:, 0], -1)
+            migrant_x = jnp.where(can_migrate_mask, bug_x[:, 1] + x_offset, -1)
+            migrant_r = jnp.where(can_migrate_mask, bug_r, 0)
+            migrant_stomach = jnp.where(can_migrate_mask, bug_stomach, 0.0)
+            migrant_models = jnp.where(can_migrate_mask[:, None], models, 0.0)
             
-            return jnp.stack([migrant_x, migrant_x_new, migrant_r, migrant_stomach], axis=1), migrant_models, mask
+            return migrant_y, migrant_x, migrant_r, migrant_stomach, migrant_models
         
-        # Package left and right migrants  
-        left_data, left_models, left_mask = package_bug_data(migrate_left, W)  # Move to right side of left neighbor
-        right_data, right_models, right_mask = package_bug_data(migrate_right, -W)  # Move to left side of right neighbor
+        # Package migrants
+        left_y, left_x, left_r, left_stomach, left_models = package_migrants(can_migrate_left, W)
+        right_y, right_x, right_r, right_stomach, right_models = package_migrants(can_migrate_right, -W)
         
-        # Exchange with neighbors (corrected topology)
-        # Send left migrants to left neighbor (device i-1)
-        left_payload_data = lax.cond(dev == 0, lambda _: jnp.zeros_like(left_data), lambda _: left_data, operand=None)
+        # Exchange migrants with neighbors
+        # Send left migrants to left neighbor
+        left_payload_y = lax.cond(dev == 0, lambda _: jnp.full_like(left_y, -1), lambda _: left_y, operand=None)
+        left_payload_x = lax.cond(dev == 0, lambda _: jnp.full_like(left_x, -1), lambda _: left_x, operand=None)
+        left_payload_r = lax.cond(dev == 0, lambda _: jnp.zeros_like(left_r), lambda _: left_r, operand=None)
+        left_payload_stomach = lax.cond(dev == 0, lambda _: jnp.zeros_like(left_stomach), lambda _: left_stomach, operand=None)
         left_payload_models = lax.cond(dev == 0, lambda _: jnp.zeros_like(left_models), lambda _: left_models, operand=None)
         
-        # Left migrants go to left neighbor, so they arrive as immigrants from the right
-        incoming_from_right_data = lax.ppermute(left_payload_data, axis_name=AXIS, perm=perm_left_shift)
-        incoming_from_right_models = lax.ppermute(left_payload_models, axis_name=AXIS, perm=perm_left_shift)
+        incoming_right_y = lax.ppermute(left_payload_y, axis_name=AXIS, perm=perm_left_shift)
+        incoming_right_x = lax.ppermute(left_payload_x, axis_name=AXIS, perm=perm_left_shift)
+        incoming_right_r = lax.ppermute(left_payload_r, axis_name=AXIS, perm=perm_left_shift)
+        incoming_right_stomach = lax.ppermute(left_payload_stomach, axis_name=AXIS, perm=perm_left_shift)
+        incoming_right_models = lax.ppermute(left_payload_models, axis_name=AXIS, perm=perm_left_shift)
         
-        # Send right migrants to right neighbor (device i+1)
-        right_payload_data = lax.cond(dev == (ndev-1), lambda _: jnp.zeros_like(right_data), lambda _: right_data, operand=None)
+        # Send right migrants to right neighbor
+        right_payload_y = lax.cond(dev == (ndev-1), lambda _: jnp.full_like(right_y, -1), lambda _: right_y, operand=None)
+        right_payload_x = lax.cond(dev == (ndev-1), lambda _: jnp.full_like(right_x, -1), lambda _: right_x, operand=None)
+        right_payload_r = lax.cond(dev == (ndev-1), lambda _: jnp.zeros_like(right_r), lambda _: right_r, operand=None)
+        right_payload_stomach = lax.cond(dev == (ndev-1), lambda _: jnp.zeros_like(right_stomach), lambda _: right_stomach, operand=None)
         right_payload_models = lax.cond(dev == (ndev-1), lambda _: jnp.zeros_like(right_models), lambda _: right_models, operand=None)
         
-        # Right migrants go to right neighbor, so they arrive as immigrants from the left  
-        incoming_from_left_data = lax.ppermute(right_payload_data, axis_name=AXIS, perm=perm_right_shift)
-        incoming_from_left_models = lax.ppermute(right_payload_models, axis_name=AXIS, perm=perm_right_shift)
+        incoming_left_y = lax.ppermute(right_payload_y, axis_name=AXIS, perm=perm_right_shift)
+        incoming_left_x = lax.ppermute(right_payload_x, axis_name=AXIS, perm=perm_right_shift)
+        incoming_left_r = lax.ppermute(right_payload_r, axis_name=AXIS, perm=perm_right_shift)
+        incoming_left_stomach = lax.ppermute(right_payload_stomach, axis_name=AXIS, perm=perm_right_shift)
+        incoming_left_models = lax.ppermute(right_payload_models, axis_name=AXIS, perm=perm_right_shift)
         
-        # Remove emigrants from current device
-        stay_mask = ~(migrate_left | migrate_right)
-        new_bug_x = jnp.where(stay_mask[:, None], bug_x, jnp.array([H+10, W+halo+10]))  # Move emigrants off-grid
+        # Remove emigrants (bugs that successfully migrated)
+        stay_mask = ~(can_migrate_left | can_migrate_right)
+        new_active = active & stay_mask
+        
+        # Count emigrants for statistics
+        num_emigrated_left = jnp.sum(can_migrate_left)
+        num_emigrated_right = jnp.sum(can_migrate_right)
+        
+        # Clear emigrant data
+        new_bug_x = jnp.where(stay_mask[:, None], bug_x, jnp.array([0, 0], dtype=jnp.int32))
         new_bug_r = jnp.where(stay_mask, bug_r, 0)
         new_bug_stomach = jnp.where(stay_mask, bug_stomach, 0.0)
         new_models = jnp.where(stay_mask[:, None], models, 0.0)
-        new_active = stay_mask & active
         
-        # Process incoming migrants
-        def place_immigrants(incoming_data, incoming_models):
-            # Find valid incoming bugs (y >= 0 indicates valid data)
-            valid_incoming = incoming_data[:, 0] >= 0
-            
-            # Find available slots (inactive bugs)
-            available_slots = ~new_active
-            
-            # Place immigrants in available slots
-            def place_one_immigrant(i, carry):
-                bug_x_c, bug_r_c, bug_stomach_c, models_c, active_c, available_slots_c = carry
+        # Place immigrants in their exact positions
+        # Find valid incoming bugs
+        valid_from_left = incoming_left_y >= 0
+        valid_from_right = incoming_right_y >= 0
+        
+        # Find available slots
+        available_slots = ~new_active
+        
+        # Super simplified immigrant placement - just place first few valid ones
+        # This is fast and handles the common case where few bugs migrate
+        def place_first_n_immigrants(incoming_y, incoming_x, incoming_r, incoming_stomach, incoming_models, valid_mask, n=32):
+            """Place first N valid immigrants - fast implementation"""
+            def place_one(i, carry):
+                bug_x_c, bug_r_c, bug_stomach_c, models_c, active_c, slots_c = carry
                 
-                # Check if this immigrant should be placed
-                immigrant_valid = valid_incoming[i]
-                slot_available = jnp.sum(available_slots_c) > 0
-                should_place = immigrant_valid & slot_available
+                # Check if this is a valid immigrant and we have a slot
+                is_valid = valid_mask[i]
+                has_slot = jnp.sum(slots_c) > 0
+                should_place = is_valid & has_slot
                 
                 # Find first available slot
-                slot_idx = jnp.argmax(available_slots_c)
+                slot_idx = jnp.argmax(slots_c)
                 
-                # Place immigrant
-                immigrant_pos = jnp.array([incoming_data[i, 0], incoming_data[i, 1]], dtype=jnp.int32)
-                bug_x_c = lax.cond(should_place, 
-                                 lambda x: x.at[slot_idx].set(immigrant_pos),
+                # Place immigrant at their actual spatial position
+                new_pos = jnp.array([incoming_y[i], incoming_x[i]], dtype=jnp.int32)
+                bug_x_c = lax.cond(should_place,
+                                 lambda x: x.at[slot_idx].set(new_pos),
                                  lambda x: x, bug_x_c)
                 bug_r_c = lax.cond(should_place,
-                                 lambda r: r.at[slot_idx].set(incoming_data[i, 2]),
+                                 lambda r: r.at[slot_idx].set(incoming_r[i]),
                                  lambda r: r, bug_r_c)
                 bug_stomach_c = lax.cond(should_place,
-                                       lambda s: s.at[slot_idx].set(incoming_data[i, 3]),
+                                       lambda s: s.at[slot_idx].set(incoming_stomach[i]),
                                        lambda s: s, bug_stomach_c)
                 models_c = lax.cond(should_place,
                                   lambda m: m.at[slot_idx].set(incoming_models[i]),
@@ -232,82 +344,39 @@ def make_bug_migration_system(H: int, W: int, halo: int, ndev: int, max_players:
                 active_c = lax.cond(should_place,
                                   lambda a: a.at[slot_idx].set(True),
                                   lambda a: a, active_c)
+                slots_c = lax.cond(should_place,
+                                 lambda s: s.at[slot_idx].set(False),
+                                 lambda s: s, slots_c)
                 
-                # Update available slots
-                available_slots_c = lax.cond(should_place,
-                                           lambda a: a.at[slot_idx].set(False),
-                                           lambda a: a, available_slots_c)
-                
-                return bug_x_c, bug_r_c, bug_stomach_c, models_c, active_c, available_slots_c
-            
-            # Process immigrants using JAX-compatible loop
-            def process_immigrant(i, carry):
-                return place_one_immigrant(i, carry)
+                return bug_x_c, bug_r_c, bug_stomach_c, models_c, active_c, slots_c
             
             carry = (new_bug_x, new_bug_r, new_bug_stomach, new_models, new_active, available_slots)
-            carry = lax.fori_loop(0, min(32, max_players), process_immigrant, carry)
-            
-            new_bug_x, new_bug_r, new_bug_stomach, new_models, new_active, _ = carry
-            return new_bug_x, new_bug_r, new_bug_stomach, new_models, new_active
+            # Only process first N positions to keep it fast
+            carry = lax.fori_loop(0, min(n, max_players), place_one, carry)
+            return carry
         
-        # Step 1: Remove emigrants (bugs that moved to halo regions)
-        stay_mask = ~(migrate_left | migrate_right)
+        # Place immigrants from left, then from right (process first 32 from each direction)
+        carry = place_first_n_immigrants(
+            incoming_left_y, incoming_left_x, incoming_left_r, 
+            incoming_left_stomach, incoming_left_models, valid_from_left, n=32)
+        new_bug_x, new_bug_r, new_bug_stomach, new_models, new_active, available_slots = carry
         
-        # Keep only staying bugs by masking their active status
-        new_active = active & stay_mask
+        carry = place_first_n_immigrants(
+            incoming_right_y, incoming_right_x, incoming_right_r,
+            incoming_right_stomach, incoming_right_models, valid_from_right, n=32)
+        new_bug_x, new_bug_r, new_bug_stomach, new_models, new_active, _ = carry
         
-        # Clear data for emigrated bugs
-        new_bug_x = jnp.where(stay_mask[:, None], bug_x, jnp.array([0, 0]))
-        new_bug_r = jnp.where(stay_mask, bug_r, 0)
-        new_bug_stomach = jnp.where(stay_mask, bug_stomach, 0.0)
-        new_models = jnp.where(stay_mask[:, None], models, 0.0)
+        # Rebuild bug_object_grid
+        world_with_halo = (H, W + 2 * halo)
+        new_bug_object_grid = jnp.full(world_with_halo, -1, dtype=jnp.int32)
+        new_bug_object_grid = new_bug_object_grid.at[new_bug_x[...,0], new_bug_x[...,1]].set(
+            jnp.where(new_active, jnp.arange(max_players), -1))
         
-        # Step 2: Place immigrants in available slots (simplified)
-        available_slots = ~new_active
+        # Update migration statistics
+        new_stats = stats.at[dev, 0].add(num_emigrated_left)  # Left emigrations
+        new_stats = new_stats.at[dev, 1].add(num_emigrated_right)  # Right emigrations
         
-        # Process left immigrants (place first valid one)
-        valid_left = jnp.all(incoming_from_left_data != -1, axis=1)
-        has_left_immigrant = jnp.any(valid_left)
-        has_available_slot = jnp.any(available_slots)
-        can_place_left = has_left_immigrant & has_available_slot
-        
-        # Find first valid immigrant and first available slot
-        first_immigrant_idx = jnp.argmax(valid_left)
-        first_slot_idx = jnp.argmax(available_slots)
-        
-        # Place the immigrant
-        new_bug_x = lax.cond(
-            can_place_left,
-            lambda x: x.at[first_slot_idx].set(jnp.array([incoming_from_left_data[first_immigrant_idx, 0], incoming_from_left_data[first_immigrant_idx, 1]], dtype=jnp.int32)),
-            lambda x: x,
-            new_bug_x
-        )
-        new_bug_r = lax.cond(
-            can_place_left,
-            lambda r: r.at[first_slot_idx].set(incoming_from_left_data[first_immigrant_idx, 2]),
-            lambda r: r,
-            new_bug_r
-        )
-        new_bug_stomach = lax.cond(
-            can_place_left,
-            lambda s: s.at[first_slot_idx].set(incoming_from_left_data[first_immigrant_idx, 3]),
-            lambda s: s,
-            new_bug_stomach
-        )
-        new_models = lax.cond(
-            can_place_left,
-            lambda m: m.at[first_slot_idx].set(incoming_from_left_models[first_immigrant_idx]),
-            lambda m: m,
-            new_models
-        )
-        new_active = lax.cond(
-            can_place_left,
-            lambda a: a.at[first_slot_idx].set(True),
-            lambda a: a,
-            new_active
-        )
-        
-        return new_bug_x, new_bug_r, new_bug_stomach, new_models, new_active
+        return new_bug_x, new_bug_r, new_bug_stomach, new_models, new_active, new_bug_object_grid, new_stats
     
     return migrate_bugs
 
@@ -325,7 +394,8 @@ def make_simple_env_distributed(params: SimpleEnvDistParams):
         player_family_tree = make_player_family_tree(player_list)
         
         food_halo_copy = make_food_halo_copy(H, W, halo, ndev)
-        bug_migration = make_bug_migration_system(H, W, halo, ndev, params.max_players)
+        bug_object_halo_copy = make_bug_object_halo_copy(H, W, halo, ndev)
+        bug_migration = make_bug_migration_system(H, W, halo, ndev, params.max_players, bug_object_halo_copy)
         
         @static_data
         class SimpleEnvDistState:
@@ -385,7 +455,7 @@ def make_simple_env_distributed(params: SimpleEnvDistParams):
             
             return SimpleEnvDistState(
                 bug_x=bug_x,
-                bug_r=bug_r, 
+                bug_r=bug_r,
                 bug_object_grid=bug_object_grid,
                 bug_stomach=bug_stomach,
                 family_tree_state=family_tree_state,
@@ -536,7 +606,7 @@ def make_simple_env_distributed(params: SimpleEnvDistParams):
             bug_object_grid = bug_object_grid.at[bug_x[...,0], bug_x[...,1]].set(
                 jnp.where(active, jnp.arange(params.max_players), -1))
             
-            # Update state
+            # Update state (keep migrated as-is, migration function will update it)
             state = state.replace(
                 bug_x=bug_x,
                 bug_r=bug_r,
@@ -689,9 +759,9 @@ def diagnose_gpu_communication():
                         print(f"   GPU {gpu_id}: {active_count} active NVLink(s)")
             
             if nvlink_active:
-                print("   ✓ NVLink connections active (GPU-direct enabled)")
+                print("   NVLink connections active (GPU-direct enabled)")
             else:
-                print("   ✗ No active NVLink connections (may use PCIe/CPU)")
+                print("   No active NVLink connections (may use PCIe/CPU)")
         except Exception as e:
             print(f"   Could not check GPU topology: {e}")
     
@@ -721,7 +791,7 @@ def diagnose_gpu_communication():
         # Calculate bandwidth
         data_size = test_data.nbytes * 2  # all-reduce: send + receive
         bandwidth_gbps = (data_size / (elapsed if elapsed > 0 else 1e-6)) / 1e9
-        print(f"   ✓ Collective operations: {elapsed*1000:.2f}ms, {bandwidth_gbps:.2f} GB/s")
+        print(f"   Collective operations: {elapsed*1000:.2f}ms, {bandwidth_gbps:.2f} GB/s")
         
         # Test ppermute
         def test_ppermute(x):
@@ -736,25 +806,12 @@ def diagnose_gpu_communication():
         elapsed = time.time() - start
         
         bandwidth_gbps = (test_data.nbytes / (elapsed if elapsed > 0 else 1e-6)) / 1e9
-        print(f"   ✓ Point-to-point (ppermute): {elapsed*1000:.2f}ms, {bandwidth_gbps:.2f} GB/s")
+        print(f"   Point-to-point (ppermute): {elapsed*1000:.2f}ms, {bandwidth_gbps:.2f} GB/s")
         
     except Exception as e:
-        print(f"   ✗ Communication test failed: {e}")
+        print(f"   Communication test failed: {e}")
     
     print("\n" + "="*60)
-    print("RECOMMENDATIONS:")
-    print("="*60)
-    
-    if jax.default_backend() == 'gpu':
-        print("For optimal GPU-to-GPU communication:")
-        print("1. Enable NCCL P2P over NVLink: export NCCL_P2P_LEVEL=NVL")
-        print("2. For debugging: export NCCL_DEBUG=INFO")
-        print("3. Note: JAX pmap ppermute has inherent overhead (~0.3ms + low bandwidth)")
-        print("4. Collective ops (all-reduce) will use NVLink efficiently (50+ GB/s)")
-        print("5. For small halo exchanges, overhead is typically <1% of step time")
-    else:
-        print(f"⚠ Backend is '{jax.default_backend()}', not 'gpu'")
-        print("  GPU communication optimizations won't apply.")
     
     print("="*60 + "\n")
 
@@ -825,7 +882,7 @@ def benchmark_communication(ndev: int, H: int, W: int, halo: int):
         print(f"  - Run the full diagnostic to see all-reduce performance")
         print(f"  - Collective ops should show >50 GB/s if NVLink is active")
     elif bandwidth_gbps > 50:
-        print(f"\n✓ Excellent bandwidth - using NVLink or similar high-speed interconnect")
+        print(f"\nExcellent bandwidth - using NVLink or similar high-speed interconnect")
     
     print("="*60 + "\n")
 
@@ -1026,24 +1083,28 @@ def main():
     
     # Define migration step function OUTSIDE the loop
     if params.allow_migration:
-        def migrate_step(state, models, role):
+        def migrate_step(state, models, stats, role):
             active = active_fn(state)
-            new_bug_x, new_bug_r, new_bug_stomach, new_models, new_active = migrate_fn(
-                state.bug_x, state.bug_r, state.bug_stomach, active, models, role)
+            new_bug_x, new_bug_r, new_bug_stomach, new_models, new_active, new_bug_object_grid, new_stats = migrate_fn(
+                state.bug_x, state.bug_r, state.bug_stomach, active, models, state.bug_object_grid, stats, role)
             
-            # Update family tree to reflect new active status
-            # For now, keep it simple - just update positions
+            # Update state with migrated bugs
             new_state = state.replace(
                 bug_x=new_bug_x,
                 bug_r=new_bug_r, 
-                bug_stomach=new_bug_stomach
+                bug_stomach=new_bug_stomach,
+                bug_object_grid=new_bug_object_grid
             )
-            return new_state, new_models
+            return new_state, new_models, new_stats
         
-        migrate_pm = pmap(migrate_step, in_axes=(0, 0, 0), axis_name=AXIS, devices=devices)
+        migrate_pm = pmap(migrate_step, in_axes=(0, 0, 0, 0), axis_name=AXIS, devices=devices)
     
     print(f"Starting main simulation loop...")
     print(f"TIP: Use Ctrl+C to stop early and still save video")
+    
+    # Initialize migration statistics
+    if params.allow_migration:
+        sharded_migration_stats = jnp.zeros((ndev, ndev, 2), dtype=jnp.int32)
     
     # Run simulation with evolution
     for step in range(params.steps):
@@ -1056,7 +1117,8 @@ def main():
         
         # Bug migration step (if enabled and at right frequency)
         if params.allow_migration and (step % params.migration_freq == 0):
-            sharded_state, sharded_models = migrate_pm(sharded_state, sharded_models, roles)
+            sharded_state, sharded_models, sharded_migration_stats = migrate_pm(
+                sharded_state, sharded_models, sharded_migration_stats, roles)
         
         # Render for video (keep on GPU until end to avoid blocking)
         if params.save_video and step % video_sample_freq == 0:
@@ -1070,6 +1132,34 @@ def main():
             print(f"Step {step + 1}/{params.steps} ({steps_per_sec:.1f} steps/sec)")
     
     print("Simulation complete!")
+    
+    # Print migration statistics
+    if params.allow_migration:
+        print("\n" + "="*60)
+        print("MIGRATION REPORT")
+        print("="*60)
+        stats_cpu = np.array(sharded_migration_stats)
+        total_migrations = 0
+        for dev in range(ndev):
+            left_emigrants = int(stats_cpu[dev, dev, 0])
+            right_emigrants = int(stats_cpu[dev, dev, 1])
+            dev_total = left_emigrants + right_emigrants
+            total_migrations += dev_total
+            
+            if dev_total > 0:
+                left_target = (dev - 1) if dev > 0 else "boundary"
+                right_target = (dev + 1) if dev < ndev - 1 else "boundary"
+                print(f"\nGPU {dev}:")
+                if left_emigrants > 0:
+                    print(f"  Left to GPU {left_target}: {left_emigrants} bugs")
+                if right_emigrants > 0:
+                    print(f"  Right to GPU {right_target}: {right_emigrants} bugs")
+        
+        print(f"\nTotal migrations: {total_migrations} bugs")
+        if params.steps > 0:
+            avg_per_step = total_migrations / params.steps
+            print(f"Average per step: {avg_per_step:.2f} bugs")
+        print("="*60 + "\n")
     
     # Save video
     if params.save_video and video_frames:
