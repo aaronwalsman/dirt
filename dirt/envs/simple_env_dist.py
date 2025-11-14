@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
 """
-Simplified Distributed Simple Environment with basic argument parsing.
+Simplified Distributed Simple Environment.
 """
 
 import os
 os.environ.setdefault("XLA_PYTHON_CLIENT_PREALLOCATE", "false")
+# Enable NCCL P2P over NVLink for GPU-to-GPU communication
+os.environ.setdefault("NCCL_P2P_LEVEL", "NVL")
+os.environ.setdefault("NCCL_SHM_DISABLE", "0")  # Allow shared memory for local GPUs
 
 import sys
 import argparse
@@ -16,6 +19,7 @@ import jax.numpy as jnp
 import jax.random as jrng
 from jax import lax, pmap
 import jax.tree_util as jtu
+from jax.experimental.compilation_cache import compilation_cache as cc
 
 from mechagogue.static import static_data
 from mechagogue.breed.normal import normal_mutate
@@ -67,7 +71,7 @@ class SimpleEnvDistParams:
     # Debug/test params
     test_mode : bool = False  # Simple test without full simulation
     allow_migration : bool = False  # Allow bugs to move between devices
-    migration_freq : int = 10  # Migration frequency (every N steps)
+    migration_freq : int = 1  # Migration frequency (every N steps)
     
     # Visualization
     save_video : bool = True
@@ -75,6 +79,10 @@ class SimpleEnvDistParams:
     video_fps : int = 30
     video_length : int = 30  # Target video length in seconds  
     max_video_frames : int = 1000
+    
+    # Performance/Diagnostics
+    profile_communication : bool = False  # Profile GPU communication
+    verify_gpu_direct : bool = True  # Verify direct GPU-to-GPU communication
 
 # ---------------- Halo Exchange for Food Grid ----------------
 def make_food_halo_copy(H: int, W: int, halo: int, ndev: int):
@@ -589,10 +597,10 @@ def make_simple_env_distributed(params: SimpleEnvDistParams):
                 interior_bugs
             )
             
-            # Use scatter-add for rendering bugs
-            bug_indices = jnp.where(valid_positions[:, None], interior_bug_x, jnp.array([H-1, W-1]))
-            image = image.at[bug_indices[:, 0], bug_indices[:, 1]].add(
-                jnp.where(valid_positions[:, None], bug_color * 0.5, 0.0))
+            # Use scatter-add for rendering bugs (ensure correct dtypes)
+            bug_indices = jnp.where(valid_positions[:, None], interior_bug_x, jnp.array([H-1, W-1], dtype=jnp.int32))
+            bug_colors_to_add = jnp.where(valid_positions[:, None], bug_color * 0.5, 0.0).astype(jnp.float32)
+            image = image.at[bug_indices[:, 0], bug_indices[:, 1]].add(bug_colors_to_add)
             
             return jnp.clip(image, 0.0, 1.0)
         
@@ -629,7 +637,197 @@ def parse_args():
     parser.add_argument('--video_fps', type=int, default=30, help='Video framerate')
     parser.add_argument('--video_length', type=int, default=30, help='Target video length in seconds')
     parser.add_argument('--max_video_frames', type=int, default=1000, help='Maximum video frames to save')
+    parser.add_argument('--profile_communication', action='store_true', help='Profile GPU communication performance')
+    parser.add_argument('--verify_gpu_direct', action='store_true', default=True, help='Verify direct GPU communication')
     return parser.parse_args()
+
+def diagnose_gpu_communication():
+    """Diagnose GPU communication capabilities and performance"""
+    print("\n" + "="*60)
+    print("GPU COMMUNICATION DIAGNOSTICS")
+    print("="*60)
+    
+    # 1. Check JAX backend
+    print(f"\n1. JAX Backend: {jax.default_backend()}")
+    print(f"   JAX version: {jax.__version__}")
+    
+    # 2. Device information
+    devices = jax.devices()
+    print(f"\n2. Devices ({len(devices)} total):")
+    for i, dev in enumerate(devices):
+        print(f"   [{i}] {dev}")
+        print(f"       Platform: {dev.platform}")
+        print(f"       Device kind: {dev.device_kind}")
+    
+    # 3. Check for GPU peer-to-peer access (NVIDIA specific)
+    if jax.default_backend() == 'gpu':
+        print("\n3. GPU Communication Check:")
+        try:
+            import subprocess
+            # Check NCCL availability
+            result = subprocess.run(['nvidia-smi', 'topo', '-m'], 
+                                  capture_output=True, text=True, timeout=5)
+            if result.returncode == 0:
+                print("   GPU Topology (nvidia-smi topo -m):")
+                print("   " + "\n   ".join(result.stdout.split('\n')[:20]))
+            
+            # Check for NVLink (per-GPU, check for bandwidth values)
+            print("\n   NVLink Status (per GPU):")
+            nvlink_active = False
+            for gpu_id in range(len(devices)):
+                result = subprocess.run(['nvidia-smi', 'nvlink', '--status', '-i', str(gpu_id)],
+                                      capture_output=True, text=True, timeout=5)
+                if result.returncode == 0:
+                    # Check for bandwidth values (e.g., "26.562 GB/s" means link is active)
+                    if 'GB/s' in result.stdout:
+                        nvlink_active = True
+                        active_count = result.stdout.count('GB/s')
+                        print(f"   GPU {gpu_id}: {active_count} active NVLink(s)")
+                    elif 'Active' in result.stdout:
+                        nvlink_active = True
+                        active_count = result.stdout.count('Active')
+                        print(f"   GPU {gpu_id}: {active_count} active NVLink(s)")
+            
+            if nvlink_active:
+                print("   ✓ NVLink connections active (GPU-direct enabled)")
+            else:
+                print("   ✗ No active NVLink connections (may use PCIe/CPU)")
+        except Exception as e:
+            print(f"   Could not check GPU topology: {e}")
+    
+    # 4. JAX distributed configuration
+    print("\n4. JAX Distributed Config:")
+    print(f"   XLA flags: {os.environ.get('XLA_FLAGS', 'Not set')}")
+    print(f"   NCCL debug: {os.environ.get('NCCL_DEBUG', 'Not set')}")
+    print(f"   XLA backend: {os.environ.get('JAX_PLATFORMS', jax.default_backend())}")
+    
+    # 5. Communication backend test
+    print("\n5. Testing collective operations:")
+    try:
+        ndev = min(4, len(devices))
+        test_data = jnp.arange(ndev * 100).reshape(ndev, 100)
+        
+        def test_allreduce(x):
+            return lax.psum(x, axis_name='batch')
+        
+        test_allreduce_pm = pmap(test_allreduce, axis_name='batch', devices=devices[:ndev])
+        
+        import time
+        start = time.time()
+        result = test_allreduce_pm(test_data)
+        result.block_until_ready()
+        elapsed = time.time() - start
+        
+        # Calculate bandwidth
+        data_size = test_data.nbytes * 2  # all-reduce: send + receive
+        bandwidth_gbps = (data_size / (elapsed if elapsed > 0 else 1e-6)) / 1e9
+        print(f"   ✓ Collective operations: {elapsed*1000:.2f}ms, {bandwidth_gbps:.2f} GB/s")
+        
+        # Test ppermute
+        def test_ppermute(x):
+            perm = [(i, (i+1) % ndev) for i in range(ndev)]
+            return lax.ppermute(x, 'batch', perm)
+        
+        test_ppermute_pm = pmap(test_ppermute, axis_name='batch', devices=devices[:ndev])
+        
+        start = time.time()
+        result = test_ppermute_pm(test_data)
+        result.block_until_ready()
+        elapsed = time.time() - start
+        
+        bandwidth_gbps = (test_data.nbytes / (elapsed if elapsed > 0 else 1e-6)) / 1e9
+        print(f"   ✓ Point-to-point (ppermute): {elapsed*1000:.2f}ms, {bandwidth_gbps:.2f} GB/s")
+        
+    except Exception as e:
+        print(f"   ✗ Communication test failed: {e}")
+    
+    print("\n" + "="*60)
+    print("RECOMMENDATIONS:")
+    print("="*60)
+    
+    if jax.default_backend() == 'gpu':
+        print("For optimal GPU-to-GPU communication:")
+        print("1. Enable NCCL P2P over NVLink: export NCCL_P2P_LEVEL=NVL")
+        print("2. For debugging: export NCCL_DEBUG=INFO")
+        print("3. Note: JAX pmap ppermute has inherent overhead (~0.3ms + low bandwidth)")
+        print("4. Collective ops (all-reduce) will use NVLink efficiently (50+ GB/s)")
+        print("5. For small halo exchanges, overhead is typically <1% of step time")
+    else:
+        print(f"⚠ Backend is '{jax.default_backend()}', not 'gpu'")
+        print("  GPU communication optimizations won't apply.")
+    
+    print("="*60 + "\n")
+
+def benchmark_communication(ndev: int, H: int, W: int, halo: int):
+    """Benchmark actual communication bandwidth for halo exchange"""
+    print("\n" + "="*60)
+    print("COMMUNICATION BANDWIDTH BENCHMARK")
+    print("="*60)
+    
+    devices = jax.devices()[:ndev]
+    
+    # Create test food grid
+    food_grid_shape = (H, W + 2*halo)
+    test_grids = jnp.ones((ndev, *food_grid_shape), dtype=jnp.float32)
+    
+    # Benchmark halo exchange
+    from dirt.envs.simple_env_dist import make_food_halo_copy
+    halo_copy = make_food_halo_copy(H, W, halo, ndev)
+    halo_copy_pm = pmap(halo_copy, in_axes=(0, 0), axis_name='mesh', devices=devices)
+    
+    roles = jnp.arange(ndev, dtype=jnp.int32)
+    
+    import time
+    
+    # Warmup
+    for _ in range(5):
+        _ = halo_copy_pm(test_grids, roles)
+    
+    # Benchmark
+    n_trials = 50
+    times = []
+    for _ in range(n_trials):
+        start = time.time()
+        result = halo_copy_pm(test_grids, roles)
+        result.block_until_ready()
+        times.append(time.time() - start)
+    
+    avg_time = np.mean(times) * 1000  # ms
+    std_time = np.std(times) * 1000
+    
+    # Calculate bandwidth
+    bytes_per_halo = halo * H * 4  # float32 = 4 bytes
+    bytes_transferred = 2 * bytes_per_halo * ndev  # 2 halos per device
+    bandwidth_gbps = (bytes_transferred / (avg_time / 1000)) / 1e9
+    
+    print(f"\nHalo Exchange Performance:")
+    print(f"  Grid shape per device: {food_grid_shape}")
+    print(f"  Halo width: {halo}")
+    print(f"  Bytes per halo: {bytes_per_halo:,}")
+    print(f"  Total bytes transferred: {bytes_transferred:,}")
+    print(f"  Average time: {avg_time:.3f} ± {std_time:.3f} ms")
+    print(f"  Bandwidth: {bandwidth_gbps:.2f} GB/s")
+    
+    # Reference bandwidths
+    print(f"\nReference Bandwidths:")
+    print(f"  NVLink 3.0: ~300 GB/s (per link)")
+    print(f"  NVLink 2.0: ~150 GB/s (per link)")
+    print(f"  PCIe 4.0 x16: ~32 GB/s")
+    print(f"  PCIe 3.0 x16: ~16 GB/s")
+    print(f"  CPU memory: ~1-10 GB/s (bottleneck!)")
+    
+    if bandwidth_gbps < 10:
+        print(f"\n⚠ Low ppermute bandwidth (expected for JAX pmap)")
+        print(f"  JAX ppermute has high overhead and limited bandwidth utilization.")
+        print(f"  This is a known limitation, not a hardware/NCCL issue.")
+        print(f"  For small halos (3 pixels), overhead is negligible vs computation.")
+        print(f"\n  To verify NCCL/NVLink is working, check collective ops bandwidth:")
+        print(f"  - Run the full diagnostic to see all-reduce performance")
+        print(f"  - Collective ops should show >50 GB/s if NVLink is active")
+    elif bandwidth_gbps > 50:
+        print(f"\n✓ Excellent bandwidth - using NVLink or similar high-speed interconnect")
+    
+    print("="*60 + "\n")
 
 def main():
     print("=== Simplified Distributed Simple Environment ===")
@@ -669,6 +867,8 @@ def main():
         video_fps=args.video_fps,
         video_length=args.video_length,
         max_video_frames=args.max_video_frames,
+        profile_communication=args.profile_communication,
+        verify_gpu_direct=args.verify_gpu_direct,
     )
     
     H, W = params.world_size
@@ -677,6 +877,10 @@ def main():
     print(f"JAX version: {jax.__version__}")
     print(f"Available devices: {jax.device_count()}")
     print(f"Device list: {jax.devices()}")
+    
+    # Run diagnostics if requested
+    if params.verify_gpu_direct:
+        diagnose_gpu_communication()
     
     assert jax.device_count() >= ndev, f"Need >= {ndev} devices; found {jax.device_count()}"
     devices = jax.devices()[:ndev]
@@ -714,6 +918,10 @@ def main():
     print("This may take a while for JIT compilation...")
     sharded_state = init_pm(init_keys, roles)
     print("SUCCESS: Distributed environment initialized!")
+    
+    # Benchmark communication if requested
+    if params.profile_communication:
+        benchmark_communication(ndev, H, W, params.halo)
     
     # Test mode: just verify initialization and exit
     if params.test_mode:
@@ -760,14 +968,14 @@ def main():
     act_pm = pmap(act, in_axes=(0, 0, 0), axis_name=AXIS, devices=devices)
     
     # Video recording setup
+    video_frames = []
     if params.save_video:
-        import imageio
-        video_frames = []
-        
         # Calculate sampling frequency for desired video length
         target_frames = min(params.video_fps * params.video_length, params.max_video_frames)
         video_sample_freq = max(1, params.steps // target_frames)
         print(f"Video sampling: every {video_sample_freq} steps for {target_frames} frames ({target_frames/params.video_fps:.1f}s at {params.video_fps}fps)")
+    else:
+        video_sample_freq = params.steps + 1  # Never render
     
     # Get initial observations
     key, obs_key = jrng.split(key)
@@ -790,58 +998,70 @@ def main():
     
     update_models_pm = pmap(update_models, in_axes=(0, 0, 0, 0), axis_name=AXIS, devices=devices)
     
-    # Run simulation with evolution
-    for step in range(params.steps):
-        # Get actions from neural network models
-        key, action_key = jrng.split(key)
-        action_keys = jrng.split(action_key, ndev)
-        sharded_actions = act_pm(action_keys, sharded_models, sharded_obs)
+    # Create a combined step function to reduce pmap overhead
+    def combined_step(keys, state, models, obs, role, step_num):
+        """Combined step: act -> transition -> observe -> update_models"""
+        action_key, env_key, obs_key, mutate_key = jrng.split(keys, 4)
+        
+        # Get actions
+        u = jrng.uniform(action_key, models.shape, minval=1e-6, maxval=1.)
+        gumbel = -jnp.log(-jnp.log(u))
+        actions = jnp.argmax(models + gumbel, axis=-1)
         
         # Environment step
-        key, env_key = jrng.split(key)
-        env_keys = jrng.split(env_key, ndev)
-        sharded_next_state = transition_pm(
-            env_keys, sharded_state, sharded_actions, None, roles)
+        next_state = transition_fn(env_key, state, actions, None, role)
+        
+        # Get next observations
+        next_obs = observe_fn(obs_key, next_state)
+        
+        # Update models based on reproduction
+        parents, children = family_fn(next_state)
+        parent_models = models[parents]
+        mutated_parents = mutate(mutate_key, parent_models)
+        next_models = models.at[children].set(mutated_parents[..., 0])
+        
+        return next_state, next_models, next_obs
+    
+    combined_step_pm = pmap(combined_step, in_axes=(0, 0, 0, 0, 0, None), axis_name=AXIS, devices=devices)
+    
+    # Define migration step function OUTSIDE the loop
+    if params.allow_migration:
+        def migrate_step(state, models, role):
+            active = active_fn(state)
+            new_bug_x, new_bug_r, new_bug_stomach, new_models, new_active = migrate_fn(
+                state.bug_x, state.bug_r, state.bug_stomach, active, models, role)
+            
+            # Update family tree to reflect new active status
+            # For now, keep it simple - just update positions
+            new_state = state.replace(
+                bug_x=new_bug_x,
+                bug_r=new_bug_r, 
+                bug_stomach=new_bug_stomach
+            )
+            return new_state, new_models
+        
+        migrate_pm = pmap(migrate_step, in_axes=(0, 0, 0), axis_name=AXIS, devices=devices)
+    
+    print(f"Starting main simulation loop...")
+    print(f"TIP: Use Ctrl+C to stop early and still save video")
+    
+    # Run simulation with evolution
+    for step in range(params.steps):
+        # Use combined step for better GPU utilization
+        key, step_key = jrng.split(key)
+        step_keys = jrng.split(step_key, ndev)
+        
+        sharded_state, sharded_models, sharded_obs = combined_step_pm(
+            step_keys, sharded_state, sharded_models, sharded_obs, roles, step)
         
         # Bug migration step (if enabled and at right frequency)
         if params.allow_migration and (step % params.migration_freq == 0):
-            def migrate_step(state, models, role):
-                active = active_fn(state)
-                new_bug_x, new_bug_r, new_bug_stomach, new_models, new_active = migrate_fn(
-                    state.bug_x, state.bug_r, state.bug_stomach, active, models, role)
-                
-                # Update family tree to reflect new active status
-                # For now, keep it simple - just update positions
-                new_state = state.replace(
-                    bug_x=new_bug_x,
-                    bug_r=new_bug_r, 
-                    bug_stomach=new_bug_stomach
-                )
-                return new_state, new_models
-            
-            migrate_pm = pmap(migrate_step, in_axes=(0, 0, 0), axis_name=AXIS, devices=devices)
-            sharded_next_state, sharded_models = migrate_pm(sharded_next_state, sharded_models, roles)
+            sharded_state, sharded_models = migrate_pm(sharded_state, sharded_models, roles)
         
-        # Get next observations
-        key, obs_key = jrng.split(key)
-        obs_keys = jrng.split(obs_key, ndev)
-        sharded_next_obs = observe_pm(obs_keys, sharded_next_state)
-        
-        # Update models based on reproduction events
-        key, mutate_key = jrng.split(key)
-        mutate_keys = jrng.split(mutate_key, ndev)
-        sharded_models = update_models_pm(
-            mutate_keys, sharded_models, sharded_state, sharded_next_state)
-        
-        # Update for next iteration
-        sharded_state = sharded_next_state
-        sharded_obs = sharded_next_obs
-        
-        # Render for video
+        # Render for video (keep on GPU until end to avoid blocking)
         if params.save_video and step % video_sample_freq == 0:
             sharded_renders = render_pm(sharded_state)
-            global_image = stitch_global_image(sharded_renders, ndev)
-            video_frames.append(global_image)
+            video_frames.append(sharded_renders)  # Keep on GPU
         
         # Progress logging
         if (step + 1) % max(1, params.steps // 10) == 0:
@@ -853,8 +1073,13 @@ def main():
     
     # Save video
     if params.save_video and video_frames:
+        import imageio
+        print(f"Transferring {len(video_frames)} video frames from GPU...")
+        # Transfer all frames from GPU to CPU at once
+        cpu_frames = [stitch_global_image(frame, ndev) for frame in video_frames]
+        
         print(f"Saving video to {params.video_path}...")
-        video_frames = np.array(video_frames)
+        video_frames = np.array(cpu_frames)
         video_frames = (video_frames * 255).astype(np.uint8)
         video_frames = video_frames[:,::-1]  # Flip vertically
         
