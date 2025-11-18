@@ -13,7 +13,8 @@ import jax.random as jrng
 import chex
 
 from mechagogue.static import static_data, static_functions
-from mechagogue.player_list import birthday_player_list, player_family_tree
+from mechagogue.player_list import (
+    make_birthday_player_list, make_player_family_tree)
 
 from dirt.constants import (
     DEFAULT_FLOAT_DTYPE, DEFAULT_BUG_COLOR, PHOTOSYNTHESIS_COLOR)
@@ -102,7 +103,7 @@ REPRODUCE_ACTION_TYPE = 8
 
 NUM_ACTION_TYPES = 9
 
-action_type_names = {
+ACTION_TYPE_NAMES = {
     0 : 'no action',
     1 : 'move',
     2 : 'attack',
@@ -330,264 +331,6 @@ class BugParams:
         
         return params
 
-@static_data
-class BugTraits:
-    # brain
-    # the total number of active parameters in the bug's policy model aka 'brain'
-    brain_size : float | jnp.ndarray
-    
-    # color
-    color : Tuple[float, float, float] | jnp.ndarray
-    
-    # resources
-    photosynthesis : float | jnp.ndarray
-    
-    # sensing
-    # - age
-    max_age_observation : float | jnp.ndarray
-    age_sensor_noise : float | jnp.ndarray
-    # - visual
-    view_distance : float | jnp.ndarray
-    view_back_distance : int | jnp.ndarray
-    view_width : int | jnp.ndarray
-    max_altitude_observation : float | jnp.ndarray
-    visual_sensor_noise : float | jnp.ndarray
-    # - audio
-    audio_sensor_noise : float | jnp.ndarray
-    # - smell
-    smell_sensor_noise : float | jnp.ndarray
-    # - external resources
-    max_water_observation : float | jnp.ndarray
-    max_energy_observation : float | jnp.ndarray
-    max_biomass_observation : float | jnp.ndarray
-    external_resource_sensor_noise : float | jnp.ndarray
-    # - wind
-    wind_sensor_noise : float | jnp.ndarray
-    # - temperature
-    min_temperature_observation : float | jnp.ndarray
-    max_temperature_observation : float | jnp.ndarray
-    temperature_sensor_noise : float | jnp.ndarray
-    # - compass
-    compass_sensor_noise : float | jnp.ndarray
-    # - health and internal resources
-    health_sensor_noise : float | jnp.ndarray
-    internal_resource_sensor_noise : float | jnp.ndarray
-    
-    # efficiency
-    max_climb : float | jnp.ndarray
-    #climb_efficiency : float | jnp.ndarray
-    #move_effciency : float | jnp.ndarray
-    
-    # stomach
-    max_water : float | jnp.ndarray
-    water_gulp : float | jnp.ndarray
-    water_expell : float | jnp.ndarray
-    max_energy : float | jnp.ndarray
-    energy_gulp : float | jnp.ndarray
-    energy_expell : float | jnp.ndarray
-    max_biomass : float | jnp.ndarray
-    biomass_gulp : float | jnp.ndarray
-    biomass_expell : float | jnp.ndarray
-    
-    # climate
-    insulation : float | jnp.ndarray
-    
-    # armor
-    armor : float | jnp.ndarray
-    
-    # age
-    senescence_damage : float | jnp.ndarray
-    
-    # health
-    max_hp : float | jnp.ndarray
-    healing_rate : float | jnp.ndarray
-    
-    # reproduction
-    child_hp : float | jnp.ndarray
-    child_water : float | jnp.ndarray
-    child_energy : float | jnp.ndarray
-    child_biomass : float | jnp.ndarray
-    #child_color : Tuple[float, float, float] | jnp.ndarray
-    
-    # actions
-    movement_primitives : jnp.ndarray
-    attack_primitives : jnp.ndarray
-    
-    @staticmethod
-    def default(shape, init_brain_size=0.):
-        if isinstance(shape, int):
-            shape = (shape,)
-        def float_vector(v):
-            return jnp.full(shape, v, dtype=DEFAULT_FLOAT_DTYPE)
-        
-        def int_vector(v):
-            return jnp.full(shape, v, dtype=jnp.int32)
-        
-        return BugTraits(
-            # brain
-            brain_size = float_vector(init_brain_size),
-            
-            # color
-            color = jnp.full(
-                (*shape,3), DEFAULT_BUG_COLOR, dtype=DEFAULT_FLOAT_DTYPE),
-            
-            # resources
-            photosynthesis = float_vector(0.),
-            
-            # sensing
-            # - age
-            max_age_observation = float_vector(1000.),
-            age_sensor_noise = float_vector(0.),
-            # - visual
-            view_distance = float_vector(5),
-            view_back_distance = float_vector(0),
-            view_width = float_vector(5),
-            max_altitude_observation = float_vector(1.),
-            visual_sensor_noise = float_vector(0.),
-            # - audio
-            audio_sensor_noise = float_vector(0.),
-            # - smell
-            smell_sensor_noise = float_vector(0.),
-            # - external resources
-            max_water_observation = float_vector(1.),
-            max_energy_observation = float_vector(1.),
-            max_biomass_observation = float_vector(1.),
-            external_resource_sensor_noise = float_vector(0.),
-            # - wind
-            wind_sensor_noise = float_vector(0.),
-            # - temperature
-            min_temperature_observation = float_vector(-3.),
-            max_temperature_observation = float_vector(3.),
-            temperature_sensor_noise = float_vector(0.),
-            # - compass
-            compass_sensor_noise = float_vector(0.),
-            # internal resources
-            health_sensor_noise = float_vector(0.),
-            internal_resource_sensor_noise = float_vector(0.),
-            
-            # efficiency
-            max_climb = float_vector(2.),
-            #climb_efficiency = float_vector(1.),
-            #move_effciency = float_vector(1.),
-            
-            # stomach
-            max_water = float_vector(1.),
-            water_gulp = float_vector(0.5),
-            water_expell = float_vector(0.05),
-            max_energy = float_vector(2.),
-            energy_gulp = float_vector(0.5),
-            energy_expell = float_vector(0.05),
-            max_biomass = float_vector(5.),
-            biomass_gulp = float_vector(0.5),
-            biomass_expell = float_vector(0.05),
-            
-            # climate
-            insulation = float_vector(0.),
-            
-            # armor
-            armor = float_vector(0.),
-            
-            # age
-            senescence_damage = float_vector(0.00001),
-            
-            # health
-            max_hp = float_vector(10.),
-            healing_rate = float_vector(1.),
-            
-            # reproduction
-            child_hp = float_vector(5.),
-            child_energy = float_vector(1.0),
-            child_biomass = float_vector(0.9),
-            child_water = float_vector(0.1),
-            #child_color = jnp.full(
-            #    (*shape,3), DEFAULT_BUG_COLOR, dtype=DEFAULT_FLOAT_DTYPE),
-            
-            # actions
-            movement_primitives = jnp.full(
-                (*shape, 3, 3), jnp.array([
-                    [1, 0, 0],
-                    [0, 0,-1],
-                    [0, 0, 1],
-                ], dtype=DEFAULT_FLOAT_DTYPE)
-            ),
-            attack_primitives = jnp.full((*shape, 1, 5), jnp.array(
-                [[1, 0, 0, 0, 5]],
-                dtype=DEFAULT_FLOAT_DTYPE
-            ))
-            #attack_primitives = jnp.array([
-            #    [1, 0, 0, 0, 1] # x-offset, y-offset, width, height, damage
-            #], dtype=DEFAULT_FLOAT_DTYPE),
-        )
-
-@static_data
-class BugObservation:
-    
-    # age
-    age : jnp.ndarray
-    newborn : jnp.ndarray
-    
-    # visual
-    rgb : jnp.ndarray
-    relative_altitude : jnp.ndarray
-
-    # audio
-    audio : jnp.ndarray
-    
-    # smell
-    smell : jnp.ndarray
-    
-    # weather
-    wind : jnp.ndarray
-    temperature : jnp.ndarray
-    
-    # compass
-    compass : jnp.ndarray
-    
-    # external resources
-    external_water : jnp.ndarray
-    external_energy : jnp.ndarray
-    external_biomass : jnp.ndarray
-             
-    # health and internal resources
-    health : jnp.ndarray
-    internal_water : jnp.ndarray
-    internal_energy : jnp.ndarray
-    internal_biomass : jnp.ndarray
-
-@static_data
-class BugState:
-    # location
-    x : jnp.ndarray
-    r : jnp.ndarray
-    object_grid : jnp.ndarray
-    
-    # age
-    age : jnp.ndarray
-    generation : jnp.ndarray
-    
-    # health
-    hp : jnp.ndarray
-    
-    # resources
-    water : jnp.ndarray
-    energy : jnp.ndarray
-    biomass : jnp.ndarray
-    
-    # color
-    #color : jnp.ndarray
-    
-    # level
-    level : jnp.ndarray
-    
-    # tracking
-    family_tree : Any
-    
-    no_actions : jnp.ndarray
-    move_actions : jnp.ndarray
-    attack_actions : jnp.ndarray
-    eat_actions : jnp.ndarray
-    reproduce_actions : jnp.ndarray
-
 def make_bugs(
     params : BugParams = BugParams(),
     float_dtype : Any = DEFAULT_FLOAT_DTYPE
@@ -595,8 +338,8 @@ def make_bugs(
     
     params = params.validate()
     
-    player_list = birthday_player_list(params.max_players)
-    family_tree = player_family_tree(player_list, 1)
+    player_list = make_birthday_player_list(params.max_players)
+    family_tree = make_player_family_tree(player_list, 1)
     
     # construct the action mapping
     # - figure out how many eat and expell action primitives there are
@@ -666,13 +409,274 @@ def make_bugs(
     
     @static_functions
     class Bugs:
+        
+        @static_data
+        class State:
+            # location
+            x : jnp.ndarray
+            r : jnp.ndarray
+            object_grid : jnp.ndarray
+            
+            # age
+            age : jnp.ndarray
+            generation : jnp.ndarray
+            
+            # health
+            hp : jnp.ndarray
+            
+            # resources
+            water : jnp.ndarray
+            energy : jnp.ndarray
+            biomass : jnp.ndarray
+            
+            # color
+            #color : jnp.ndarray
+            
+            # level
+            level : jnp.ndarray
+            
+            # tracking
+            family_tree : Any
+            
+            no_actions : jnp.ndarray
+            move_actions : jnp.ndarray
+            attack_actions : jnp.ndarray
+            eat_actions : jnp.ndarray
+            reproduce_actions : jnp.ndarray
+
+        @static_data
+        class Traits:
+            # brain
+            brain_size : float | jnp.ndarray
+            
+            # color
+            color : Tuple[float, float, float] | jnp.ndarray
+            
+            # resources
+            photosynthesis : float | jnp.ndarray
+            
+            # sensing
+            # - age
+            max_age_observation : float | jnp.ndarray
+            age_sensor_noise : float | jnp.ndarray
+            # - visual
+            view_distance : float | jnp.ndarray
+            view_back_distance : int | jnp.ndarray
+            view_width : int | jnp.ndarray
+            max_altitude_observation : float | jnp.ndarray
+            visual_sensor_noise : float | jnp.ndarray
+            # - audio
+            audio_sensor_noise : float | jnp.ndarray
+            # - smell
+            smell_sensor_noise : float | jnp.ndarray
+            # - external resources
+            max_water_observation : float | jnp.ndarray
+            max_energy_observation : float | jnp.ndarray
+            max_biomass_observation : float | jnp.ndarray
+            external_resource_sensor_noise : float | jnp.ndarray
+            # - wind
+            wind_sensor_noise : float | jnp.ndarray
+            # - temperature
+            min_temperature_observation : float | jnp.ndarray
+            max_temperature_observation : float | jnp.ndarray
+            temperature_sensor_noise : float | jnp.ndarray
+            # - compass
+            compass_sensor_noise : float | jnp.ndarray
+            # - health and internal resources
+            health_sensor_noise : float | jnp.ndarray
+            internal_resource_sensor_noise : float | jnp.ndarray
+            
+            # efficiency
+            max_climb : float | jnp.ndarray
+            #climb_efficiency : float | jnp.ndarray
+            #move_effciency : float | jnp.ndarray
+            
+            # stomach
+            max_water : float | jnp.ndarray
+            water_gulp : float | jnp.ndarray
+            water_expell : float | jnp.ndarray
+            max_energy : float | jnp.ndarray
+            energy_gulp : float | jnp.ndarray
+            energy_expell : float | jnp.ndarray
+            max_biomass : float | jnp.ndarray
+            biomass_gulp : float | jnp.ndarray
+            biomass_expell : float | jnp.ndarray
+            
+            # climate
+            insulation : float | jnp.ndarray
+            
+            # armor
+            armor : float | jnp.ndarray
+            
+            # age
+            senescence_damage : float | jnp.ndarray
+            
+            # health
+            max_hp : float | jnp.ndarray
+            healing_rate : float | jnp.ndarray
+            
+            # reproduction
+            child_hp : float | jnp.ndarray
+            child_water : float | jnp.ndarray
+            child_energy : float | jnp.ndarray
+            child_biomass : float | jnp.ndarray
+            #child_color : Tuple[float, float, float] | jnp.ndarray
+            
+            # actions
+            movement_primitives : jnp.ndarray
+            attack_primitives : jnp.ndarray
+            
+            # markers
+            markers : jnp.ndarray
+    
+            @staticmethod
+            def default(shape, init_brain_size=0.):
+                if isinstance(shape, int):
+                    shape = (shape,)
+                
+                def float_vector(v):
+                    return jnp.full(shape, v, dtype=DEFAULT_FLOAT_DTYPE)
+                
+                def int_vector(v):
+                    return jnp.full(shape, v, dtype=jnp.int32)
+                
+                return Bugs.Traits(
+                    # brain
+                    brain_size = float_vector(init_brain_size),
+                    
+                    # color
+                    color = jnp.full(
+                        (*shape,3),
+                        DEFAULT_BUG_COLOR,
+                        dtype=DEFAULT_FLOAT_DTYPE
+                    ),
+                    
+                    # resources
+                    photosynthesis = float_vector(0.),
+                    
+                    # sensing
+                    # - age
+                    max_age_observation = float_vector(1000.),
+                    age_sensor_noise = float_vector(0.),
+                    # - visual
+                    view_distance = float_vector(5),
+                    view_back_distance = float_vector(0),
+                    view_width = float_vector(5),
+                    max_altitude_observation = float_vector(1.),
+                    visual_sensor_noise = float_vector(0.),
+                    # - audio
+                    audio_sensor_noise = float_vector(0.),
+                    # - smell
+                    smell_sensor_noise = float_vector(0.),
+                    # - external resources
+                    max_water_observation = float_vector(1.),
+                    max_energy_observation = float_vector(1.),
+                    max_biomass_observation = float_vector(1.),
+                    external_resource_sensor_noise = float_vector(0.),
+                    # - wind
+                    wind_sensor_noise = float_vector(0.),
+                    # - temperature
+                    min_temperature_observation = float_vector(-3.),
+                    max_temperature_observation = float_vector(3.),
+                    temperature_sensor_noise = float_vector(0.),
+                    # - compass
+                    compass_sensor_noise = float_vector(0.),
+                    # internal resources
+                    health_sensor_noise = float_vector(0.),
+                    internal_resource_sensor_noise = float_vector(0.),
+                    
+                    # efficiency
+                    max_climb = float_vector(2.),
+                    #climb_efficiency = float_vector(1.),
+                    #move_effciency = float_vector(1.),
+                    
+                    # stomach
+                    max_water = float_vector(1.),
+                    water_gulp = float_vector(0.5),
+                    water_expell = float_vector(0.05),
+                    max_energy = float_vector(2.),
+                    energy_gulp = float_vector(0.5),
+                    energy_expell = float_vector(0.05),
+                    max_biomass = float_vector(5.),
+                    biomass_gulp = float_vector(0.5),
+                    biomass_expell = float_vector(0.05),
+                    
+                    # climate
+                    insulation = float_vector(0.),
+                    
+                    # armor
+                    armor = float_vector(0.),
+                    
+                    # age
+                    senescence_damage = float_vector(0.00001),
+                    
+                    # health
+                    max_hp = float_vector(10.),
+                    healing_rate = float_vector(1.),
+                    
+                    # reproduction
+                    child_hp = float_vector(5.),
+                    child_energy = float_vector(1.0),
+                    child_biomass = float_vector(0.9),
+                    child_water = float_vector(0.1),
+                    
+                    # actions
+                    movement_primitives = jnp.full(
+                        (*shape, 3, 3), jnp.array([
+                            [1, 0, 0],
+                            [0, 0,-1],
+                            [0, 0, 1],
+                        ], dtype=DEFAULT_FLOAT_DTYPE)
+                    ),
+                    attack_primitives = jnp.full((*shape, 1, 5), jnp.array(
+                        [[1, 0, 0, 0, 5]],
+                        dtype=DEFAULT_FLOAT_DTYPE
+                    )),
+                    markers = jnp.zeros(shape)
+                )
+        
+        @static_data
+        class Observation:
+            
+            # age
+            age : jnp.ndarray
+            newborn : jnp.ndarray
+            
+            # visual
+            rgb : jnp.ndarray
+            relative_altitude : jnp.ndarray
+
+            # audio
+            audio : jnp.ndarray
+            
+            # smell
+            smell : jnp.ndarray
+            
+            # weather
+            wind : jnp.ndarray
+            temperature : jnp.ndarray
+            
+            # compass
+            compass : jnp.ndarray
+            
+            # external resources
+            external_water : jnp.ndarray
+            external_energy : jnp.ndarray
+            external_biomass : jnp.ndarray
+                     
+            # health and internal resources
+            health : jnp.ndarray
+            internal_water : jnp.ndarray
+            internal_energy : jnp.ndarray
+            internal_biomass : jnp.ndarray
+        
         num_actions = num_action_primitives
         action_primitive_count = action_primitives
         action_to_primitive = action_to_primitive_map
         
         def init(
             key : chex.PRNGKey,
-        ) -> BugState :
+        ) -> State :
             
             # initialize the family tree
             family_tree_state = family_tree.init(params.initial_players)
@@ -721,7 +725,7 @@ def make_bugs(
             # initialize level
             level = jnp.zeros(params.max_players, dtype=jnp.int32)
             
-            return BugState(
+            return Bugs.State(
                 x=x,
                 r=r,
                 object_grid=object_grid,
@@ -761,9 +765,9 @@ def make_bugs(
         
         def move(
             key : chex.PRNGKey,
-            state : BugState,
+            state : State,
             action : int,
-            traits : BugTraits,
+            traits : Traits,
             altitude : jnp.ndarray,
             altitude_downsample : int,
         ):
@@ -857,9 +861,9 @@ def make_bugs(
             return state, water_cost
         
         def eat(
-            state : BugState,
+            state : State,
             action : int,
-            traits : BugTraits,
+            traits : Traits,
             external_water : Optional[jnp.ndarray] = None,
             external_energy : Optional[jnp.ndarray] = None,
             external_biomass : Optional[jnp.ndarray] = None,
@@ -948,8 +952,8 @@ def make_bugs(
             return state, leftover_water, leftover_energy, leftover_biomass
         
         def photosynthesis(
-            state : BugState,
-            traits : BugTraits,
+            state : State,
+            traits : Traits,
             light : jnp.ndarray,
         ):
             energy_gain = (
@@ -961,8 +965,8 @@ def make_bugs(
             return state
         
         def heal(
-            state : BugState,
-            traits : BugTraits,
+            state : State,
+            traits : Traits,
         ):
             healable_hp = jnp.minimum(
                 traits.max_hp - state.hp, traits.healing_rate)
@@ -976,9 +980,9 @@ def make_bugs(
             return state
         
         def fight_pairwise(
-            state : BugState,
+            state : State,
             action : int,
-            traits : BugTraits,
+            traits : Traits,
         ):
             assert (
                 params.attack_primitives ==
@@ -1060,10 +1064,10 @@ def make_bugs(
         
         def fight(
             key: chex.PRNGKey,
-            state: BugState,
+            state: State,
             action: int,
-            traits: BugTraits,
-        ) -> BugState:
+            traits: Traits,
+        ) -> State:
             
             # make no changes if violence is turned off
             if not params.include_violence:
@@ -1227,8 +1231,8 @@ def make_bugs(
             return req
         
         def metabolism(
-            state : BugState,
-            traits : BugTraits,
+            state : State,
+            traits : Traits,
         ):
             damage = jnp.zeros((params.max_players,), dtype=float_dtype)
             
@@ -1288,9 +1292,9 @@ def make_bugs(
             return state, water_paid
         
         def birth_and_death(
-            state : BugState,
+            state : State,
             action : int,
-            traits : BugTraits,
+            traits : Traits,
         ):
             # determine who is active and alive
             active = Bugs.active_players(state)
@@ -1479,8 +1483,8 @@ def make_bugs(
         
         def observe(
             key : chex.PRNGKey,
-            state : BugState,
-            traits : BugTraits,
+            state : State,
+            traits : Traits,
             rgb : jnp.ndarray,
             relative_altitude : jnp.ndarray,
             audio : jnp.ndarray,
@@ -1678,7 +1682,7 @@ def make_bugs(
             else:
                 sensor_internal_biomass = None
             
-            return BugObservation(
+            return Bugs.Observation(
                 age=sensor_age,
                 newborn=newborn,
                 rgb=sensor_rgb,
@@ -1808,12 +1812,12 @@ def make_bugs(
             return traits
         
         def active_players(
-            state : BugState,
+            state : State,
         ):
             return family_tree.active(state.family_tree)
         
         def family_info(
-            next_state : BugState,
+            next_state : State,
         ):
             birthdays = next_state.family_tree.player_state.players[...,0]
             current_time = next_state.family_tree.player_state.current_time

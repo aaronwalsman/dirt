@@ -289,49 +289,6 @@ class LandscapeParams:
                 params.audio_downsample, params.world_size),
         )
 
-@static_data
-class LandscapeState:
-    
-    # time
-    time : int = 0
-    
-    # terrain
-    # - rock
-    rock : jnp.ndarray = None
-    rock_normals: jnp.ndarray = None
-    # -- erosion
-    erosion : jnp.ndarray = None
-    # - water
-    water : jnp.ndarray = None
-    water_source_locations : jnp.ndarray = None
-    water_sink_locations : jnp.ndarray = None
-    
-    # light
-    light: jnp.ndarray = None
-    
-    # weather
-    # - wind
-    wind : jnp.ndarray = None
-    max_wind : jnp.ndarray = None
-    # - temperature
-    temperature : jnp.ndarray = None
-    # - rain
-    # -- moisture
-    moisture : jnp.ndarray = None
-    # -- rain
-    raining : jnp.ndarray = None
-    
-    # resources
-    # - energy
-    energy : jnp.ndarray = None
-    # - biomass
-    biomass : jnp.ndarray = None
-    
-    # smell
-    smell: jnp.ndarray = None
-    # audio
-    audio: jnp.ndarray = None
-
 def make_landscape(
     params : LandscapeParams = LandscapeParams(),
     float_dtype : Any = DEFAULT_FLOAT_DTYPE,
@@ -456,11 +413,54 @@ def make_landscape(
     @static_functions
     class Landscape:
         
+        @static_data
+        class State:
+            
+            # time
+            time : int = 0
+            
+            # terrain
+            # - rock
+            rock : jnp.ndarray = None
+            rock_normals: jnp.ndarray = None
+            # -- erosion
+            erosion : jnp.ndarray = None
+            # - water
+            water : jnp.ndarray = None
+            water_source_locations : jnp.ndarray = None
+            water_sink_locations : jnp.ndarray = None
+            
+            # light
+            light: jnp.ndarray = None
+            
+            # weather
+            # - wind
+            wind : jnp.ndarray = None
+            max_wind : jnp.ndarray = None
+            # - temperature
+            temperature : jnp.ndarray = None
+            # - rain
+            # -- moisture
+            moisture : jnp.ndarray = None
+            # -- rain
+            raining : jnp.ndarray = None
+            
+            # resources
+            # - energy
+            energy : jnp.ndarray = None
+            # - biomass
+            biomass : jnp.ndarray = None
+            
+            # smell
+            smell: jnp.ndarray = None
+            # audio
+            audio: jnp.ndarray = None
+        
         def init(
             key : chex.PRNGKey,
-        ) -> LandscapeState :
+        ) -> State :
             
-            state = LandscapeState()
+            state = Landscape.State()
             
             # time
             state = state.replace(time=params.initial_time)
@@ -966,8 +966,8 @@ def make_landscape(
         
         def step(
             key : chex.PRNGKey,
-            state : LandscapeState,
-        ) -> LandscapeState :
+            state : State,
+        ) -> State :
             
             # time
             t = state.time + 1
