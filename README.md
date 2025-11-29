@@ -6,7 +6,7 @@ when fully zoomed out. The inset areas progressively zoom in on
 one patch of terrain to reveal detail._
 
 ## Overview
-DIRT is a set of simulation tools for building large dynamic gridworlds with artificial agents.
+DIRT is a set of simulation tools for building large dynamic gridworlds with artificial agents (aka 'bugs').
 
 ## Setup
 
