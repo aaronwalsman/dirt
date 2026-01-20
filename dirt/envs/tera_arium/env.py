@@ -137,7 +137,8 @@ def make_tera_arium(
             else:
                 bug_key = jrng.key(params.bug_seed)
             bug_state = bugs.init(bug_key)
-            bug_traits = bugs.Traits.default(params.max_players)
+            key, traits_key = jrng.split(key)
+            bug_traits = bugs.Traits.default(traits_key, params.max_players)
             
             initial_biomass = (
                 jnp.sum(landscape_state.biomass, dtype=jnp.float32) +
@@ -261,6 +262,7 @@ def make_tera_arium(
             )
             
             # - birth and death
+            key, birth_death_key = jrng.split(key)
             (
                 bug_state,
                 expelled_x,
@@ -268,7 +270,7 @@ def make_tera_arium(
                 expelled_water,
                 expelled_energy,
                 expelled_biomass,
-            ) = bugs.birth_and_death(bug_state, action, traits)
+            ) = bugs.birth_and_death(birth_death_key, bug_state, action, traits)
             
             # - add evaporated water to the atmosphere/ground
             if params.include_water:
@@ -664,8 +666,10 @@ def make_tera_arium(
         
         normal_mutate_trait = bugs.normal_mutate_trait
         
-        action_primitive_count=bugs.action_primitive_count,
-        action_to_primitive=bugs.action_to_primitive,
+        action_primitive_count=bugs.action_primitive_count
+        action_to_primitive=bugs.action_to_primitive
+        
+    TeraArium.params = params
         
     #game = make_poeg(
     #    init_state,

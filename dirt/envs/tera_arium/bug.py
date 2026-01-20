@@ -15,6 +15,7 @@ import chex
 from mechagogue.static import static_data, static_functions
 from mechagogue.player_list import (
     make_birthday_player_list, make_player_family_tree)
+from mechagogue.cluster import make_population_clusters
 
 from dirt.constants import (
     DEFAULT_FLOAT_DTYPE, DEFAULT_BUG_COLOR, PHOTOSYNTHESIS_COLOR)
@@ -315,6 +316,16 @@ class BugParams:
     # environment
     wind_std : float = 5.
     
+    # markers and clustering
+    include_population_clusters : bool = False
+    #max_cluster_distance : float = 1.
+    max_cluster_steps : int = 20
+    marker_channels : int = 256
+    marker_initial_magnitude : float = 1.
+    marker_drift_distance : float = 0.1
+    #marker_init_std : float = 1.
+    #marker_drift_std : float = 0.1
+    
     def validate(params):
         assert params.initial_players <= params.max_players, (
             f'params.initial_players ({params.initial_players}) must be less '
@@ -395,6 +406,22 @@ def make_bugs(
                 primitive_to_action_map.at[action_type, j].set(action_index))
             action_index += 1
     
+    # make population clusters
+    if params.include_population_clusters:
+        max_cluster_distance = (
+            params.marker_drift_distance**2 *
+            params.max_cluster_steps *
+            params.marker_channels
+        ) ** 0.5
+        #max_cluster_distance = 0.0001
+        population_clusters = make_population_clusters(
+            params.max_players,
+            max_cluster_distance,
+            params.marker_channels,
+            params.marker_initial_magnitude,
+            params.marker_drift_distance,
+        )
+    
     # resource primitives
     resource_primitive = 0
     if params.include_water:
@@ -437,6 +464,11 @@ def make_bugs(
             
             # tracking
             family_tree : Any
+            
+            # markers and clustering
+            #markers : jnp.ndarray
+            cluster_state : Any
+            cluster_action_distribution : Any
             
             no_actions : jnp.ndarray
             move_actions : jnp.ndarray
@@ -527,10 +559,11 @@ def make_bugs(
             attack_primitives : jnp.ndarray
             
             # markers
-            markers : jnp.ndarray
+            # moving to state
+            #markers : jnp.ndarray
     
             @staticmethod
-            def default(shape, init_brain_size=0.):
+            def default(key, shape, init_brain_size=0.):
                 if isinstance(shape, int):
                     shape = (shape,)
                 
@@ -540,6 +573,7 @@ def make_bugs(
                 def int_vector(v):
                     return jnp.full(shape, v, dtype=jnp.int32)
                 
+                #key, marker_key = jrng.split(key)
                 return Bugs.Traits(
                     # brain
                     brain_size = float_vector(init_brain_size),
@@ -632,7 +666,11 @@ def make_bugs(
                         [[1, 0, 0, 0, 5]],
                         dtype=DEFAULT_FLOAT_DTYPE
                     )),
-                    markers = jnp.zeros(shape)
+                    #markers = jnp.zeros(*shape, params.marker_channels)
+                    #markers = jrng.normal(
+                    #    marker_key,
+                    #    (*shape, params.marker_channels)
+                    #) * params.marker_init_std
                 )
         
         @static_data
@@ -681,6 +719,23 @@ def make_bugs(
             # initialize the family tree
             family_tree_state = family_tree.init(params.initial_players)
             active_players = family_tree.active(family_tree_state)
+            
+            # initialize markers
+            if params.include_population_clusters:
+                #key, marker_key = jrng.split(key)
+                #markers = jrng.normal(
+                #    marker_key,
+                #    (params.max_players, params.marker_channels)
+                #)*params.marker_init_magnitude / params.marker_channels ** 0.5
+                key, cluster_key = jrng.split(key)
+                cluster_state = population_clusters.init_state(
+                    cluster_key, params.initial_players)
+                cluster_action_distribution = jnp.zeros(
+                    (params.max_players, Bugs.num_actions))
+            else:
+                cluster_state = None
+                cluster_action_distribution = None
+                #markers = None
             
             # initialize map positions and rotations
             key, xr_key = jrng.split(key)
@@ -743,6 +798,10 @@ def make_bugs(
                 level=level,
                 
                 family_tree=family_tree_state,
+                
+                #markers=markers,
+                cluster_state=cluster_state,
+                cluster_action_distribution=cluster_action_distribution,
                 
                 no_actions=jnp.zeros((n,), dtype=jnp.int32),
                 move_actions=jnp.zeros((n,), dtype=jnp.int32),
@@ -1292,6 +1351,7 @@ def make_bugs(
             return state, water_paid
         
         def birth_and_death(
+            key : Any,
             state : State,
             action : int,
             traits : Traits,
@@ -1392,6 +1452,42 @@ def make_bugs(
                 age = age,
                 family_tree = family_tree_state,
             )
+            
+            # udpate the markers
+            if params.include_population_clusters:
+                #parent_markers = state.markers[parent_locations]
+                #key, marker_key = jrng.split(key)
+                #child_markers = parent_markers + jrng.normal(
+                #    marker_key,
+                #    shape=parent_markers.shape,
+                #) * params.marker_drift_std
+                #markers = state.markers.at[child_locations].set(child_markers)
+                #state = state.replace(markers=markers)
+                key, cluster_key = jrng.split(key)
+                cluster_state = population_clusters.step(
+                    cluster_key,
+                    recent_deaths,
+                    parent_locations[..., None],
+                    child_locations,
+                    state.cluster_state,
+                )
+                state = state.replace(cluster_state=cluster_state)
+                
+                agent_action_one_hot = jnp.zeros(
+                    (params.max_players, Bugs.num_actions))
+                agent_action_one_hot = agent_action_one_hot.at[
+                    jnp.arange(params.max_players), action].set(1.)
+                cluster_action_distribution = jnp.zeros(
+                    (params.max_players, Bugs.num_actions))
+                cluster_action_distribution = cluster_action_distribution.at[
+                    cluster_state.assignment].add(agent_action_one_hot)
+                cluster_action_distribution = jnp.where(
+                    cluster_state.n[:,None] > 0,
+                    cluster_action_distribution / cluster_state.n[:,None],
+                    0.,
+                )
+                state = state.replace(
+                    cluster_action_distribution=cluster_action_distribution)
             
             state = state.replace(
                 attack_actions=state.attack_actions * still_alive,
