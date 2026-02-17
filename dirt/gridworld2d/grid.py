@@ -225,11 +225,24 @@ def make_grid(
     dtype=DEFAULT_FLOAT_DTYPE,
     init_value=0,
     fill_value=0,
+    distributed=False,
+    tile_dimensions=(1, 1),
 ):
     assert halo >= 0
     dh, dw = downsample_grid_shape(*world_size, downsample)
     full_shape = (dh + 2 * halo, dw + 2 * halo, *cell_shape)
     interior_shape = (dh, dw, *cell_shape)
+    exchanger = None
+    if distributed:
+        assert tile_dimensions is not None
+        assert len(tile_dimensions) == 2
+        if halo > 0:
+            from dirt.gridworld2d.distributed import make_distributed_halo_grid
+            exchanger = make_distributed_halo_grid(
+                halo=halo,
+                tile_dimensions=tile_dimensions,
+                fill_value=fill_value,
+            )
 
     def _fill(grid, value):
         if halo == 0:
@@ -276,6 +289,11 @@ def make_grid(
         def upsample_to(grid, h, w, preserve_mass=True):
             return upsample_grid(grid, h, w, preserve_mass=preserve_mass)
 
+        def exchange(grid):
+            if exchanger is None:
+                return grid
+            return exchanger.halo_padded_grid(grid)
+
     Grid.init = staticmethod(Grid.init)
     Grid.interior = staticmethod(Grid.interior)
     Grid.set_interior = staticmethod(Grid.set_interior)
@@ -288,6 +306,7 @@ def make_grid(
     Grid.set_shape = staticmethod(Grid.set_shape)
     Grid.downsample_to = staticmethod(Grid.downsample_to)
     Grid.upsample_to = staticmethod(Grid.upsample_to)
+    Grid.exchange = staticmethod(Grid.exchange)
 
     Grid.world_size = world_size
     Grid.downsample = downsample
@@ -296,6 +315,8 @@ def make_grid(
     Grid.dtype = dtype
     Grid.init_value = init_value
     Grid.fill_value = fill_value
+    Grid.distributed = distributed
+    Grid.tile_dimensions = tile_dimensions
     Grid.full_shape = full_shape
     Grid.interior_shape = interior_shape
 

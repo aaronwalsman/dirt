@@ -591,7 +591,9 @@ class BugState:
 
 def make_bugs(
     params : BugParams = BugParams(),
-    float_dtype : Any = DEFAULT_FLOAT_DTYPE
+    float_dtype : Any = DEFAULT_FLOAT_DTYPE,
+    distributed: bool = False,
+    tile_dimensions: Tuple[int, int] = (1, 1),
 ):
     
     params = params.validate()
@@ -673,6 +675,8 @@ def make_bugs(
         dtype=jnp.int32,
         init_value=-1,
         fill_value=-1,
+        distributed=distributed,
+        tile_dimensions=tile_dimensions,
     )
     
     @static_functions
@@ -694,6 +698,13 @@ def make_bugs(
 
         def object_grid():
             return object_grid_spec
+
+        def exchange(state: BugState) -> BugState:
+            if object_grid_halo == 0:
+                return state
+            return state.replace(
+                object_grid=object_grid_spec.exchange(state.object_grid)
+            )
         
         def init(
             key : chex.PRNGKey,

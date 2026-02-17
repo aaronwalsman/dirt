@@ -41,7 +41,6 @@ from dirt.gridworld2d.grid import (
 from dirt.gridworld2d.observations import first_person_view, noisy_sensor
 import dirt.gridworld2d.spawn as spawn
 from dirt.visualization.image import jax_to_image
-from dirt.gridworld2d.distributed import make_distributed_halo_grid
 
 @static_data
 class TeraAriumParams:
@@ -137,78 +136,18 @@ def make_tera_arium(
             "water": movement_halo,
         }
     landscape = make_landscape(
-        params.landscape, float_dtype=float_dtype, extra_halos=extra_halos)
-    bugs = make_bugs(params.bugs)
-    landscape_halos = landscape.required_halos()
-    bug_halos = bugs.required_halos()
+        params.landscape,
+        float_dtype=float_dtype,
+        extra_halos=extra_halos,
+        distributed=params.distributed,
+        tile_dimensions=params.tile_dimensions,
+    )
+    bugs = make_bugs(
+        params.bugs,
+        distributed=params.distributed,
+        tile_dimensions=params.tile_dimensions,
+    )
     bug_object_grid = bugs.object_grid
-
-    exchangers = {}
-    def _get_exchanger(halo, fill_value):
-        if halo == 0:
-            return None
-        key = (halo, float(fill_value) if isinstance(fill_value, float) else fill_value)
-        if key not in exchangers:
-            exchangers[key] = make_distributed_halo_grid(
-                halo=halo,
-                tile_dimensions=params.tile_dimensions,
-                fill_value=fill_value,
-            )
-        return exchangers[key]
-
-    def _exchange_grid(grid_value, halo, fill_value):
-        if not params.distributed or halo == 0:
-            return grid_value
-        exchanger = _get_exchanger(halo, fill_value)
-        return exchanger.halo_padded_grid(grid_value)
-
-    def _exchange_landscape(state):
-        ls = state.landscape
-        if params.include_rock:
-            ls = ls.replace(rock=_exchange_grid(
-                ls.rock, landscape_halos["rock"], 0.))
-            if params.include_light:
-                ls = ls.replace(rock_normals=_exchange_grid(
-                    ls.rock_normals, landscape_halos["rock_normals"], 0.))
-            if params.include_erosion:
-                ls = ls.replace(erosion=_exchange_grid(
-                    ls.erosion, landscape_halos["erosion"], 0.))
-        if params.include_water:
-            ls = ls.replace(water=_exchange_grid(
-                ls.water, landscape_halos["water"], 0.))
-        if params.include_light:
-            ls = ls.replace(light=_exchange_grid(
-                ls.light, landscape_halos["light"], 0.))
-        if params.include_temperature:
-            ls = ls.replace(temperature=_exchange_grid(
-                ls.temperature, landscape_halos["temperature"], 0.))
-        if params.include_rain:
-            ls = ls.replace(moisture=_exchange_grid(
-                ls.moisture, landscape_halos["moisture"], 0.))
-            ls = ls.replace(raining=_exchange_grid(
-                ls.raining, landscape_halos["raining"], False))
-        if params.include_energy:
-            ls = ls.replace(energy=_exchange_grid(
-                ls.energy, landscape_halos["energy"], 0.))
-        if params.include_biomass:
-            ls = ls.replace(biomass=_exchange_grid(
-                ls.biomass, landscape_halos["biomass"], 0.))
-        if params.include_smell:
-            ls = ls.replace(smell=_exchange_grid(
-                ls.smell, landscape_halos["smell"], 0.))
-        if params.include_audio:
-            ls = ls.replace(audio=_exchange_grid(
-                ls.audio, landscape_halos["audio"], 0.))
-        return state.replace(landscape=ls)
-
-    def _exchange_object_grid(state):
-        if bug_object_grid.halo == 0:
-            return state
-        bugs_state = state.bugs
-        object_grid = _exchange_grid(
-            bugs_state.object_grid, bug_object_grid.halo, -1)
-        bugs_state = bugs_state.replace(object_grid=object_grid)
-        return state.replace(bugs=bugs_state)
     
     if params.distributed:
         _tile_size = _compute_tile_size(params)
@@ -253,8 +192,8 @@ def make_tera_arium(
         )
 
         if params.distributed:
-            state = _exchange_landscape(state)
-            state = _exchange_object_grid(state)
+            state = state.replace(landscape=landscape.exchange(state.landscape))
+            state = state.replace(bugs=bugs.exchange(state.bugs))
         
         return state
     
@@ -337,7 +276,7 @@ def make_tera_arium(
         # TODO(halo): bug collision/interaction should use an object_grid
         # with a fresh halo exchange before fight near tile edges.
         if params.distributed:
-            state = _exchange_object_grid(state)
+            state = state.replace(bugs=bugs.exchange(state.bugs))
             bug_state = state.bugs
         key, fight_key = jrng.split(key)
         bug_state, attacks, homicides, homicide_locations, hit_map = bugs.fight(
@@ -404,7 +343,7 @@ def make_tera_arium(
         # required grids have halo padding before step.
         if params.distributed:
             state = state.replace(landscape=landscape_state)
-            state = _exchange_landscape(state)
+            state = state.replace(landscape=landscape.exchange(state.landscape))
             landscape_state = state.landscape
         key, landscape_key = jrng.split(key)
         landscape_state = landscape.step(
@@ -443,8 +382,8 @@ def make_tera_arium(
         # correct neighbor data. Include same landscape grids as above, plus
         # bug object_grid if observations or debug views depend on it.
         if params.distributed:
-            state = _exchange_landscape(state)
-            state = _exchange_object_grid(state)
+            state = state.replace(landscape=landscape.exchange(state.landscape))
+            state = state.replace(bugs=bugs.exchange(state.bugs))
         
         return state
     

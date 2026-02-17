@@ -8,7 +8,7 @@ import jax.random as jrng
 
 import chex
 
-from typing import Tuple, Optional, TypeVar, Any, Union
+from typing import Tuple, Optional, TypeVar, Any, Union, Dict
 
 from mechagogue.static import static_data, static_functions
 
@@ -332,6 +332,8 @@ def make_landscape(
     params : LandscapeParams = LandscapeParams(),
     float_dtype : Any = DEFAULT_FLOAT_DTYPE,
     extra_halos: Optional[dict] = None,
+    distributed: bool = False,
+    tile_dimensions: Tuple[int, int] = (1, 1),
 ):
     
     # validate parameters
@@ -464,43 +466,56 @@ def make_landscape(
 
     _rock_grid = grid.make_grid(
         params.world_size, params.terrain_downsample,
-        halo=required_halos["rock"], dtype=float_dtype)
+        halo=required_halos["rock"], dtype=float_dtype,
+        distributed=distributed, tile_dimensions=tile_dimensions)
     _water_grid = grid.make_grid(
         params.world_size, params.terrain_downsample,
-        halo=required_halos["water"], dtype=float_dtype)
+        halo=required_halos["water"], dtype=float_dtype,
+        distributed=distributed, tile_dimensions=tile_dimensions)
     _erosion_grid = grid.make_grid(
         params.world_size, params.terrain_downsample,
-        halo=required_halos["erosion"], dtype=float_dtype)
+        halo=required_halos["erosion"], dtype=float_dtype,
+        distributed=distributed, tile_dimensions=tile_dimensions)
     _light_grid = grid.make_grid(
         params.world_size, params.light_downsample,
-        halo=required_halos["light"], dtype=float_dtype)
+        halo=required_halos["light"], dtype=float_dtype,
+        distributed=distributed, tile_dimensions=tile_dimensions)
     _rock_normals_grid = grid.make_grid(
         params.world_size, params.light_downsample,
-        halo=required_halos["rock_normals"], cell_shape=(3,), dtype=float_dtype)
+        halo=required_halos["rock_normals"], cell_shape=(3,), dtype=float_dtype,
+        distributed=distributed, tile_dimensions=tile_dimensions)
     _temperature_grid = grid.make_grid(
         params.world_size, params.temperature_downsample,
-        halo=required_halos["temperature"], dtype=float_dtype)
+        halo=required_halos["temperature"], dtype=float_dtype,
+        distributed=distributed, tile_dimensions=tile_dimensions)
     _moisture_grid = grid.make_grid(
         params.world_size, params.rain_downsample,
-        halo=required_halos["moisture"], dtype=float_dtype)
+        halo=required_halos["moisture"], dtype=float_dtype,
+        distributed=distributed, tile_dimensions=tile_dimensions)
     _raining_grid = grid.make_grid(
         params.world_size, params.rain_downsample,
-        halo=required_halos["raining"], dtype=jnp.bool, init_value=False, fill_value=False)
+        halo=required_halos["raining"], dtype=jnp.bool, init_value=False,
+        fill_value=False, distributed=distributed, tile_dimensions=tile_dimensions)
     _energy_grid = grid.make_grid(
         params.world_size, params.resource_downsample,
-        halo=required_halos["energy"], dtype=float_dtype)
+        halo=required_halos["energy"], dtype=float_dtype,
+        distributed=distributed, tile_dimensions=tile_dimensions)
     _biomass_grid = grid.make_grid(
         params.world_size, params.resource_downsample,
-        halo=required_halos["biomass"], dtype=float_dtype)
+        halo=required_halos["biomass"], dtype=float_dtype,
+        distributed=distributed, tile_dimensions=tile_dimensions)
     _smell_grid = grid.make_grid(
         params.world_size, params.smell_downsample,
-        halo=required_halos["smell"], cell_shape=(params.smell_channels,), dtype=float_dtype)
+        halo=required_halos["smell"], cell_shape=(params.smell_channels,),
+        dtype=float_dtype, distributed=distributed, tile_dimensions=tile_dimensions)
     _audio_grid = grid.make_grid(
         params.world_size, params.audio_downsample,
-        halo=required_halos["audio"], cell_shape=(params.audio_channels,), dtype=float_dtype)
+        halo=required_halos["audio"], cell_shape=(params.audio_channels,),
+        dtype=float_dtype, distributed=distributed, tile_dimensions=tile_dimensions)
     _altitude_grid = grid.make_grid(
         params.world_size, params.terrain_downsample,
-        halo=required_halos["rock"], dtype=float_dtype)
+        halo=required_halos["rock"], dtype=float_dtype,
+        distributed=distributed, tile_dimensions=tile_dimensions)
     
     # initial resource values
     mean_energy_sites = (
@@ -544,6 +559,33 @@ def make_landscape(
         
         def required_halos():
             return required_halos
+        def exchange(state: LandscapeState) -> LandscapeState:
+            """Exchange halo-padded landscape grids using per-grid exchangers."""
+            ls = state
+            if params.include_rock:
+                ls = ls.replace(rock=_rock_grid.exchange(ls.rock))
+                if params.include_light:
+                    ls = ls.replace(rock_normals=_rock_normals_grid.exchange(ls.rock_normals))
+                if params.include_erosion:
+                    ls = ls.replace(erosion=_erosion_grid.exchange(ls.erosion))
+            if params.include_water:
+                ls = ls.replace(water=_water_grid.exchange(ls.water))
+            if params.include_light:
+                ls = ls.replace(light=_light_grid.exchange(ls.light))
+            if params.include_temperature:
+                ls = ls.replace(temperature=_temperature_grid.exchange(ls.temperature))
+            if params.include_rain:
+                ls = ls.replace(moisture=_moisture_grid.exchange(ls.moisture))
+                ls = ls.replace(raining=_raining_grid.exchange(ls.raining))
+            if params.include_energy:
+                ls = ls.replace(energy=_energy_grid.exchange(ls.energy))
+            if params.include_biomass:
+                ls = ls.replace(biomass=_biomass_grid.exchange(ls.biomass))
+            if params.include_smell:
+                ls = ls.replace(smell=_smell_grid.exchange(ls.smell))
+            if params.include_audio:
+                ls = ls.replace(audio=_audio_grid.exchange(ls.audio))
+            return ls
         rock_grid = _rock_grid
         water_grid = _water_grid
         erosion_grid = _erosion_grid
