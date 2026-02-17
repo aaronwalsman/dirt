@@ -1,3 +1,4 @@
+import math
 from typing import Tuple, Optional
 
 import jax
@@ -40,10 +41,14 @@ from dirt.gridworld2d.grid import (
 from dirt.gridworld2d.observations import first_person_view, noisy_sensor
 import dirt.gridworld2d.spawn as spawn
 from dirt.visualization.image import jax_to_image
+from dirt.gridworld2d.distributed import make_distributed_halo_grid
 
 @static_data
 class TeraAriumParams:
     verbose : bool = True
+    
+    distributed : bool = False
+    tile_dimensions : Tuple[int, int] = (1, 1)
     
     world_size : Tuple[int, int] = (1024, 1024)
     spatial_offset : Tuple[int, int] = (0,0)
@@ -114,13 +119,99 @@ class TeraAriumState:
     
 TeraAriumTraits = BugTraits
 
+def _compute_tile_size(params: TeraAriumParams) -> Tuple[int, int]:
+    h, w = params.world_size
+    tr, tc = params.tile_dimensions
+    assert h % tr == 0 and w % tc == 0
+    return (h // tr, w // tc)
+
 def make_tera_arium(
     params : TeraAriumParams = TeraAriumParams(),
     float_dtype=DEFAULT_FLOAT_DTYPE,
 ):
-    
-    landscape = make_landscape(params.landscape, float_dtype=float_dtype)
+    extra_halos = None
+    if params.distributed:
+        movement_halo = int(math.ceil(params.bugs.max_movement))
+        extra_halos = {
+            "rock": movement_halo,
+            "water": movement_halo,
+        }
+    landscape = make_landscape(
+        params.landscape, float_dtype=float_dtype, extra_halos=extra_halos)
     bugs = make_bugs(params.bugs)
+    landscape_halos = landscape.required_halos()
+    bug_halos = bugs.required_halos()
+    bug_object_grid = bugs.object_grid
+
+    exchangers = {}
+    def _get_exchanger(halo, fill_value):
+        if halo == 0:
+            return None
+        key = (halo, float(fill_value) if isinstance(fill_value, float) else fill_value)
+        if key not in exchangers:
+            exchangers[key] = make_distributed_halo_grid(
+                halo=halo,
+                tile_dimensions=params.tile_dimensions,
+                fill_value=fill_value,
+            )
+        return exchangers[key]
+
+    def _exchange_grid(grid_value, halo, fill_value):
+        if not params.distributed or halo == 0:
+            return grid_value
+        exchanger = _get_exchanger(halo, fill_value)
+        return exchanger.halo_padded_grid(grid_value)
+
+    def _exchange_landscape(state):
+        ls = state.landscape
+        if params.include_rock:
+            ls = ls.replace(rock=_exchange_grid(
+                ls.rock, landscape_halos["rock"], 0.))
+            if params.include_light:
+                ls = ls.replace(rock_normals=_exchange_grid(
+                    ls.rock_normals, landscape_halos["rock_normals"], 0.))
+            if params.include_erosion:
+                ls = ls.replace(erosion=_exchange_grid(
+                    ls.erosion, landscape_halos["erosion"], 0.))
+        if params.include_water:
+            ls = ls.replace(water=_exchange_grid(
+                ls.water, landscape_halos["water"], 0.))
+        if params.include_light:
+            ls = ls.replace(light=_exchange_grid(
+                ls.light, landscape_halos["light"], 0.))
+        if params.include_temperature:
+            ls = ls.replace(temperature=_exchange_grid(
+                ls.temperature, landscape_halos["temperature"], 0.))
+        if params.include_rain:
+            ls = ls.replace(moisture=_exchange_grid(
+                ls.moisture, landscape_halos["moisture"], 0.))
+            ls = ls.replace(raining=_exchange_grid(
+                ls.raining, landscape_halos["raining"], False))
+        if params.include_energy:
+            ls = ls.replace(energy=_exchange_grid(
+                ls.energy, landscape_halos["energy"], 0.))
+        if params.include_biomass:
+            ls = ls.replace(biomass=_exchange_grid(
+                ls.biomass, landscape_halos["biomass"], 0.))
+        if params.include_smell:
+            ls = ls.replace(smell=_exchange_grid(
+                ls.smell, landscape_halos["smell"], 0.))
+        if params.include_audio:
+            ls = ls.replace(audio=_exchange_grid(
+                ls.audio, landscape_halos["audio"], 0.))
+        return state.replace(landscape=ls)
+
+    def _exchange_object_grid(state):
+        if bug_object_grid.halo == 0:
+            return state
+        bugs_state = state.bugs
+        object_grid = _exchange_grid(
+            bugs_state.object_grid, bug_object_grid.halo, -1)
+        bugs_state = bugs_state.replace(object_grid=object_grid)
+        return state.replace(bugs=bugs_state)
+    
+    if params.distributed:
+        _tile_size = _compute_tile_size(params)
     
     def init_state(
         key : chex.PRNGKey,
@@ -160,6 +251,10 @@ def make_tera_arium(
             attacks=attacks,
             homicide_locations=homicide_locations,
         )
+
+        if params.distributed:
+            state = _exchange_landscape(state)
+            state = _exchange_object_grid(state)
         
         return state
     
@@ -172,10 +267,20 @@ def make_tera_arium(
         
         # bugs
         bug_state = state.bugs
+
+        # TODO(halo): two-exchange plan.
+        # 1) Pre-transition halos are assumed valid (from init or prior step).
+        #    Transition can read grid values safely at this point.
+        # 2) After local writes but BEFORE any neighbor-dependent dynamics
+        #    (notably landscape.step), exchange halos again so dynamics see
+        #    correct neighbor values.
+        # 3) After transition, exchange halos again so observation is correct.
         
         # - eat
         #   do this before anything else happens so that the food an agent
         #   observed in the last time step is still in the right location
+        # TODO(halo): if running distributed, ensure landscape grids have
+        # up-to-date halo padding before any grid reads based on bug positions.
         # -- pull resources out of the environment
         landscape_state = state.landscape
         if params.include_water:
@@ -214,12 +319,10 @@ def make_tera_arium(
                 landscape_state, bug_state.x, leftover_biomass)
         
         # - photosynthesis
+        # TODO(halo): photosynthesis reads light at bug locations; requires
+        # light halo to be current near tile boundaries.
         if params.include_light:
-            bug_light = grid.read_grid_locations(
-                state.landscape.light,
-                bug_state.x,
-                params.landscape.light_downsample,
-            )
+            bug_light = landscape.get_light(state.landscape, bug_state.x)
         else:
             bug_light = jnp.ones((params.max_players,), dtype=float_dtype) 
         bug_state = bugs.photosynthesis(bug_state, traits, bug_light)
@@ -231,13 +334,20 @@ def make_tera_arium(
         bug_state, evaporated_metabolism = bugs.metabolism(bug_state, traits)
         
         # - fight
+        # TODO(halo): bug collision/interaction should use an object_grid
+        # with a fresh halo exchange before fight near tile edges.
+        if params.distributed:
+            state = _exchange_object_grid(state)
+            bug_state = state.bugs
         key, fight_key = jrng.split(key)
         bug_state, attacks, homicides, homicide_locations, hit_map = bugs.fight(
-            key, bug_state, action, traits)
+            fight_key, bug_state, action, traits)
         
         # - move bugs
+        # TODO(halo): movement and collision checks should use an object_grid
+        # with a fresh halo exchange before moving near tile edges.
         key, move_key = jrng.split(key)
-        altitude = landscape.get_altitude(landscape_state)
+        altitude = landscape.get_altitude_full(landscape_state)
         bug_state, evaporated_move = bugs.move(
             move_key,
             bug_state,
@@ -245,9 +355,12 @@ def make_tera_arium(
             traits,
             altitude,
             params.landscape.terrain_downsample,
+            altitude_grid=landscape.altitude_grid(),
         )
         
         # - birth and death
+        # TODO(halo): birth/death may write to object_grid; consider halo
+        # update after local writes if subsequent steps read neighbors.
         (
             bug_state,
             expelled_x,
@@ -258,6 +371,8 @@ def make_tera_arium(
         ) = bugs.birth_and_death(bug_state, action, traits)
         
         # - add evaporated water to the atmosphere/ground
+        # TODO(halo): add_* writes should remain interior-only; halo should be
+        # refreshed before any neighbor-dependent reads (e.g., step/observe).
         if params.include_water:
             evaporated_moisture = (
                 evaporated_move + evaporated_metabolism + evaporated_birth)
@@ -275,8 +390,22 @@ def make_tera_arium(
         if params.include_biomass:
             landscape_state = landscape.add_biomass(
                 landscape_state, expelled_x, expelled_biomass)
+
+        # TODO(halo): exchange landscape halos HERE (after local writes) before
+        # landscape.step. Grids likely needed:
+        # - rock (if used in step), water, energy, biomass
+        # - moisture/raining (if include_rain), temperature (if include_temperature)
+        # - wind (if include_wind), light (if include_light)
+        # - audio/smell (if include_audio/include_smell), any gas fields
+        # This should use fill_value=0 for floats.
         
         # natural landscape processes
+        # TODO(halo): landscape.step may depend on neighboring cells; ensure
+        # required grids have halo padding before step.
+        if params.distributed:
+            state = state.replace(landscape=landscape_state)
+            state = _exchange_landscape(state)
+            landscape_state = state.landscape
         key, landscape_key = jrng.split(key)
         landscape_state = landscape.step(
             landscape_key, landscape_state)
@@ -309,6 +438,13 @@ def make_tera_arium(
         )
         if params.display_hit_map:
             state = state.replace(hit_map=hit_map)
+
+        # TODO(halo): exchange halos HERE (end of transition) so observe sees
+        # correct neighbor data. Include same landscape grids as above, plus
+        # bug object_grid if observations or debug views depend on it.
+        if params.distributed:
+            state = _exchange_landscape(state)
+            state = _exchange_object_grid(state)
         
         return state
     
@@ -316,8 +452,16 @@ def make_tera_arium(
         key : chex.PRNGKey,
         state : TeraAriumState,
     ) -> BugObservation:
+        # TODO(halo): observation expects halos to already be current (end of
+        # transition or post-init exchange).
+        # TODO(perf): investigate batching or fusing repeated grid reads
+        # (read_grid_locations) across channels/fields.
         # visual
         # - rgb
+        # TODO(halo): render_rgb and first_person_view should operate on grids
+        # with current halos; use local coordinates if distributed.
+        # TODO(perf): render_rgb may be expensive at full resolution; consider
+        # a cheaper observation path if possible.
         if params.vision_includes_rgb:
             rgb = landscape.render_rgb(
                 state.landscape,
@@ -337,6 +481,7 @@ def make_tera_arium(
             rgb_view = None
         
         # - relative altitude
+        # TODO(halo): altitude reads and views need halos near tile edges.
         if params.vision_includes_relative_altitude:
             '''
             if params.include_rock:
@@ -356,12 +501,12 @@ def make_tera_arium(
             
             altitude = landscape.get_altitude(state.landscape)
             
-            bug_altitude = read_grid_locations(
-                altitude, state.bugs.x, params.landscape.terrain_downsample)
+            bug_altitude = landscape.altitude_grid.read(
+                landscape.get_altitude_full(state.landscape), state.bugs.x)
             altitude_view = first_person_view(
                 state.bugs.x,
                 state.bugs.r,
-                altitude,
+                landscape.altitude_grid.interior(altitude),
                 params.max_view_width,
                 params.max_view_distance,
                 params.max_view_back_distance,
@@ -372,54 +517,45 @@ def make_tera_arium(
             altitude_view = None
         
         # audio/smell
+        # TODO(halo): audio/smell reads need halos near tile edges.
         if params.include_audio:
-            audio = read_grid_locations(
-                state.landscape.audio,
-                state.bugs.x,
-                params.landscape.audio_downsample,
-            )
+            audio = landscape.get_audio(state.landscape, state.bugs.x)
         else:
             audio = None
         if params.include_smell:
-            smell = read_grid_locations(
-                state.landscape.smell,
-                state.bugs.x,
-                params.landscape.smell_downsample,
-            )
+            smell = landscape.get_smell(state.landscape, state.bugs.x)
         else:
             smell = None
         
         # weather
+        # TODO(halo): wind/temperature reads need halos near tile edges.
         if params.include_wind:
             wind = state.landscape.wind / state.landscape.max_wind
+            # TODO(perf): avoid per-player repeat if bugs.observe can accept
+            # broadcasted/global wind directly.
             wind = jnp.repeat(
                 wind[None,...], repeats=params.max_players, axis=0)
         else:
             wind = None
         if params.include_temperature:
-            temperature = read_grid_locations(
-                state.landscape.temperature,
-                state.bugs.x,
-                params.landscape.temperature_downsample,
-            )
+            temperature = landscape.get_temperature(state.landscape, state.bugs.x)
         else:
             temperature = 0.
         
         # external resources
+        # TODO(halo): resource reads need halos near tile edges.
         if params.include_water:
             external_water = landscape.get_water(state.landscape, state.bugs.x)
         else:
             external_water = None
-        external_energy = read_grid_locations(
-            state.landscape.energy,
-            state.bugs.x,
-            params.landscape.resource_downsample,
-        )
-        external_biomass = read_grid_locations(
-            state.landscape.biomass,
-            state.bugs.x,
-            params.landscape.resource_downsample,
-        )
+        if params.include_energy:
+            external_energy = landscape.get_energy(state.landscape, state.bugs.x)
+        else:
+            external_energy = None
+        if params.include_biomass:
+            external_biomass = landscape.get_biomass(state.landscape, state.bugs.x)
+        else:
+            external_biomass = None
         
         return bugs.observe(
             key,
@@ -444,12 +580,16 @@ def make_tera_arium(
     
     def correct(state, steps):
         if params.auto_correct_biomass:
+            # TODO(perf): full-grid sums every call can be expensive; consider
+            # tracking deltas or reducing correction frequency.
             #state_biomass = (
             #    jnp.sum(state.landscape.biomass, dtype=jnp.float32) +
             #    jnp.sum(state.bugs.biomass, dtype=jnp.float32)
             #)
             state_landscape_biomass = jnp.sum(
-                state.landscape.biomass, dtype=jnp.float32)
+                landscape.biomass_grid.interior(state.landscape.biomass),
+                dtype=jnp.float32,
+            )
             state_bugs_biomass = jnp.sum(
                 state.bugs.biomass, dtype=jnp.float32)
             state_biomass = state_landscape_biomass + state_bugs_biomass
@@ -484,7 +624,8 @@ def make_tera_arium(
                 convert_to_image=True,
             )
         elif display_mode == 6 and params.report_object_grid:
-            occupied = report.object_grid != -1
+            object_grid = bug_object_grid.interior(report.object_grid)
+            occupied = object_grid != -1
             rgb = jnp.stack((occupied, occupied, occupied), axis=-1)
             rgb = set_grid_shape(rgb, *shape, preserve_mass=False)
             return jax_to_image(rgb)
@@ -574,22 +715,30 @@ def make_tera_arium(
             player_color=state.bug_traits.color,
         )
         if params.include_rock:
-            report = report.replace(rock=state.landscape.rock)
+            report = report.replace(
+                rock=landscape.rock_grid.interior(state.landscape.rock))
         if params.include_water:
-            report = report.replace(water=state.landscape.water)
+            report = report.replace(
+                water=landscape.water_grid.interior(state.landscape.water))
         if params.include_light:
-            report = report.replace(light=state.landscape.light)
+            report = report.replace(
+                light=landscape.light_grid.interior(state.landscape.light))
         if params.include_temperature:
-            report = report.replace(temperature=state.landscape.temperature)
+            report = report.replace(temperature=landscape.temperature_grid.interior(
+                state.landscape.temperature))
         if params.include_rain:
             report = report.replace(
-                moisture=state.landscape.moisture,
-                raining=state.landscape.raining,
+                moisture=landscape.moisture_grid.interior(
+                    state.landscape.moisture),
+                raining=landscape.raining_grid.interior(
+                    state.landscape.raining),
             )
         if params.include_energy:
-            report = report.replace(energy=state.landscape.energy)
+            report = report.replace(
+                energy=landscape.energy_grid.interior(state.landscape.energy))
         if params.include_biomass:
-            report = report.replace(biomass=state.landscape.biomass)
+            report = report.replace(biomass=landscape.biomass_grid.interior(
+                state.landscape.biomass))
         
         if params.report_bug_actions:
             report = report.replace(actions=actions)
@@ -608,7 +757,8 @@ def make_tera_arium(
             report = report.replace(traits=state.bug_traits)
         
         if params.report_object_grid:
-            report = report.replace(object_grid=state.bugs.object_grid)
+            report = report.replace(
+                object_grid=bug_object_grid.interior(state.bugs.object_grid))
         
         return report
     

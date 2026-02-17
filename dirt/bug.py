@@ -3,6 +3,7 @@ Run this file with:
 python bug.py -m configs/sweep.yaml
 '''
 
+import math
 from typing import TypeVar, Tuple, Any, Optional
 from omegaconf import DictConfig
 
@@ -663,12 +664,36 @@ def make_bugs(
     if params.include_biomass:
         BIOMASS_PRIMITIVE = resource_primitive
         resource_primitive += 1
+
+    object_grid_halo = int(math.ceil(params.max_movement))
+    object_grid_spec = grid.make_grid(
+        params.world_size,
+        downsample=1,
+        halo=object_grid_halo,
+        dtype=jnp.int32,
+        init_value=-1,
+        fill_value=-1,
+    )
     
     @static_functions
     class Bugs:
         num_actions = num_action_primitives
         action_primitive_count = action_primitives
         action_to_primitive = action_to_primitive_map
+
+        def required_halos():
+            return {
+                "object_grid": object_grid_halo,
+                "attack": int(params.max_attack_radius),
+            }
+
+        def _shift_object_x(x):
+            if object_grid_halo == 0:
+                return x
+            return x + object_grid_halo
+
+        def object_grid():
+            return object_grid_spec
         
         def init(
             key : chex.PRNGKey,
@@ -689,6 +714,8 @@ def make_bugs(
             object_grid = jnp.full(params.world_size, -1, dtype=jnp.int32)
             object_grid = object_grid.at[x[...,0], x[...,1]].set(
                 jnp.arange(params.max_players))
+            object_grid = object_grid_spec.set_interior(
+                object_grid_spec.init(), object_grid)
             
             # initialize the player age
             age = jnp.zeros((params.max_players,), dtype=jnp.int32)
@@ -766,6 +793,8 @@ def make_bugs(
             traits : BugTraits,
             altitude : jnp.ndarray,
             altitude_downsample : int,
+            altitude_grid=None,
+            altitude_halo : int = 0,
         ):
             
             # validate
@@ -799,6 +828,7 @@ def make_bugs(
                 active=active_bugs,
                 check_collisions=True,
                 object_grid=g0,
+                object_grid_halo=object_grid_halo,
             )
             
             # record move actions
@@ -808,10 +838,18 @@ def make_bugs(
             # compute the energy and water costs
             dx = dynamics.distance_x(x1, x0)
             dr = dynamics.distance_r(r1, r0)
-            y0 = grid.read_grid_locations(
-                altitude, x0, altitude_downsample, downsample_scale=False)
-            y1 = grid.read_grid_locations(
-                altitude, x1, altitude_downsample, downsample_scale=False)
+            if altitude_grid is not None:
+                y0 = altitude_grid.read(
+                    altitude, x0, downsample_scale=False)
+                y1 = altitude_grid.read(
+                    altitude, x1, downsample_scale=False)
+            else:
+                y0 = grid.read_grid_locations(
+                    altitude, x0, altitude_downsample, downsample_scale=False,
+                    halo=altitude_halo)
+                y1 = grid.read_grid_locations(
+                    altitude, x1, altitude_downsample, downsample_scale=False,
+                    halo=altitude_halo)
             dy = y1 - y0
             uphill = jnp.where(dy > 0., dy, 0.)
             can_move = uphill <= traits.max_climb
@@ -833,7 +871,7 @@ def make_bugs(
             # or cannot climb well enough
             x2 = jnp.where(can_move[...,None], x1, x0)
             r2 = jnp.where(can_move, r1, r0)
-            g2 = dynamics.move_objects(x1, x2, g1)
+            g2 = dynamics.move_objects(x1, x2, g1, halo=object_grid_halo)
             
             # update state position/rotation
             state = state.replace(
@@ -1336,6 +1374,7 @@ def make_bugs(
                 state.x,
                 state.r,
                 object_grid=state.object_grid,
+                object_grid_halo=object_grid_halo,
             )
             # - finally filter by available slots
             #   technically, this may undercount the number of available slots
@@ -1401,8 +1440,9 @@ def make_bugs(
             # - empty the positions of the dead bugs in the object grid
             #   TODO: this seems redundant with the one below that updates for
             #   new children
+            xg = Bugs._shift_object_x(state.x)
             object_grid = (
-                state.object_grid.at[state.x[...,0], state.x[...,1]].set(
+                state.object_grid.at[xg[...,0], xg[...,1]].set(
                     jnp.where(still_alive, jnp.arange(params.max_players), -1)))
             # - move the dead bugs off the map and set 0 rotation
             x = jnp.where(
@@ -1420,7 +1460,8 @@ def make_bugs(
             x = x.at[child_locations].set(child_x)
             r = r.at[child_locations].set(child_r)
             # - update the object grid
-            object_grid = object_grid.at[x[...,0], x[...,1]].set(
+            xg_new = Bugs._shift_object_x(x)
+            object_grid = object_grid.at[xg_new[...,0], xg_new[...,1]].set(
                 jnp.where(active, jnp.arange(params.max_players), -1))
             # - update the state
             state = state.replace(x=x, r=r, object_grid=object_grid)

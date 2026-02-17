@@ -192,7 +192,116 @@ def compare_grids(a, b, mode='<'):
     
     return blocks_to_grid(result)
 
-def read_grid_locations(a, x, downsample, downsample_scale=True):
+def _shift_for_halo(xd, halo):
+    if halo == 0:
+        return xd
+    return xd + halo
+
+def interior_slice(a, halo):
+    if halo == 0:
+        return a
+    return a[halo:-halo, halo:-halo, ...]
+
+def pad_with_halo(a, halo, fill_value=0):
+    if halo == 0:
+        return a
+    return jnp.pad(
+        a,
+        ((halo, halo), (halo, halo), *(((0, 0),) * (a.ndim - 2))),
+        mode='constant',
+        constant_values=fill_value,
+    )
+
+def set_interior(a, interior, halo):
+    if halo == 0:
+        return interior
+    return a.at[halo:-halo, halo:-halo, ...].set(interior)
+
+def make_grid(
+    world_size,
+    downsample=1,
+    halo=0,
+    cell_shape=(),
+    dtype=DEFAULT_FLOAT_DTYPE,
+    init_value=0,
+    fill_value=0,
+):
+    assert halo >= 0
+    dh, dw = downsample_grid_shape(*world_size, downsample)
+    full_shape = (dh + 2 * halo, dw + 2 * halo, *cell_shape)
+    interior_shape = (dh, dw, *cell_shape)
+
+    def _fill(grid, value):
+        if halo == 0:
+            return grid.at[:,:].set(value)
+        return grid.at[halo:-halo, halo:-halo, ...].set(value)
+
+    class Grid:
+        def init():
+            grid = jnp.full(full_shape, fill_value, dtype=dtype)
+            return _fill(grid, init_value)
+
+        def interior(grid):
+            return interior_slice(grid, halo)
+
+        def set_interior(grid, new):
+            return set_interior(grid, new, halo)
+
+        def read(grid, x, downsample_scale=True):
+            return read_grid_locations(
+                grid, x, downsample, downsample_scale=downsample_scale, halo=halo)
+
+        def write(grid, x, value, overwrite_all=False):
+            return write_grid_locations(
+                grid, x, value, downsample, overwrite_all=overwrite_all, halo=halo)
+
+        def add(grid, x, value):
+            return add_to_grid_locations(grid, x, value, downsample, halo=halo)
+
+        def take(grid, x, take=None):
+            return take_from_grid_locations(grid, x, take, downsample, halo=halo)
+
+        def sum_to_mean(grid):
+            return grid_sum_to_mean(grid, downsample)
+
+        def mean_to_sum(grid):
+            return grid_mean_to_sum(grid, downsample)
+
+        def set_shape(grid, h, w, preserve_mass=True):
+            return set_grid_shape(grid, h, w, preserve_mass=preserve_mass)
+
+        def downsample_to(grid, h, w, preserve_mass=True):
+            return downsample_grid(grid, h, w, preserve_mass=preserve_mass)
+
+        def upsample_to(grid, h, w, preserve_mass=True):
+            return upsample_grid(grid, h, w, preserve_mass=preserve_mass)
+
+    Grid.init = staticmethod(Grid.init)
+    Grid.interior = staticmethod(Grid.interior)
+    Grid.set_interior = staticmethod(Grid.set_interior)
+    Grid.read = staticmethod(Grid.read)
+    Grid.write = staticmethod(Grid.write)
+    Grid.add = staticmethod(Grid.add)
+    Grid.take = staticmethod(Grid.take)
+    Grid.sum_to_mean = staticmethod(Grid.sum_to_mean)
+    Grid.mean_to_sum = staticmethod(Grid.mean_to_sum)
+    Grid.set_shape = staticmethod(Grid.set_shape)
+    Grid.downsample_to = staticmethod(Grid.downsample_to)
+    Grid.upsample_to = staticmethod(Grid.upsample_to)
+
+    Grid.world_size = world_size
+    Grid.downsample = downsample
+    Grid.halo = halo
+    Grid.cell_shape = cell_shape
+    Grid.dtype = dtype
+    Grid.init_value = init_value
+    Grid.fill_value = fill_value
+    Grid.full_shape = full_shape
+    Grid.interior_shape = interior_shape
+
+    return Grid
+
+def read_grid_locations(a, x, downsample, downsample_scale=True, halo=0):
     '''
     Read values from specific locations (x) in a downsampled grid (a). The
     downsampled grid values represent the sum of quantities from a higher
@@ -200,13 +309,14 @@ def read_grid_locations(a, x, downsample, downsample_scale=True):
     downsample ratio.
     '''
     xd = x // downsample
+    xd = _shift_for_halo(xd, halo)
     value = a.at[xd[...,0], xd[...,1]].get(mode='fill', fill_value=0.)
     if downsample_scale:
         value /= (downsample**2)
     return value
 
 def write_grid_locations(
-    a, x, value, downsample, overwrite_all=False):
+    a, x, value, downsample, overwrite_all=False, halo=0):
     '''
     Write values to specific locations (x) in a downsampled grid (a).  The
     downsampled grid values represent the sum of quantities from a higher
@@ -219,6 +329,7 @@ def write_grid_locations(
     this cell after this operation. 
     '''
     xd = x // downsample
+    xd = _shift_for_halo(xd, halo)
     xd0 = xd[...,0]
     xd1 = xd[...,1]
     if overwrite_all:
@@ -230,23 +341,24 @@ def write_grid_locations(
     
     return a
 
-def add_to_grid_locations(a, x, value, downsample):
+def add_to_grid_locations(a, x, value, downsample, halo=0):
     '''
     Add values to specific locations (x) in a downsampled grid (a).
     '''
     xd = x // downsample
+    xd = _shift_for_halo(xd, halo)
     a = a.at[xd[...,0], xd[...,1]].add(value)
     return a
 
-def take_from_grid_locations(a, x, take, downsample):
+def take_from_grid_locations(a, x, take, downsample, halo=0):
     '''
     Subtract values (take) from a downsampled grid (a) at locations (x) while
     enforcing a non-negative constraint on a.  Returns the updated grid a and
     the ammount taken min(a[x], take).  If take is None, the maximum possible
     is taken from each location.
     '''
-    taken = read_grid_locations(a, x, downsample)
+    taken = read_grid_locations(a, x, downsample, halo=halo)
     if take is not None:
         taken = jnp.clip(taken, max=take)
-    a = add_to_grid_locations(a, x, -taken, downsample)
+    a = add_to_grid_locations(a, x, -taken, downsample, halo=halo)
     return a, taken
