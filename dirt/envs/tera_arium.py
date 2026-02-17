@@ -296,6 +296,9 @@ def make_tera_arium(
             params.landscape.terrain_downsample,
             altitude_grid=landscape.altitude_grid(),
         )
+
+        if params.distributed:
+            bug_state = bugs.migrate(bug_state)
         
         # - birth and death
         # TODO(halo): birth/death may write to object_grid; consider halo
@@ -749,6 +752,7 @@ def make_tera_arium(
         action_to_primitive=bugs.action_to_primitive,
         biomass_requirement=bugs.biomass_requirement,
         correct=correct,
+        capacity_reached=bugs.capacity_reached,
     )
     
     return game
