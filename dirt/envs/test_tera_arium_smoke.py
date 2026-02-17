@@ -1,3 +1,4 @@
+import functools
 import pytest
 
 
@@ -122,12 +123,10 @@ def test_tera_arium_distributed_smoke():
 
     env = make_tera_arium(params)
 
-    @jax.pmap(axis_name="mesh")
     def init_fn(key):
         state, obs, players = env.init(key)
         return state, obs, players
 
-    @jax.pmap(axis_name="mesh")
     def step_fn(key, state):
         key, action_key, step_key = jrng.split(key, 3)
         actions = jrng.randint(action_key, (params.max_players,), 0, env.num_actions)
@@ -135,6 +134,10 @@ def test_tera_arium_distributed_smoke():
             step_key, state, actions, state.bug_traits
         )
         return next_state, next_obs, players
+
+    pmap = functools.partial(jax.pmap, axis_name="mesh")
+    init_fn = pmap(init_fn)
+    step_fn = pmap(step_fn)
 
     key = jrng.key(0)
     keys = jrng.split(key, jax.device_count())
