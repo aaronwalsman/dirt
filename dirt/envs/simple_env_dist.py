@@ -441,15 +441,20 @@ def make_simple_env_distributed(params: SimpleEnvDistParams):
             bug_stomach = bug_stomach.at[:params.initial_players].set(
                 params.starting_food)
             
-            # Initialize food in full grid (including halos) 
+            # Initialize food only in interior region (HxW)
             key, food_key = jrng.split(key)
             n = round(
                 params.initial_food_density *
-                world_with_halo[0] * world_with_halo[1]
+                interior_size[0] * interior_size[1]
             )
-            food = spawn.poisson_grid(
-                food_key, n, n*2, world_with_halo)
-            food = food.astype(jnp.float32)
+            food_interior = spawn.poisson_grid(
+                food_key, n, n*2, interior_size)
+            food_interior = food_interior.astype(jnp.float32)
+            
+            # Create full grid with halos, place interior food, leave halos empty
+            food = jnp.zeros(world_with_halo, dtype=jnp.float32)
+            food = food.at[:, halo:halo+W].set(food_interior)
+            print(f"Initialized food grid on device {device_id} with shape {food.shape, food}")
             
             reproduced = jnp.zeros(params.max_players, dtype=jnp.bool)
             
@@ -492,16 +497,17 @@ def make_simple_env_distributed(params: SimpleEnvDistParams):
             food = add_to_grid_locations(food, bug_x, leftover_food, 1)
             bug_stomach -= params.food_burn_rate * active
             
-            # Add new food
+            # Add new food (only in interior region)
             key, food_key = jrng.split(key)
-            world_with_halo = (H, W + 2 * halo)
+            interior_size = (H, W)
             n = round(
                 params.per_step_food_density *
-                world_with_halo[0] * world_with_halo[1]
+                interior_size[0] * interior_size[1]
             )
-            new_food = spawn.poisson_grid(      
-                food_key, n, n*2, world_with_halo)
-            food = food + new_food
+            new_food_interior = spawn.poisson_grid(
+                food_key, n, n*2, interior_size)
+            # Add food to interior columns only, leave halos untouched
+            food = food.at[:, halo:halo+W].add(new_food_interior)
             food = jnp.clip(food, min=0., max=1.)
             
             # Move bugs
