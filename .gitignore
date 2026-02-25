@@ -5,3 +5,4 @@ __pycache__
 wandb
 *.state
 .DS_Store
+*.mp4
