@@ -3,6 +3,7 @@ Run this file with:
 python bug.py -m configs/sweep.yaml
 '''
 
+import math
 from typing import TypeVar, Tuple, Any, Optional
 from omegaconf import DictConfig
 
@@ -13,13 +14,14 @@ import jax.random as jrng
 import chex
 
 from mechagogue.static import static_data, static_functions
-from mechagogue.player_list import birthday_player_list, player_family_tree
+from mechagogue.player_list import birthday_hometown_player_list, player_family_tree
 
 from dirt.constants import (
     DEFAULT_FLOAT_DTYPE, DEFAULT_BUG_COLOR, PHOTOSYNTHESIS_COLOR)
 import dirt.gridworld2d.dynamics as dynamics
 import dirt.gridworld2d.spawn as spawn
 import dirt.gridworld2d.grid as grid
+from dirt.gridworld2d.distributed import _make_perms
 from dirt.gridworld2d.observations import noisy_sensor
 from dirt.distribution.stochastic_rounding import stochastic_rounding
 
@@ -590,12 +592,16 @@ class BugState:
 
 def make_bugs(
     params : BugParams = BugParams(),
-    float_dtype : Any = DEFAULT_FLOAT_DTYPE
+    float_dtype : Any = DEFAULT_FLOAT_DTYPE,
+    distributed: bool = False,
+    tile_dimensions: Tuple[int, int] = (1, 1),
 ):
     
     params = params.validate()
     
-    player_list = birthday_player_list(params.max_players)
+    axis_name = "mesh" if distributed else None
+    player_list = birthday_hometown_player_list(
+        params.max_players, axis_name=axis_name)
     family_tree = player_family_tree(player_list, 1)
     
     # construct the action mapping
@@ -663,12 +669,45 @@ def make_bugs(
     if params.include_biomass:
         BIOMASS_PRIMITIVE = resource_primitive
         resource_primitive += 1
+
+    object_grid_halo = int(math.ceil(params.max_movement))
+    object_grid_spec = grid.make_grid(
+        params.world_size,
+        downsample=1,
+        halo=object_grid_halo,
+        dtype=jnp.int32,
+        init_value=-1,
+        fill_value=-1,
+        distributed=distributed,
+        tile_dimensions=tile_dimensions,
+    )
     
     @static_functions
     class Bugs:
         num_actions = num_action_primitives
         action_primitive_count = action_primitives
         action_to_primitive = action_to_primitive_map
+
+        def required_halos():
+            return {
+                "object_grid": object_grid_halo,
+                "attack": int(params.max_attack_radius),
+            }
+
+        def _shift_object_x(x):
+            if object_grid_halo == 0:
+                return x
+            return x + object_grid_halo
+
+        def object_grid():
+            return object_grid_spec
+
+        def exchange(state: BugState) -> BugState:
+            if object_grid_halo == 0:
+                return state
+            return state.replace(
+                object_grid=object_grid_spec.exchange(state.object_grid)
+            )
         
         def init(
             key : chex.PRNGKey,
@@ -689,6 +728,8 @@ def make_bugs(
             object_grid = jnp.full(params.world_size, -1, dtype=jnp.int32)
             object_grid = object_grid.at[x[...,0], x[...,1]].set(
                 jnp.arange(params.max_players))
+            object_grid = object_grid_spec.set_interior(
+                object_grid_spec.init(), object_grid)
             
             # initialize the player age
             age = jnp.zeros((params.max_players,), dtype=jnp.int32)
@@ -766,6 +807,8 @@ def make_bugs(
             traits : BugTraits,
             altitude : jnp.ndarray,
             altitude_downsample : int,
+            altitude_grid=None,
+            altitude_halo : int = 0,
         ):
             
             # validate
@@ -792,6 +835,7 @@ def make_bugs(
             
             # move the bugs
             active_bugs = family_tree.active(state.family_tree)
+            out_of_bounds = 'none' if distributed else 'clip'
             x1, r1, _, g1 = dynamics.movement_step(
                 x0,
                 r0,
@@ -799,6 +843,8 @@ def make_bugs(
                 active=active_bugs,
                 check_collisions=True,
                 object_grid=g0,
+                object_grid_halo=object_grid_halo,
+                out_of_bounds=out_of_bounds,
             )
             
             # record move actions
@@ -808,10 +854,18 @@ def make_bugs(
             # compute the energy and water costs
             dx = dynamics.distance_x(x1, x0)
             dr = dynamics.distance_r(r1, r0)
-            y0 = grid.read_grid_locations(
-                altitude, x0, altitude_downsample, downsample_scale=False)
-            y1 = grid.read_grid_locations(
-                altitude, x1, altitude_downsample, downsample_scale=False)
+            if altitude_grid is not None:
+                y0 = altitude_grid.read(
+                    altitude, x0, downsample_scale=False)
+                y1 = altitude_grid.read(
+                    altitude, x1, downsample_scale=False)
+            else:
+                y0 = grid.read_grid_locations(
+                    altitude, x0, altitude_downsample, downsample_scale=False,
+                    halo=altitude_halo)
+                y1 = grid.read_grid_locations(
+                    altitude, x1, altitude_downsample, downsample_scale=False,
+                    halo=altitude_halo)
             dy = y1 - y0
             uphill = jnp.where(dy > 0., dy, 0.)
             can_move = uphill <= traits.max_climb
@@ -833,7 +887,7 @@ def make_bugs(
             # or cannot climb well enough
             x2 = jnp.where(can_move[...,None], x1, x0)
             r2 = jnp.where(can_move, r1, r0)
-            g2 = dynamics.move_objects(x1, x2, g1)
+            g2 = dynamics.move_objects(x1, x2, g1, halo=object_grid_halo)
             
             # update state position/rotation
             state = state.replace(
@@ -855,6 +909,223 @@ def make_bugs(
                 water_cost = None
             
             return state, water_cost
+
+        def migrate(
+            state : BugState,
+        ) -> BugState:
+            if not distributed or tile_dimensions == (1, 1):
+                return state
+
+            H, W = params.world_size
+            x = state.x
+            active = family_tree.active(state.family_tree)
+
+            row_offset = jnp.where(
+                x[:, 0] < 0, -1, jnp.where(x[:, 0] >= H, 1, 0))
+            col_offset = jnp.where(
+                x[:, 1] < 0, -1, jnp.where(x[:, 1] >= W, 1, 0))
+            in_bounds = (row_offset == 0) & (col_offset == 0)
+            emigrant = active & ~in_bounds
+
+            tr, tc = tile_dimensions
+            dev = jax.lax.axis_index("mesh")
+            dev_row = dev // tc
+            dev_col = dev % tc
+            has_up = dev_row > 0
+            has_down = dev_row < (tr - 1)
+            has_left = dev_col > 0
+            has_right = dev_col < (tc - 1)
+
+            perms = _make_perms(tr, tc)
+
+            def _ppermute(payload, direction):
+                return jax.lax.ppermute(
+                    payload, axis_name="mesh", perm=perms[direction])
+
+            def _mask_payload(arr, mask):
+                if arr is None:
+                    return None
+                if arr.ndim == 1:
+                    return jnp.where(mask, arr, jnp.zeros_like(arr))
+                mask_shape = (mask.shape[0],) + (1,) * (arr.ndim - 1)
+                return jnp.where(mask.reshape(mask_shape), arr, jnp.zeros_like(arr))
+
+            players = state.family_tree.player_state.players
+            parents = state.family_tree.parents
+            players_orig = players
+            parents_orig = parents
+
+            fields = {
+                "x": x,
+                "r": state.r,
+                "age": state.age,
+                "generation": state.generation,
+                "hp": state.hp,
+                "level": state.level,
+                "no_actions": state.no_actions,
+                "move_actions": state.move_actions,
+                "attack_actions": state.attack_actions,
+                "eat_actions": state.eat_actions,
+                "reproduce_actions": state.reproduce_actions,
+            }
+            if params.include_water:
+                fields["water"] = state.water
+            if params.include_energy:
+                fields["energy"] = state.energy
+            if params.include_biomass:
+                fields["biomass"] = state.biomass
+            fields_orig = {key: value for key, value in fields.items()}
+
+            directions = [
+                ("up", -1, 0, has_up),
+                ("down", 1, 0, has_down),
+                ("left", 0, -1, has_left),
+                ("right", 0, 1, has_right),
+                ("up_left", -1, -1, has_up & has_left),
+                ("up_right", -1, 1, has_up & has_right),
+                ("down_left", 1, -1, has_down & has_left),
+                ("down_right", 1, 1, has_down & has_right),
+            ]
+
+            direction_masks = []
+            for name, dr, dc, allowed in directions:
+                mask = emigrant & (row_offset == dr) & (col_offset == dc) & allowed
+                direction_masks.append(mask)
+
+            allowed_mask = jnp.zeros_like(emigrant)
+            for mask in direction_masks:
+                allowed_mask = allowed_mask | mask
+            drop_mask = emigrant & ~allowed_mask
+
+            keep_mask = ~(emigrant | drop_mask)
+            for key, arr in fields.items():
+                if arr.ndim == 1:
+                    fields[key] = jnp.where(keep_mask, arr, jnp.zeros_like(arr))
+                else:
+                    fields[key] = jnp.where(
+                        keep_mask[:, None], arr, jnp.zeros_like(arr))
+
+            players = jnp.where((emigrant | drop_mask)[:, None], -1, players)
+            parents = jnp.where((emigrant | drop_mask)[:, None, None], -1, parents)
+
+            available_slots = players[..., 0] == -1
+            capacity_reached = state.family_tree.player_state.capacity_reached
+
+            def _incoming_for(mask, dr, dc, name):
+                x_adj = x + jnp.array([-dr * H, -dc * W], dtype=jnp.int32)
+                payload_fields = {
+                    key: _mask_payload(
+                        x_adj if key == "x" else value, mask)
+                    for key, value in fields_orig.items()
+                }
+                payload_players = _mask_payload(players_orig, mask)
+                payload_parents = _mask_payload(parents_orig, mask)
+                incoming = {
+                    "mask": _ppermute(mask, name),
+                    "fields": {
+                        key: _ppermute(val, name) for key, val in payload_fields.items()
+                    },
+                    "players": _ppermute(payload_players, name),
+                    "parents": _ppermute(payload_parents, name),
+                }
+                return incoming
+
+            incoming_payloads = []
+            for (name, dr, dc, _), mask in zip(directions, direction_masks):
+                incoming_payloads.append(_incoming_for(mask, dr, dc, name))
+
+            def _place_payload(payload, carry):
+                fields_local, players_local, parents_local, slots_local, cap_local = carry
+
+                incoming_mask = payload["mask"]
+                incoming_fields = payload["fields"]
+                incoming_players = payload["players"]
+                incoming_parents = payload["parents"]
+
+                def place_one(i, carry_inner):
+                    fields_i, players_i, parents_i, slots_i, cap_i = carry_inner
+                    mask_i = incoming_mask[i]
+                    has_slot = jnp.any(slots_i)
+                    cap_i = cap_i | (mask_i & ~has_slot)
+
+                    def _do_place(carry_do):
+                        fields_d, players_d, parents_d, slots_d = carry_do
+                        slot_idx = jnp.argmax(slots_d)
+                        fields_d = jax.tree_util.tree_map(
+                            lambda arr, inc: arr.at[slot_idx].set(inc[i]),
+                            fields_d,
+                            incoming_fields,
+                        )
+                        incoming_player = incoming_players[i]
+                        incoming_player = incoming_player.at[3].set(slot_idx)
+                        players_d = players_d.at[slot_idx].set(incoming_player)
+                        parents_d = parents_d.at[slot_idx].set(incoming_parents[i])
+                        slots_d = slots_d.at[slot_idx].set(False)
+                        return fields_d, players_d, parents_d, slots_d
+
+                    def _no_place(carry_do):
+                        return carry_do
+
+                    fields_i, players_i, parents_i, slots_i = jax.lax.cond(
+                        mask_i & has_slot,
+                        _do_place,
+                        _no_place,
+                        (fields_i, players_i, parents_i, slots_i),
+                    )
+                    return fields_i, players_i, parents_i, slots_i, cap_i
+
+                return jax.lax.fori_loop(
+                    0, params.max_players, place_one,
+                    (fields_local, players_local, parents_local, slots_local, cap_local),
+                )
+
+            for payload in incoming_payloads:
+                fields, players, parents, available_slots, capacity_reached = _place_payload(
+                    payload,
+                    (fields, players, parents, available_slots, capacity_reached),
+                )
+
+            player_state = state.family_tree.player_state.replace(
+                players=players,
+                capacity_reached=capacity_reached,
+            )
+            family_tree_state = state.family_tree.replace(
+                player_state=player_state,
+                parents=parents,
+            )
+
+            active_after = family_tree.active(family_tree_state)
+            object_grid = dynamics.make_object_grid(
+                params.world_size,
+                fields["x"],
+                active_after,
+                empty=-1,
+                halo=object_grid_halo,
+            )
+
+            next_state = state.replace(
+                x=fields["x"],
+                r=fields["r"],
+                object_grid=object_grid,
+                age=fields["age"],
+                generation=fields["generation"],
+                hp=fields["hp"],
+                level=fields["level"],
+                no_actions=fields["no_actions"],
+                move_actions=fields["move_actions"],
+                attack_actions=fields["attack_actions"],
+                eat_actions=fields["eat_actions"],
+                reproduce_actions=fields["reproduce_actions"],
+                family_tree=family_tree_state,
+            )
+            if params.include_water:
+                next_state = next_state.replace(water=fields["water"])
+            if params.include_energy:
+                next_state = next_state.replace(energy=fields["energy"])
+            if params.include_biomass:
+                next_state = next_state.replace(biomass=fields["biomass"])
+
+            return next_state
         
         def eat(
             state : BugState,
@@ -1336,6 +1607,7 @@ def make_bugs(
                 state.x,
                 state.r,
                 object_grid=state.object_grid,
+                object_grid_halo=object_grid_halo,
             )
             # - finally filter by available slots
             #   technically, this may undercount the number of available slots
@@ -1401,8 +1673,9 @@ def make_bugs(
             # - empty the positions of the dead bugs in the object grid
             #   TODO: this seems redundant with the one below that updates for
             #   new children
+            xg = Bugs._shift_object_x(state.x)
             object_grid = (
-                state.object_grid.at[state.x[...,0], state.x[...,1]].set(
+                state.object_grid.at[xg[...,0], xg[...,1]].set(
                     jnp.where(still_alive, jnp.arange(params.max_players), -1)))
             # - move the dead bugs off the map and set 0 rotation
             x = jnp.where(
@@ -1420,7 +1693,8 @@ def make_bugs(
             x = x.at[child_locations].set(child_x)
             r = r.at[child_locations].set(child_r)
             # - update the object grid
-            object_grid = object_grid.at[x[...,0], x[...,1]].set(
+            xg_new = Bugs._shift_object_x(x)
+            object_grid = object_grid.at[xg_new[...,0], xg_new[...,1]].set(
                 jnp.where(active, jnp.arange(params.max_players), -1))
             # - update the state
             state = state.replace(x=x, r=r, object_grid=object_grid)
@@ -1825,9 +2099,12 @@ def make_bugs(
                 fill_value=params.max_players,
             )
             parent_info = next_state.family_tree.parents[child_locations]
-            parent_locations = parent_info[...,1]
+            parent_locations = parent_info[...,-1]
             
             return parent_locations, child_locations
+
+        def capacity_reached(state: BugState):
+            return state.family_tree.player_state.capacity_reached
         
         def empty_family_tree_state():
             return family_tree.init(0)

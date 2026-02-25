@@ -248,6 +248,13 @@ def make_gas(
     
     @static_functions
     class Gas:
+        def required_halo():
+            r = diffusion_radius if include_diffusion else 0
+            if include_wind:
+                wind_cells = int(math.ceil(max_wind / downsample))
+            else:
+                wind_cells = 0
+            return max(r, wind_cells)
         
         def init():
             grid = jnp.zeros(grid_size, dtype=dtype)

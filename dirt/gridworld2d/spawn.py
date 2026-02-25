@@ -209,6 +209,7 @@ def spawn_from_parents(
     parent_r,
     world_size=None,
     object_grid=None,
+    object_grid_halo: int = 0,
     #child_ids=None,
     child_x_offset=(-1,0),
     child_r_offset=0,
@@ -223,7 +224,13 @@ def spawn_from_parents(
     
     if object_grid is not None:
         assert world_size is None
-        world_size = object_grid.shape
+        if object_grid_halo == 0:
+            world_size = object_grid.shape
+        else:
+            world_size = (
+                object_grid.shape[0] - 2 * object_grid_halo,
+                object_grid.shape[1] - 2 * object_grid_halo,
+            )
     
     child_x, child_r = dynamics.step(
         parent_x,
@@ -251,8 +258,12 @@ def spawn_from_parents(
         #child_colliders = object_grid[child_x[:,0], child_x[:,1]]
         #valid_children = valid_children & (child_colliders == empty)
         occupancy_map = (object_grid != empty).astype(jnp.int32)
-        occupancy_map = occupancy_map.at[child_x[:,0], child_x[:,1]].add(1)
-        child_occupancy = occupancy_map[child_x[:,0], child_x[:,1]]
+        if object_grid_halo == 0:
+            child_xg = child_x
+        else:
+            child_xg = child_x + object_grid_halo
+        occupancy_map = occupancy_map.at[child_xg[:,0], child_xg[:,1]].add(1)
+        child_occupancy = occupancy_map[child_xg[:,0], child_xg[:,1]]
         valid_children = valid_children & (child_occupancy <= 1)
     
     # update the non-reproduced child_x locations to be off the grid so they

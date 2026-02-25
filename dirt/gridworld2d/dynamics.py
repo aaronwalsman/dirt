@@ -98,11 +98,17 @@ def distance_r(r0, r1):
     #return distance_matrix[r0, r1]
     return jnp.abs(shortest_r(r0, r1))
 
+def _shift_x(x, halo):
+    if halo == 0:
+        return x
+    return x + halo
+
 def move_mass(
     x0 : jnp.ndarray,
     x1 : jnp.ndarray,
     mass_grid : jnp.ndarray,
     mass : Union[int, float, jnp.ndarray] = 1,
+    halo: int = 0,
 ) -> jnp.ndarray :
     '''
     Returns a new mass_grid after a fixed ammount of mass at one position x0
@@ -114,6 +120,8 @@ def move_mass(
         added to these locations.
     occupancy : The existing occupancy map.
     '''
+    x0 = _shift_x(x0, halo)
+    x1 = _shift_x(x1, halo)
     mass_grid = mass_grid.at[x0[...,0], x0[...,1]].add(-mass)
     mass_grid = mass_grid.at[x1[...,0], x1[...,1]].add(mass)
     return mass_grid
@@ -123,6 +131,7 @@ def collide(
     x1 : jnp.ndarray,
     occupancy_grid : jnp.ndarray,
     max_occupancy : int = 1,
+    halo: int = 0,
 ) -> Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray] :
     '''
     Checks for collisions as objects at x0 move to x1.  Objects are
@@ -140,16 +149,20 @@ def collide(
     x1 : The ending position for each moving object.
     occupancy_grid : The occupancy grid before the motion.
     '''
-    collision_grid = occupancy_grid + move_mass(x0, x1, occupancy_grid)
+    collision_grid = occupancy_grid + move_mass(
+        x0, x1, occupancy_grid, halo=halo)
     
     # subtract one from all places where no motion occurred
     # (do not count collisions with self)
     no_motion = jnp.all(x0==x1, axis=-1).astype(jnp.int32)
-    collision_grid = collision_grid.at[x0[:,0], x0[:,1]].add(-no_motion)
+    x0h = _shift_x(x0, halo)
+    collision_grid = collision_grid.at[x0h[:,0], x0h[:,1]].add(-no_motion)
     
-    collided = (collision_grid[x1[:,0], x1[:,1]] > 1)
+    x1h = _shift_x(x1, halo)
+    collided = (collision_grid[x1h[:,0], x1h[:,1]] > 1)
     x2 = jnp.where(collided[...,None], x0, x1)
-    occupancy_grid = move_mass(x0, x2, occupancy_grid)
+    occupancy_grid = move_mass(
+        x0, x2, occupancy_grid, halo=halo)
     return x2, collided, occupancy_grid
 
 def move_objects(
@@ -157,6 +170,7 @@ def move_objects(
     x1 : jnp.ndarray,
     object_grid : jnp.ndarray,
     empty : int = -1,
+    halo: int = 0,
 ) -> jnp.ndarray :
     '''
     Returns a new object_grid after objects at position x0
@@ -170,6 +184,8 @@ def move_objects(
         placed in these locations.
     object_grid : The existing object_grid.
     '''
+    x0 = _shift_x(x0, halo)
+    x1 = _shift_x(x1, halo)
     values = object_grid[x0[...,0], x0[...,1]]
     object_grid = object_grid.at[x0[...,0], x0[...,1]].set(empty)
     object_grid = object_grid.at[x1[...,0], x1[...,1]].set(values)
@@ -180,6 +196,7 @@ def move_and_collide_objects(
     x1 : jnp.ndarray,
     object_grid : jnp.ndarray,
     empty : int = -1,
+    halo: int = 0,
 ) -> Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray] :
     '''
     Returns a new object_grid after attempting to move objects at
@@ -192,8 +209,8 @@ def move_and_collide_objects(
     object_grid : The existing object_grid.
     '''
     occupancy_grid = (object_grid != empty).astype(jnp.int32)
-    x2, collided, _ = collide(x0, x1, occupancy_grid)
-    object_grid = move_objects(x0, x2, object_grid, empty=empty)
+    x2, collided, _ = collide(x0, x1, occupancy_grid, halo=halo)
+    object_grid = move_objects(x0, x2, object_grid, empty=empty, halo=halo)
     return x2, collided, object_grid
 
 def step(
@@ -206,6 +223,7 @@ def step(
     active : Optional[jnp.ndarray] = None,
     check_collisions : bool = False,
     object_grid : Optional[jnp.ndarray] = None,
+    object_grid_halo: int = 0,
     out_of_bounds : str = 'clip',
 ) -> Tuple[jnp.ndarray, jnp.ndarray] :
     '''
@@ -241,7 +259,13 @@ def step(
         the edge of the gridworld.  Can be either "clip", "wrap" or "none".
     '''
     if world_size is None and object_grid is not None:
-        world_size = object_grid.shape
+        if object_grid_halo == 0:
+            world_size = object_grid.shape
+        else:
+            world_size = (
+                object_grid.shape[0] - 2 * object_grid_halo,
+                object_grid.shape[1] - 2 * object_grid_halo,
+            )
     
     if active is not None:
         dx = dx * active[:, None]
@@ -268,7 +292,7 @@ def step(
     if object_grid is not None:
         if check_collisions:
             x1, collided, object_grid = move_and_collide_objects(
-                x0, x1, object_grid)
+                x0, x1, object_grid, halo=object_grid_halo)
             return x1, r1, collided, object_grid
         
         else:
@@ -323,9 +347,19 @@ if __name__ == '__main__':
     
     x2, occupancy = collide(x0, x1, occupancy)
 
-def make_object_grid(world_size, x, active, empty=-1):
+def make_object_grid(world_size, x, active, empty=-1, halo: int = 0):
     n, _ = x.shape
     object_grid = jnp.full(world_size, empty, dtype=jnp.int32)
+    if halo == 0:
+        object_grid = object_grid.at[x[...,0], x[...,1]].set(
+            jnp.where(active, jnp.arange(n), empty))
+        return object_grid
     object_grid = object_grid.at[x[...,0], x[...,1]].set(
         jnp.where(active, jnp.arange(n), empty))
+    object_grid = jnp.pad(
+        object_grid,
+        ((halo, halo), (halo, halo)),
+        mode='constant',
+        constant_values=empty,
+    )
     return object_grid
