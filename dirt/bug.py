@@ -589,6 +589,10 @@ class BugState:
     attack_actions : jnp.ndarray
     eat_actions : jnp.ndarray
     reproduce_actions : jnp.ndarray
+    # migration debug
+    migrate_outgoing : jnp.ndarray
+    migrate_incoming : jnp.ndarray
+    migrate_dir : jnp.ndarray
 
 def make_bugs(
     params : BugParams = BugParams(),
@@ -786,6 +790,9 @@ def make_bugs(
                 attack_actions=jnp.zeros((n,), dtype=jnp.int32),
                 eat_actions=jnp.zeros((n,), dtype=jnp.int32),
                 reproduce_actions=jnp.zeros((n,), dtype=jnp.int32),
+                migrate_outgoing=jnp.zeros((n,), dtype=jnp.bool),
+                migrate_incoming=jnp.zeros((n,), dtype=jnp.bool),
+                migrate_dir=jnp.zeros((n, 2), dtype=jnp.int32),
             )
         
         def get_mass(water, biomass):
@@ -1011,11 +1018,18 @@ def make_bugs(
                 else:
                     fields[key] = jnp.where(
                         keep_mask[:, None], arr, jnp.zeros_like(arr))
+
+            outgoing_mask = allowed_mask
+            outgoing_dir = jnp.stack((row_offset, col_offset), axis=1)
+            outgoing_dir = jnp.where(outgoing_mask[:, None], outgoing_dir, 0)
+
             family_tree_state = family_tree.remove(
                 state.family_tree, allowed_mask | drop_mask)
             players = family_tree_state.player_state.players
             parents = family_tree_state.parents
             capacity_reached = family_tree_state.player_state.capacity_reached
+
+            incoming_slots_mask = jnp.zeros((params.max_players,), dtype=jnp.bool)
 
             def _incoming_for(mask, dr, dc, name):
                 x_adj = x + jnp.array([-dr * H, -dc * W], dtype=jnp.int32)
@@ -1052,6 +1066,8 @@ def make_bugs(
                 valid = slot_idx >= 0
                 safe_slots = jnp.where(valid, slot_idx, 0)
                 safe_src = jnp.where(valid, source_idx, 0)
+                incoming_slots_mask = incoming_slots_mask.at[safe_slots].set(
+                    jnp.where(valid, True, incoming_slots_mask[safe_slots]))
                 for key, arr in fields.items():
                     incoming = payload["fields"][key][safe_src]
                     fields[key] = arr.at[safe_slots].set(
@@ -1087,6 +1103,9 @@ def make_bugs(
                 eat_actions=fields["eat_actions"],
                 reproduce_actions=fields["reproduce_actions"],
                 family_tree=family_tree_state,
+                migrate_outgoing=outgoing_mask,
+                migrate_incoming=incoming_slots_mask,
+                migrate_dir=outgoing_dir,
             )
             if params.include_water:
                 next_state = next_state.replace(water=fields["water"])

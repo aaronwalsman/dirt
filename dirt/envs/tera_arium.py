@@ -649,6 +649,9 @@ def make_tera_arium(
             age : jnp.ndarray = False
             generation : jnp.ndarray = False
             hp : jnp.ndarray = False
+            migrate_outgoing : jnp.ndarray = False
+            migrate_incoming : jnp.ndarray = False
+            migrate_dir : jnp.ndarray = False
             if params.include_water:
                 player_water : jnp.ndarray = False
             if params.include_energy:
@@ -697,6 +700,11 @@ def make_tera_arium(
             report = report.replace(age=state.bugs.age)
             report = report.replace(generation=state.bugs.generation)
             report = report.replace(hp=state.bugs.hp)
+            report = report.replace(
+                migrate_outgoing=state.bugs.migrate_outgoing,
+                migrate_incoming=state.bugs.migrate_incoming,
+                migrate_dir=state.bugs.migrate_dir,
+            )
             if params.include_water:
                 report = report.replace(player_water=state.bugs.water)
             if params.include_energy:
@@ -728,6 +736,9 @@ def make_tera_arium(
             print(f'  age:         {report.age[player_id]}')
             print(f'  generation:  {report.generation[player_id]}')
             print(f'  hp:          {report.hp[player_id]}')
+            print(f'  migrating:   {report.migrate_outgoing[player_id]}')
+            print(f'  incoming:    {report.migrate_incoming[player_id]}')
+            print(f'  migrate_dir: {report.migrate_dir[player_id]}')
             if params.include_water:
                 print(f'  water:       {report.player_water[player_id]}')
             if params.include_energy:
