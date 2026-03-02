@@ -135,8 +135,15 @@ def make_tera_arium(
             "rock": movement_halo,
             "water": movement_halo,
         }
+    landscape_params = params.landscape
+    if params.distributed and landscape_params.max_size is None:
+        tr, tc = params.tile_dimensions
+        h, w = params.world_size
+        landscape_params = landscape_params.replace(
+            max_size=(h * tr, w * tc),
+        )
     landscape = make_landscape(
-        params.landscape,
+        landscape_params,
         float_dtype=float_dtype,
         extra_halos=extra_halos,
         distributed=params.distributed,
@@ -157,7 +164,11 @@ def make_tera_arium(
     ) -> TeraAriumState :
         
         if params.landscape_seed is None:
-            key, landscape_key = jrng.split(key)
+            if params.distributed:
+                base_key = jax.lax.pmin(jrng.key_data(key), axis_name="mesh")
+                landscape_key = jrng.wrap_key_data(base_key)
+            else:
+                key, landscape_key = jrng.split(key)
         else:
             landscape_key = jrng.key(params.landscape_seed)
         landscape_state = landscape.init(landscape_key)
@@ -658,29 +669,26 @@ def make_tera_arium(
         )
         if params.include_rock:
             report = report.replace(
-                rock=landscape.rock_grid.interior(state.landscape.rock))
+                rock=state.landscape.rock)
         if params.include_water:
             report = report.replace(
-                water=landscape.water_grid.interior(state.landscape.water))
+                water=state.landscape.water)
         if params.include_light:
             report = report.replace(
-                light=landscape.light_grid.interior(state.landscape.light))
+                light=state.landscape.light)
         if params.include_temperature:
-            report = report.replace(temperature=landscape.temperature_grid.interior(
-                state.landscape.temperature))
+            report = report.replace(
+                temperature=state.landscape.temperature)
         if params.include_rain:
             report = report.replace(
-                moisture=landscape.moisture_grid.interior(
-                    state.landscape.moisture),
-                raining=landscape.raining_grid.interior(
-                    state.landscape.raining),
+                moisture=state.landscape.moisture,
+                raining=state.landscape.raining,
             )
         if params.include_energy:
             report = report.replace(
-                energy=landscape.energy_grid.interior(state.landscape.energy))
+                energy=state.landscape.energy)
         if params.include_biomass:
-            report = report.replace(biomass=landscape.biomass_grid.interior(
-                state.landscape.biomass))
+            report = report.replace(biomass=state.landscape.biomass)
         
         if params.report_bug_actions:
             report = report.replace(actions=actions)

@@ -608,14 +608,45 @@ def make_landscape(
             
             # time
             state = state.replace(time=params.initial_time)
+
+            max_size = params.max_size
+            if max_size is None:
+                if distributed:
+                    tr, tc = tile_dimensions
+                    max_size = (
+                        params.world_size[0] * tr,
+                        params.world_size[1] * tc,
+                    )
+                else:
+                    max_size = params.world_size
+            spatial_offset = params.spatial_offset
+            if distributed:
+                dev = jax.lax.axis_index("mesh")
+                tr, tc = tile_dimensions
+                dev_row = dev // tc
+                dev_col = dev % tc
+                spatial_offset = (
+                    spatial_offset[0] + dev_row * params.world_size[0],
+                    spatial_offset[1] + dev_col * params.world_size[1],
+                )
             
             # terrain
             terrain_size = downsample_grid_shape(
                 *params.world_size, params.terrain_downsample)
             terrain_max_size = downsample_grid_shape(
-                *params.max_size, params.terrain_downsample)
+                *max_size, params.terrain_downsample)
             terrain_spatial_offset = downsample_grid_shape(
-                *params.spatial_offset, params.terrain_downsample)
+                *spatial_offset, params.terrain_downsample)
+            if distributed:
+                jax.debug.print(
+                    "[landscape init] dev={d} max_size={m} spatial_offset={s} "
+                    "terrain_max_size={tm} terrain_spatial_offset={ts}",
+                    d=dev,
+                    m=max_size,
+                    s=spatial_offset,
+                    tm=terrain_max_size,
+                    ts=terrain_spatial_offset,
+                )
             #terrain_spatial_offset = (
             #    params.spatial_offset[0] // params.terrain_downsample,
             #    params.spatial_offset[1] // params.terrain_downsample,
@@ -640,15 +671,17 @@ def make_landscape(
                         dtype=float_dtype,
                     ) + params.rock_bias
                     x0 = terrain_spatial_offset[0]
-                    x1 = terrain_spatial_offset[0] + terrain_size[0]
                     y0 = terrain_spatial_offset[1]
-                    y1 = terrain_spatial_offset[1] + terrain_size[1]
-                    rock = rock[x0:x1,y0:y1]
+                    rock = jax.lax.dynamic_slice(
+                        rock,
+                        (x0, y0),
+                        terrain_size,
+                    )
                     rock = grid_mean_to_sum(rock, params.terrain_downsample)
                     state = state.replace(rock=rock)
                     
                     # -- add mountains
-                    mean_mountains = params.max_size[0] * params.max_size[1]
+                    mean_mountains = max_size[0] * max_size[1]
                     mean_mountains *= params.mountain_density / 1024**2
                     key, mountain_n_key, mountain_height_key = jrng.split(
                         key, 3)
@@ -668,18 +701,16 @@ def make_landscape(
                             mountain_x_key,
                             shape=(2,),
                             minval=0.,
-                            maxval=jnp.array(params.max_size),
+                            maxval=jnp.array(max_size),
                             dtype=float_dtype,
                         )
-                        x0 = jnp.arange(
-                            params.spatial_offset[0],
-                            params.spatial_offset[0] + params.world_size[0],
-                            params.terrain_downsample,
+                        x0 = (
+                            jnp.arange(terrain_size[0]) * params.terrain_downsample +
+                            spatial_offset[0]
                         )
-                        x1 = jnp.arange(
-                            params.spatial_offset[1],
-                            params.spatial_offset[1] + params.world_size[1],
-                            params.terrain_downsample,
+                        x1 = (
+                            jnp.arange(terrain_size[1]) * params.terrain_downsample +
+                            spatial_offset[1]
                         )
                         dx02 = (mountain_location[0] - x0).astype(
                             jnp.float32)**2
@@ -929,9 +960,9 @@ def make_landscape(
                 resource_size = downsample_grid_shape(
                     *params.world_size, params.resource_downsample)
                 resource_max_size = downsample_grid_shape(
-                    *params.max_size, params.resource_downsample)
+                    *max_size, params.resource_downsample)
                 resource_spatial_offset = downsample_grid_shape(
-                    *params.spatial_offset, params.resource_downsample)
+                    *spatial_offset, params.resource_downsample)
                 #resource_spatial_offset = (
                 #    params.spatial_offset[0] // params.resource_downsample,
                 #    params.spatial_offset[1] // params.resource_downsample,
@@ -946,13 +977,15 @@ def make_landscape(
                         energy_key,
                         mean_energy_sites,
                         round(mean_energy_sites*2),
-                        params.max_size,
+                        max_size,
                     )
-                    x0 = params.spatial_offset[0]
-                    x1 = params.spatial_offset[0] + params.world_size[0]
-                    y0 = params.spatial_offset[1]
-                    y1 = params.spatial_offset[1] + params.world_size[1]
-                    energy_sites = energy_sites[x0:x1,y0:y1]
+                    x0 = spatial_offset[0]
+                    y0 = spatial_offset[1]
+                    energy_sites = jax.lax.dynamic_slice(
+                        energy_sites,
+                        (x0, y0),
+                        params.world_size,
+                    )
                     
                     energy = energy_sites * initial_energy
                     energy = downsample_grid(energy, *resource_size)
@@ -975,10 +1008,12 @@ def make_landscape(
                             dtype=float_dtype,
                         ) + params.energy_mask_bias > 0.
                         x0 = resource_spatial_offset[0]
-                        x1 = resource_spatial_offset[0] + resource_size[0]
                         y0 = resource_spatial_offset[1]
-                        y1 = resource_spatial_offset[1] + resource_size[1]
-                        energy_mask = energy_mask[x0:x1, y0:y1]
+                        energy_mask = jax.lax.dynamic_slice(
+                            energy_mask,
+                            (x0, y0),
+                            resource_size,
+                        )
                     energy *= energy_mask
                     state = state.replace(
                         energy=_energy_grid.set_interior(
@@ -991,13 +1026,15 @@ def make_landscape(
                         biomass_key,
                         mean_biomass_sites,
                         round(mean_biomass_sites*2),
-                        params.max_size,
+                        max_size,
                     )
-                    x0 = params.spatial_offset[0]
-                    x1 = params.spatial_offset[0] + params.world_size[0]
-                    y0 = params.spatial_offset[1]
-                    y1 = params.spatial_offset[1] + params.world_size[1]
-                    biomass_sites = biomass_sites[x0:x1,y0:y1]
+                    x0 = spatial_offset[0]
+                    y0 = spatial_offset[1]
+                    biomass_sites = jax.lax.dynamic_slice(
+                        biomass_sites,
+                        (x0, y0),
+                        params.world_size,
+                    )
                     biomass = (
                         biomass_sites *
                         jnp.array(
@@ -1025,10 +1062,12 @@ def make_landscape(
                             dtype=float_dtype,
                         ) + params.biomass_mask_bias > 0.
                         x0 = resource_spatial_offset[0]
-                        x1 = resource_spatial_offset[0] + resource_size[0]
                         y0 = resource_spatial_offset[1]
-                        y1 = resource_spatial_offset[1] + resource_size[1]
-                        biomass_mask = biomass_mask[x0:x1, y0:y1]
+                        biomass_mask = jax.lax.dynamic_slice(
+                            biomass_mask,
+                            (x0, y0),
+                            resource_size,
+                        )
                         biomass *= biomass_mask
                     
                     state = state.replace(

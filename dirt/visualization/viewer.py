@@ -69,6 +69,7 @@ class Viewer:
         get_player_color=default_get_player_color,
         get_sun_direction=None,
         print_player_info=default_print_player_info,
+        tile_dimensions=None,
     ):
         
         self.get_report_block = standardize_args(
@@ -117,6 +118,13 @@ class Viewer:
                 print_player_info, ('player_id', 'report',))
         
         self.world_size = world_size
+        self.tile_dimensions = tile_dimensions
+        self.tiled = (
+            tile_dimensions is not None and
+            isinstance(report_files, (list, tuple)) and
+            len(report_files) > 0 and
+            isinstance(report_files[0], (list, tuple))
+        )
         
         self._init_params_and_reports(
             #example_params,
@@ -139,6 +147,99 @@ class Viewer:
         
         self.step_size = 1
         self.change_step(start_step)
+
+    def _tile_offsets(self):
+        tr, tc = self.tile_dimensions
+        tile_h = self.world_size[0] // tr
+        tile_w = self.world_size[1] // tc
+        offsets = []
+        for r in range(tr):
+            for c in range(tc):
+                offsets.append((r * tile_h, c * tile_w))
+        return offsets, (tile_h, tile_w)
+
+    def _tile_world_offsets(self):
+        tr, tc = self.tile_dimensions
+        tile_h = self.world_size[0] / tr
+        tile_w = self.world_size[1] / tc
+        offsets = []
+        for r in range(tr):
+            for c in range(tc):
+                off_y = -self.world_size[0] / 2 + tile_h / 2 + r * tile_h
+                off_x = -self.world_size[1] / 2 + tile_w / 2 + c * tile_w
+                offsets.append((off_y, off_x))
+        return offsets, (tile_h, tile_w)
+
+    def _stitch_grid(self, grids):
+        tr, tc = self.tile_dimensions
+        rows = []
+        for r in range(tr):
+            row = jnp.concatenate(grids[r * tc:(r + 1) * tc], axis=1)
+            rows.append(row)
+        return jnp.concatenate(rows, axis=0)
+
+    def _stitch_report(self, block_step):
+        tile_reports = [
+            tree_getitem(block, block_step)
+            for block in self.current_report_block
+        ]
+        self.tile_reports = tile_reports
+        report0 = tile_reports[0]
+        offsets, _ = self._tile_offsets()
+
+        spatial_keys = {
+            "rock", "water", "light", "temperature",
+            "moisture", "raining", "energy", "biomass",
+            "smell", "audio", "object_grid", "rock_normals",
+        }
+        player_x_key = "player_x"
+        player_r_key = "player_r"
+        players_key = "players"
+        player_color_key = "player_color"
+
+        stitched = {}
+        players_len = None
+        if hasattr(report0, players_key):
+            players0 = getattr(report0, players_key)
+            if isinstance(players0, (np.ndarray, jnp.ndarray)):
+                players_len = players0.shape[0]
+
+        for key, value0 in report0.__dict__.items():
+            if value0 is None or value0 is False:
+                stitched[key] = value0
+                continue
+
+            tile_values = [getattr(r, key, None) for r in tile_reports]
+            if tile_values[0] is None:
+                stitched[key] = None
+                continue
+
+            if key in spatial_keys and isinstance(tile_values[0], (np.ndarray, jnp.ndarray)):
+                if tile_values[0].ndim >= 2:
+                    stitched[key] = self._stitch_grid(tile_values)
+                else:
+                    stitched[key] = tile_values[0]
+                continue
+
+            if key == player_x_key:
+                xs = []
+                for (off_y, off_x), x in zip(offsets, tile_values):
+                    xs.append(x + jnp.array([off_y, off_x], dtype=jnp.int32))
+                stitched[key] = jnp.concatenate(xs, axis=0)
+                continue
+
+            if key in {player_r_key, players_key, player_color_key}:
+                stitched[key] = jnp.concatenate(tile_values, axis=0)
+                continue
+
+            if isinstance(tile_values[0], (np.ndarray, jnp.ndarray)) and players_len is not None:
+                if tile_values[0].shape[0] == players_len:
+                    stitched[key] = jnp.concatenate(tile_values, axis=0)
+                    continue
+
+            stitched[key] = tile_values[0]
+
+        return type(report0)(**stitched)
     
     def _init_params_and_reports(
         self,
@@ -156,14 +257,26 @@ class Viewer:
         
         #self.params = load_example_data(example_params, params_file)
         self.report_files = report_files
-        report_block = load_example_data(
-            self._example_report, self.report_files[self.block_index])
-        self.current_report_block = self.get_report_block(report_block)
-        self.report = tree_getitem(
-            self.current_report_block, 0)
-        self.reports_per_block = tree_len(self.current_report_block)
-        
-        self.step_N = step_0 + len(report_files) * self.reports_per_block
+        if not self.tiled:
+            report_block = load_example_data(
+                self._example_report, self.report_files[self.block_index])
+            self.current_report_block = self.get_report_block(report_block)
+            self.report = tree_getitem(
+                self.current_report_block, 0)
+            self.reports_per_block = tree_len(self.current_report_block)
+            self.step_N = step_0 + len(report_files) * self.reports_per_block
+        else:
+            report_blocks = [
+                load_example_data(self._example_report, files[self.block_index])
+                for files in self.report_files
+            ]
+            self.current_report_block = report_blocks
+            self.reports_per_block = tree_len(report_blocks[0])
+            self.tile_reports = [
+                tree_getitem(block, 0) for block in self.current_report_block
+            ]
+            self.report = self.tile_reports[0]
+            self.step_N = step_0 + len(self.report_files[0]) * self.reports_per_block
     
     def _init_context_and_window(self, window_width, window_height):
         glfw_context.initialize()
@@ -190,86 +303,204 @@ class Viewer:
     
     def _init_landscape(self, terrain_texture_resolution):
         #self.terrain_map = self.get_terrain_map(self.params, self.report)
-        self.terrain_map = self.get_terrain_map(self.report)
-        h, w = self.terrain_map.shape
-        if terrain_texture_resolution is None:
-            terrain_texture_resolution = self.world_size
-        self.terrain_texture_resolution = terrain_texture_resolution
-        self.mesh_spacing = self.world_size[0] / h
-        
-        vertices, normals, uvs, faces = make_height_map_mesh(
-            self.terrain_map, spacing=self.mesh_spacing)
-        self.terrain_uvs = uvs
-        self.terrain_faces = faces
-        self.renderer.load_mesh(
-            name='terrain_mesh',
-            mesh_data={
-                'vertices' : vertices,
-                'normals' : normals,
-                'faces' : faces,
-                'uvs' : uvs,
-            },
-            color_mode='textured',
-        )
-        
-        self.renderer.load_texture(
-            name='terrain_texture',
-            texture_data=np.full(
-                (self.terrain_texture_resolution + (3,)),
-                127,
-                dtype=np.uint8,
-            ),
-        )
-        
-        self.renderer.load_material(
-            name='terrain_material',
-            #flat_color=(0.5,0.5,0.5),
-            texture_name='terrain_texture',
-            rough=1.,
-        )
-        
-        self.renderer.add_instance(
-            name='terrain',
-            mesh_name='terrain_mesh',
-            material_name='terrain_material',
-            transform=self.upright,
-        )
-        
-        if self.get_water_map is not None:
-            #water_map = self.get_water_map(self.params, self.report)
-            water_map = self.get_water_map(self.report)
-            self.total_height_map = self.terrain_map + water_map
-            (
-                water_vertices,
-                water_normals,
-                self.water_uvs,
-                self.water_faces,
-            ) = make_height_map_mesh(
-                self.total_height_map, spacing=mesh_spacing)
+        if not self.tiled:
+            self.terrain_map = self.get_terrain_map(self.report)
+            h, w = self.terrain_map.shape
+            if terrain_texture_resolution is None:
+                terrain_texture_resolution = self.world_size
+            self.terrain_texture_resolution = terrain_texture_resolution
+            self.mesh_spacing = (self.world_size[0] / h, self.world_size[1] / w)
+            
+            vertices, normals, uvs, faces = make_height_map_mesh(
+                self.terrain_map, spacing=self.mesh_spacing)
+            self.terrain_uvs = uvs
+            self.terrain_faces = faces
             self.renderer.load_mesh(
-                name='water_mesh',
+                name='terrain_mesh',
                 mesh_data={
-                    'vertices' : water_vertices,
-                    'normals' : water_normals,
-                    'faces' : self.water_faces,
-                    'uvs' : self.water_uvs,
+                    'vertices' : vertices,
+                    'normals' : normals,
+                    'faces' : faces,
+                    'uvs' : uvs,
                 },
-                color_mode='flat_color',
+                color_mode='textured',
+            )
+            
+            self.renderer.load_texture(
+                name='terrain_texture',
+                texture_data=np.full(
+                    (self.terrain_texture_resolution + (3,)),
+                    127,
+                    dtype=np.uint8,
+                ),
             )
             
             self.renderer.load_material(
-                name='water_material',
-                flat_color=(66/255.,135/255.,255.),
+                name='terrain_material',
+                #flat_color=(0.5,0.5,0.5),
+                texture_name='terrain_texture',
                 rough=1.,
             )
             
             self.renderer.add_instance(
-                name='water',
-                mesh_name='water_mesh',
-                material_name='water_material',
+                name='terrain',
+                mesh_name='terrain_mesh',
+                material_name='terrain_material',
                 transform=self.upright,
             )
-        
+            
+            if self.get_water_map is not None:
+                #water_map = self.get_water_map(self.params, self.report)
+                water_map = self.get_water_map(self.report)
+                self.total_height_map = self.terrain_map + water_map
+                (
+                    water_vertices,
+                    water_normals,
+                    self.water_uvs,
+                    self.water_faces,
+                ) = make_height_map_mesh(
+                    self.total_height_map, spacing=self.mesh_spacing)
+                self.renderer.load_mesh(
+                    name='water_mesh',
+                    mesh_data={
+                        'vertices' : water_vertices,
+                        'normals' : water_normals,
+                        'faces' : self.water_faces,
+                        'uvs' : self.water_uvs,
+                    },
+                    color_mode='flat_color',
+                )
+                
+                self.renderer.load_material(
+                    name='water_material',
+                    flat_color=(66/255.,135/255.,255.),
+                    rough=1.,
+                )
+                
+                self.renderer.add_instance(
+                    name='water',
+                    mesh_name='water_mesh',
+                    material_name='water_material',
+                    transform=self.upright,
+                )
+            else:
+                self.total_height_map = self.terrain_map
+        else:
+            tile_reports = getattr(self, "tile_reports", None)
+            if tile_reports is None:
+                tile_reports = [self.report]
+            self.tile_mesh_spacing = None
+            self.tile_terrain_faces = []
+            self.tile_terrain_uvs = []
+            self.tile_water_faces = []
+            self.tile_water_uvs = []
+            self.tile_offsets_world, tile_size = self._tile_world_offsets()
+            tile_h, tile_w = tile_size
+            self.tile_texture_shape = (int(tile_h), int(tile_w))
+            terrain_map0 = self.get_terrain_map(tile_reports[0])
+            self.tile_mesh_spacing = (
+                tile_h / terrain_map0.shape[0],
+                tile_w / terrain_map0.shape[1],
+            )
+            self.mesh_spacing = (
+                self.world_size[0] / (terrain_map0.shape[0] * self.tile_dimensions[0]),
+                self.world_size[1] / (terrain_map0.shape[1] * self.tile_dimensions[1]),
+            )
+            self.tile_terrain_maps = []
+            self.tile_water_maps = []
+            self.tile_total_height_maps = []
+
+            for i, report in enumerate(tile_reports):
+                terrain_map = self.get_terrain_map(report)
+                self.tile_terrain_maps.append(terrain_map)
+                vertices, normals, uvs, faces = make_height_map_mesh(
+                    terrain_map, spacing=self.tile_mesh_spacing)
+                off_y, off_x = self.tile_offsets_world[i]
+                vertices = vertices.at[:, 0].add(off_x)
+                vertices = vertices.at[:, 1].add(off_y)
+
+                mesh_name = f"terrain_mesh_{i}"
+                texture_name = f"terrain_texture_{i}"
+                material_name = f"terrain_material_{i}"
+                instance_name = f"terrain_{i}"
+
+                self.terrain_uvs = uvs
+                self.terrain_faces = faces
+                self.tile_terrain_uvs.append(uvs)
+                self.tile_terrain_faces.append(faces)
+
+                self.renderer.load_mesh(
+                    name=mesh_name,
+                    mesh_data={
+                        'vertices' : vertices,
+                        'normals' : normals,
+                        'faces' : faces,
+                        'uvs' : uvs,
+                    },
+                    color_mode='textured',
+                )
+                self.renderer.load_texture(
+                    name=texture_name,
+                    texture_data=np.full(
+                        (self.tile_texture_shape + (3,)),
+                        127,
+                        dtype=np.uint8,
+                    ),
+                )
+                self.renderer.load_material(
+                    name=material_name,
+                    texture_name=texture_name,
+                    rough=1.,
+                )
+                self.renderer.add_instance(
+                    name=instance_name,
+                    mesh_name=mesh_name,
+                    material_name=material_name,
+                    transform=self.upright,
+                )
+
+            if self.get_water_map is not None:
+                for i, report in enumerate(tile_reports):
+                    water_map = self.get_water_map(report)
+                    terrain_map = self.get_terrain_map(report)
+                    self.tile_water_maps.append(water_map)
+                    total_map = terrain_map + water_map
+                    self.tile_total_height_maps.append(total_map)
+                    water_vertices, water_normals, water_uvs, water_faces = make_height_map_mesh(
+                        total_map, spacing=self.tile_mesh_spacing)
+                    off_y, off_x = self.tile_offsets_world[i]
+                    water_vertices = water_vertices.at[:, 0].add(off_x)
+                    water_vertices = water_vertices.at[:, 1].add(off_y)
+                    mesh_name = f"water_mesh_{i}"
+                    material_name = f"water_material_{i}"
+                    instance_name = f"water_{i}"
+                    self.tile_water_uvs.append(water_uvs)
+                    self.tile_water_faces.append(water_faces)
+                    self.renderer.load_mesh(
+                        name=mesh_name,
+                        mesh_data={
+                            'vertices' : water_vertices,
+                            'normals' : water_normals,
+                            'faces' : water_faces,
+                            'uvs' : water_uvs,
+                        },
+                        color_mode='flat_color',
+                    )
+                    self.renderer.load_material(
+                        name=material_name,
+                        flat_color=(66/255.,135/255.,255.),
+                        rough=1.,
+                    )
+                    self.renderer.add_instance(
+                        name=instance_name,
+                        mesh_name=mesh_name,
+                        material_name=material_name,
+                        transform=self.upright,
+                    )
+            if self.get_water_map is None:
+                self.tile_total_height_maps = list(self.tile_terrain_maps)
+            self.total_height_map = None
+
         if hasattr(self, 'get_sun_direction'):
             max_size = max(self.world_size)
             self.renderer.load_mesh(
@@ -310,11 +541,35 @@ class Viewer:
             
             
             self.renderer.set_instance_transform('sun', sun_transform)
+
+    def _player_id_and_report(self, player_id):
+        if not self.tiled:
+            return player_id, self.report
+        tile_map = getattr(self, "_player_tile_map", None)
+        if tile_map is None:
+            return player_id, self.report
+        if player_id < 0 or player_id >= len(tile_map):
+            return player_id, self.report
+        tile_idx, local_idx = tile_map[player_id]
+        tile_reports = getattr(self, "tile_reports", None)
+        if tile_reports is None or tile_idx >= len(tile_reports):
+            return player_id, self.report
+        return local_idx, tile_reports[tile_idx]
     
     def _init_players(self, max_render_players):
         #active_players = self.get_active_players(self.params, self.report)
-        active_players = self.get_active_players(self.report)
-        self.max_players = min(active_players.shape[0], max_render_players)
+        if not self.tiled:
+            active_players = self.get_active_players(self.report)
+            total_players = active_players.shape[0]
+        else:
+            tile_reports = getattr(self, "tile_reports", None)
+            if tile_reports is None:
+                tile_reports = [self.report]
+            total_players = 0
+            for report in tile_reports:
+                active = self.get_active_players(report)
+                total_players += active.shape[0]
+        self.max_players = min(total_players, max_render_players)
         self.selected_player = None
         
         # make player cube
@@ -547,7 +802,8 @@ class Viewer:
                 if render_id in self._render_players:
                     player_id = self._render_players[render_id]
                     self.selected_player = player_id
-                    self.print_player_info(player_id, self.report)
+                    player_id, report = self._player_id_and_report(player_id)
+                    self.print_player_info(player_id, report)
                 else:
                     self.selected_player = None
                 self._update_players()
@@ -580,16 +836,29 @@ class Viewer:
         block_index, block_step = self.step_to_block(step)
         if block_index != self.block_index:
             self.block_index = block_index
-            report_block = load_example_data(
-                self._example_report, self.report_files[self.block_index])
-            self.current_report_block = self.get_report_block(report_block)
+            if not self.tiled:
+                report_block = load_example_data(
+                    self._example_report, self.report_files[self.block_index])
+                self.current_report_block = self.get_report_block(report_block)
+            else:
+                self.current_report_block = [
+                    load_example_data(self._example_report, files[self.block_index])
+                    for files in self.report_files
+                ]
         self.current_step = step
         
         print(f'Current Step: {step} '
             f'Block Location: {block_index}, {block_step}')
         
-        self.report = tree_getitem(
-            self.current_report_block, block_step)
+        if not self.tiled:
+            self.report = tree_getitem(
+                self.current_report_block, block_step)
+        else:
+            self.tile_reports = [
+                tree_getitem(block, block_step)
+                for block in self.current_report_block
+            ]
+            self.report = self.tile_reports[0]
         
         #print(self.report)
         
@@ -599,24 +868,71 @@ class Viewer:
             self._update_players()
         
         if self.selected_player is not None:
-            self.print_player_info(self.selected_player, self.report)
+            player_id, report = self._player_id_and_report(self.selected_player)
+            self.print_player_info(player_id, report)
     
     def _update_players(self):
-        #active_players = self.get_active_players(self.params, self.report)
-        active_players = self.get_active_players(self.report)
-        if not self.show_players:
-            active_players = jnp.zeros_like(active_players)
-        
-        #player_x = self.get_player_x(self.params, self.report)
-        #player_r = self.get_player_r(self.params, self.report)
-        player_x = self.get_player_x(self.report)
-        player_r = self.get_player_r(self.report)
-        if self.get_player_energy is not None:
-            #player_energy = self.get_player_energy(self.params, self.report)
-            player_energy = self.get_player_energy(self.report)
+        if not self.tiled:
+            active_players = self.get_active_players(self.report)
+            if not self.show_players:
+                active_players = jnp.zeros_like(active_players)
+            player_x = self.get_player_x(self.report)
+            player_r = self.get_player_r(self.report)
+            if self.get_player_energy is not None:
+                player_energy = self.get_player_energy(self.report)
+            else:
+                player_energy = np.zeros(player_r.shape)
+            player_transforms = self._player_transform(player_x, player_r)
         else:
-            player_energy = np.zeros(player_r.shape)
-        player_transforms = self._player_transform(player_x, player_r)
+            tile_reports = getattr(self, "tile_reports", None)
+            if tile_reports is None:
+                tile_reports = [self.report]
+            active_list = []
+            x_list = []
+            r_list = []
+            z_list = []
+            energy_list = []
+            spacing_y, spacing_x = self.tile_mesh_spacing
+            offsets_grid, _ = self._tile_offsets()
+            if not hasattr(self, "_tile_player_debug_printed"):
+                self._tile_player_debug_printed = False
+            self._player_tile_map = []
+            for i, report in enumerate(tile_reports):
+                active = self.get_active_players(report)
+                if not self.show_players:
+                    active = jnp.zeros_like(active)
+                player_x = self.get_player_x(report)
+                player_r = self.get_player_r(report)
+                if self.get_player_energy is not None:
+                    player_energy = self.get_player_energy(report)
+                else:
+                    player_energy = np.zeros(player_r.shape)
+                off_y, off_x = self.tile_offsets_world[i]
+                # compute heights from per-tile height maps
+                zy = (player_x[..., 0] // spacing_y).astype(jnp.int32)
+                zx = (player_x[..., 1] // spacing_x).astype(jnp.int32)
+                height_map = self.tile_total_height_maps[i]
+                z = height_map[zy, zx] + PLAYER_RADIUS
+                # convert to global grid coords for transforms
+                off_gy, off_gx = offsets_grid[i]
+                global_x = player_x + jnp.array([off_gy, off_gx], dtype=jnp.int32)
+                x_list.append(global_x)
+                z_list.append(z)
+                r_list.append(player_r)
+                active_list.append(active)
+                energy_list.append(player_energy)
+                # build global->(tile, local) mapping
+                for local_idx in range(active.shape[0]):
+                    self._player_tile_map.append((i, local_idx))
+            if not self._tile_player_debug_printed:
+                self._tile_player_debug_printed = True
+            player_x = jnp.concatenate(x_list, axis=0)
+            player_r = jnp.concatenate(r_list, axis=0)
+            active_players = jnp.concatenate(active_list, axis=0)
+            player_energy = np.concatenate(energy_list, axis=0)
+            player_z = jnp.concatenate(z_list, axis=0)
+            player_transforms = self._player_transform_with_z(
+                player_x, player_r, player_z)
         
         print(f'Active Players: {jnp.sum(active_players)}')
         
@@ -671,9 +987,10 @@ class Viewer:
                 ):
                     player_color = np.array([1., 0., 0.])
                 else:
+                    color_id, color_report = self._player_id_and_report(player_id)
                     player_color = self.get_player_color(
                     #    player_id, self.params, self.report)
-                        player_id, self.report)
+                        color_id, color_report)
                 material_name = f'player_material_{render_id}'
                 self.renderer.set_material_flat_color(
                     material_name, player_color)
@@ -712,64 +1029,167 @@ class Viewer:
     
     def _update_landscape(self):
         self._update_sun_position()
-        if self.get_terrain_texture is not None:
-            texture = self.get_terrain_texture(
-                #self.params,
-                self.report,
-                self.terrain_texture_resolution,
-                self.display_mode,
-            )
-            self.renderer.load_texture(
-                'terrain_texture',
-                texture_data = texture,
-            )
-        
-        if self.get_terrain_map:
-            #self.terrain_map = self.get_terrain_map(self.params, self.report)
-            self.terrain_map = self.get_terrain_map(self.report)
-            (
-                terrain_vertices,
-                terrain_normals,
-            ) = make_height_map_vertices_and_normals(
-                self.terrain_map, spacing=self.mesh_spacing)
-            self.renderer.load_mesh(
-                name='terrain_mesh',
-                mesh_data={
-                    'vertices' : terrain_vertices,
-                    'normals' : terrain_normals,
-                    'faces' : self.terrain_faces,
-                    'uvs' : self.terrain_uvs,
-                }
-            )
-        
-        if self.get_water_map:
-            #water_map = self.get_water_map(self.params, self.report)
-            water_map = self.get_water_map(self.report)
-            self.total_height_map = self.terrain_map + water_map
-            (
-                water_vertices,
-                water_normals,
-            ) = make_height_map_vertices_and_normals(
-                self.total_height_map, spacing=self.mesh_spacing)
-            self.renderer.load_mesh(
-                name='water_mesh',
-                mesh_data={
-                    'vertices' : water_vertices,
-                    'normals' : water_normals,
-                    'faces' : self.water_faces,
-                    'uvs' : self.water_uvs,
-                },
-                color_mode='flat_color',
-            )
-        
+        if not self.tiled:
+            if self.get_terrain_texture is not None:
+                texture = self.get_terrain_texture(
+                    #self.params,
+                    self.report,
+                    self.terrain_texture_resolution,
+                    self.display_mode,
+                )
+                self.renderer.load_texture(
+                    'terrain_texture',
+                    texture_data = texture,
+                )
+            
+            if self.get_terrain_map:
+                #self.terrain_map = self.get_terrain_map(self.params, self.report)
+                self.terrain_map = self.get_terrain_map(self.report)
+                (
+                    terrain_vertices,
+                    terrain_normals,
+                ) = make_height_map_vertices_and_normals(
+                    self.terrain_map, spacing=self.mesh_spacing)
+                self.renderer.load_mesh(
+                    name='terrain_mesh',
+                    mesh_data={
+                        'vertices' : terrain_vertices,
+                        'normals' : terrain_normals,
+                        'faces' : self.terrain_faces,
+                        'uvs' : self.terrain_uvs,
+                    }
+                )
+            
+            if self.get_water_map:
+                #water_map = self.get_water_map(self.params, self.report)
+                water_map = self.get_water_map(self.report)
+                self.total_height_map = self.terrain_map + water_map
+                (
+                    water_vertices,
+                    water_normals,
+                ) = make_height_map_vertices_and_normals(
+                    self.total_height_map, spacing=self.mesh_spacing)
+                self.renderer.load_mesh(
+                    name='water_mesh',
+                    mesh_data={
+                        'vertices' : water_vertices,
+                        'normals' : water_normals,
+                        'faces' : self.water_faces,
+                        'uvs' : self.water_uvs,
+                    },
+                    color_mode='flat_color',
+                )
+            
+            else:
+                self.total_height_map = self.terrain_map
         else:
-            self.total_height_map = self.terrain_map
+            tile_reports = getattr(self, "tile_reports", None)
+            if tile_reports is None:
+                tile_reports = [self.report]
+            terrain_maps = []
+            water_maps = []
+
+            for i, report in enumerate(tile_reports):
+                terrain_map = None
+                if self.get_terrain_texture is not None:
+                    texture_shape = getattr(self, "tile_texture_shape", None)
+                    if texture_shape is None:
+                        if self.get_terrain_map is not None:
+                            terrain_map = self.get_terrain_map(report)
+                            texture_shape = terrain_map.shape
+                        else:
+                            texture_shape = self.terrain_texture_resolution
+                    texture = self.get_terrain_texture(
+                        report,
+                        texture_shape,
+                        self.display_mode,
+                    )
+                    self.renderer.load_texture(
+                        f"terrain_texture_{i}",
+                        texture_data=texture,
+                    )
+
+                if self.get_terrain_map:
+                    if terrain_map is None:
+                        terrain_map = self.get_terrain_map(report)
+                    terrain_maps.append(terrain_map)
+                    terrain_vertices, terrain_normals = make_height_map_vertices_and_normals(
+                        terrain_map, spacing=self.tile_mesh_spacing)
+                    off_y, off_x = self.tile_offsets_world[i]
+                    terrain_vertices = terrain_vertices.at[:, 0].add(off_x)
+                    terrain_vertices = terrain_vertices.at[:, 1].add(off_y)
+                    self.renderer.load_mesh(
+                        name=f"terrain_mesh_{i}",
+                        mesh_data={
+                            'vertices' : terrain_vertices,
+                            'normals' : terrain_normals,
+                            'faces' : self.tile_terrain_faces[i],
+                            'uvs' : self.tile_terrain_uvs[i],
+                        }
+                    )
+
+                if self.get_water_map:
+                    if terrain_map is None:
+                        terrain_map = self.get_terrain_map(report)
+                    water_map = self.get_water_map(report)
+                    water_maps.append(water_map)
+                    total_map = terrain_map + water_map
+                    water_vertices, water_normals = make_height_map_vertices_and_normals(
+                        total_map, spacing=self.tile_mesh_spacing)
+                    off_y, off_x = self.tile_offsets_world[i]
+                    water_vertices = water_vertices.at[:, 0].add(off_x)
+                    water_vertices = water_vertices.at[:, 1].add(off_y)
+                    self.renderer.load_mesh(
+                        name=f"water_mesh_{i}",
+                        mesh_data={
+                            'vertices' : water_vertices,
+                            'normals' : water_normals,
+                            'faces' : self.tile_water_faces[i],
+                            'uvs' : self.tile_water_uvs[i],
+                        },
+                        color_mode='flat_color',
+                    )
+
+            if terrain_maps:
+                self.terrain_map = self._stitch_grid(terrain_maps)
+            if self.get_water_map and water_maps:
+                stitched_water = self._stitch_grid(water_maps)
+                self.total_height_map = self.terrain_map + stitched_water
+            else:
+                self.total_height_map = self.terrain_map
     
     def _player_transform(self, player_x, player_r):
         height, width = self.world_size
-        zy = (player_x[..., 0] // self.mesh_spacing).astype(jnp.int32)
-        zx = (player_x[..., 1] // self.mesh_spacing).astype(jnp.int32)
+        spacing_y, spacing_x = self.mesh_spacing
+        zy = (player_x[..., 0] // spacing_y).astype(jnp.int32)
+        zx = (player_x[..., 1] // spacing_x).astype(jnp.int32)
         z = self.total_height_map[zy, zx] + PLAYER_RADIUS
+        y = player_x[..., 0] - height/2. + 0.5
+        x = player_x[..., 1] - width/2. + 0.5
+        
+        cs = np.array((( 1, 0), ( 0, 1), (-1, 0), ( 0,-1)))[player_r]
+        c = cs[...,0]
+        s = cs[...,1]
+        
+        transforms = np.zeros((*player_r.shape, 4, 4))
+        transforms[...,0,0] = c
+        transforms[...,0,1] = s
+        transforms[...,0,3] = x
+        
+        transforms[...,1,0] = -s
+        
+        transforms[...,1,1] = c
+        transforms[...,1,3] = y
+        
+        transforms[...,2,2] = 1.
+        transforms[...,2,3] = z
+        
+        transforms[...,3,3] = 1.
+        
+        return self.upright @ transforms
+
+    def _player_transform_with_z(self, player_x, player_r, z):
+        height, width = self.world_size
         y = player_x[..., 0] - height/2. + 0.5
         x = player_x[..., 1] - width/2. + 0.5
         
