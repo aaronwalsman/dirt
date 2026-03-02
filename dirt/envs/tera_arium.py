@@ -658,29 +658,26 @@ def make_tera_arium(
         )
         if params.include_rock:
             report = report.replace(
-                rock=landscape.rock_grid.interior(state.landscape.rock))
+                rock=state.landscape.rock)
         if params.include_water:
             report = report.replace(
-                water=landscape.water_grid.interior(state.landscape.water))
+                water=state.landscape.water)
         if params.include_light:
             report = report.replace(
-                light=landscape.light_grid.interior(state.landscape.light))
+                light=state.landscape.light)
         if params.include_temperature:
-            report = report.replace(temperature=landscape.temperature_grid.interior(
-                state.landscape.temperature))
+            report = report.replace(
+                temperature=state.landscape.temperature)
         if params.include_rain:
             report = report.replace(
-                moisture=landscape.moisture_grid.interior(
-                    state.landscape.moisture),
-                raining=landscape.raining_grid.interior(
-                    state.landscape.raining),
+                moisture=state.landscape.moisture,
+                raining=state.landscape.raining,
             )
         if params.include_energy:
             report = report.replace(
-                energy=landscape.energy_grid.interior(state.landscape.energy))
+                energy=state.landscape.energy)
         if params.include_biomass:
-            report = report.replace(biomass=landscape.biomass_grid.interior(
-                state.landscape.biomass))
+            report = report.replace(biomass=state.landscape.biomass)
         
         if params.report_bug_actions:
             report = report.replace(actions=actions)

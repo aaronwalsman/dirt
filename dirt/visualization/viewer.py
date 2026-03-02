@@ -158,6 +158,18 @@ class Viewer:
                 offsets.append((r * tile_h, c * tile_w))
         return offsets, (tile_h, tile_w)
 
+    def _tile_world_offsets(self):
+        tr, tc = self.tile_dimensions
+        tile_h = self.world_size[0] / tr
+        tile_w = self.world_size[1] / tc
+        offsets = []
+        for r in range(tr):
+            for c in range(tc):
+                off_y = -self.world_size[0] / 2 + tile_h / 2 + r * tile_h
+                off_x = -self.world_size[1] / 2 + tile_w / 2 + c * tile_w
+                offsets.append((off_y, off_x))
+        return offsets, (tile_h, tile_w)
+
     def _stitch_grid(self, grids):
         tr, tc = self.tile_dimensions
         rows = []
@@ -171,6 +183,7 @@ class Viewer:
             tree_getitem(block, block_step)
             for block in self.current_report_block
         ]
+        self.tile_reports = tile_reports
         report0 = tile_reports[0]
         offsets, _ = self._tile_offsets()
 
@@ -202,7 +215,10 @@ class Viewer:
                 continue
 
             if key in spatial_keys and isinstance(tile_values[0], (np.ndarray, jnp.ndarray)):
-                stitched[key] = self._stitch_grid(tile_values)
+                if tile_values[0].ndim >= 2:
+                    stitched[key] = self._stitch_grid(tile_values)
+                else:
+                    stitched[key] = tile_values[0]
                 continue
 
             if key == player_x_key:
@@ -284,86 +300,201 @@ class Viewer:
     
     def _init_landscape(self, terrain_texture_resolution):
         #self.terrain_map = self.get_terrain_map(self.params, self.report)
-        self.terrain_map = self.get_terrain_map(self.report)
-        h, w = self.terrain_map.shape
-        if terrain_texture_resolution is None:
-            terrain_texture_resolution = self.world_size
-        self.terrain_texture_resolution = terrain_texture_resolution
-        self.mesh_spacing = self.world_size[0] / h
-        
-        vertices, normals, uvs, faces = make_height_map_mesh(
-            self.terrain_map, spacing=self.mesh_spacing)
-        self.terrain_uvs = uvs
-        self.terrain_faces = faces
-        self.renderer.load_mesh(
-            name='terrain_mesh',
-            mesh_data={
-                'vertices' : vertices,
-                'normals' : normals,
-                'faces' : faces,
-                'uvs' : uvs,
-            },
-            color_mode='textured',
-        )
-        
-        self.renderer.load_texture(
-            name='terrain_texture',
-            texture_data=np.full(
-                (self.terrain_texture_resolution + (3,)),
-                127,
-                dtype=np.uint8,
-            ),
-        )
-        
-        self.renderer.load_material(
-            name='terrain_material',
-            #flat_color=(0.5,0.5,0.5),
-            texture_name='terrain_texture',
-            rough=1.,
-        )
-        
-        self.renderer.add_instance(
-            name='terrain',
-            mesh_name='terrain_mesh',
-            material_name='terrain_material',
-            transform=self.upright,
-        )
-        
-        if self.get_water_map is not None:
-            #water_map = self.get_water_map(self.params, self.report)
-            water_map = self.get_water_map(self.report)
-            self.total_height_map = self.terrain_map + water_map
-            (
-                water_vertices,
-                water_normals,
-                self.water_uvs,
-                self.water_faces,
-            ) = make_height_map_mesh(
-                self.total_height_map, spacing=mesh_spacing)
+        if not self.tiled:
+            self.terrain_map = self.get_terrain_map(self.report)
+            h, w = self.terrain_map.shape
+            if terrain_texture_resolution is None:
+                terrain_texture_resolution = self.world_size
+            self.terrain_texture_resolution = terrain_texture_resolution
+            self.mesh_spacing = (self.world_size[0] / h, self.world_size[1] / w)
+            
+            vertices, normals, uvs, faces = make_height_map_mesh(
+                self.terrain_map, spacing=self.mesh_spacing)
+            self.terrain_uvs = uvs
+            self.terrain_faces = faces
             self.renderer.load_mesh(
-                name='water_mesh',
+                name='terrain_mesh',
                 mesh_data={
-                    'vertices' : water_vertices,
-                    'normals' : water_normals,
-                    'faces' : self.water_faces,
-                    'uvs' : self.water_uvs,
+                    'vertices' : vertices,
+                    'normals' : normals,
+                    'faces' : faces,
+                    'uvs' : uvs,
                 },
-                color_mode='flat_color',
+                color_mode='textured',
+            )
+            
+            self.renderer.load_texture(
+                name='terrain_texture',
+                texture_data=np.full(
+                    (self.terrain_texture_resolution + (3,)),
+                    127,
+                    dtype=np.uint8,
+                ),
             )
             
             self.renderer.load_material(
-                name='water_material',
-                flat_color=(66/255.,135/255.,255.),
+                name='terrain_material',
+                #flat_color=(0.5,0.5,0.5),
+                texture_name='terrain_texture',
                 rough=1.,
             )
             
             self.renderer.add_instance(
-                name='water',
-                mesh_name='water_mesh',
-                material_name='water_material',
+                name='terrain',
+                mesh_name='terrain_mesh',
+                material_name='terrain_material',
                 transform=self.upright,
             )
-        
+            
+            if self.get_water_map is not None:
+                #water_map = self.get_water_map(self.params, self.report)
+                water_map = self.get_water_map(self.report)
+                self.total_height_map = self.terrain_map + water_map
+                (
+                    water_vertices,
+                    water_normals,
+                    self.water_uvs,
+                    self.water_faces,
+                ) = make_height_map_mesh(
+                    self.total_height_map, spacing=self.mesh_spacing)
+                self.renderer.load_mesh(
+                    name='water_mesh',
+                    mesh_data={
+                        'vertices' : water_vertices,
+                        'normals' : water_normals,
+                        'faces' : self.water_faces,
+                        'uvs' : self.water_uvs,
+                    },
+                    color_mode='flat_color',
+                )
+                
+                self.renderer.load_material(
+                    name='water_material',
+                    flat_color=(66/255.,135/255.,255.),
+                    rough=1.,
+                )
+                
+                self.renderer.add_instance(
+                    name='water',
+                    mesh_name='water_mesh',
+                    material_name='water_material',
+                    transform=self.upright,
+                )
+            else:
+                self.total_height_map = self.terrain_map
+        else:
+            tile_reports = getattr(self, "tile_reports", None)
+            if tile_reports is None:
+                tile_reports = [self.report]
+            self.tile_mesh_spacing = None
+            self.tile_terrain_faces = []
+            self.tile_terrain_uvs = []
+            self.tile_water_faces = []
+            self.tile_water_uvs = []
+            self.tile_offsets_world, tile_size = self._tile_world_offsets()
+            tile_h, tile_w = tile_size
+            self.tile_texture_shape = (int(tile_h), int(tile_w))
+            terrain_map0 = self.get_terrain_map(tile_reports[0])
+            self.tile_mesh_spacing = (
+                tile_h / terrain_map0.shape[0],
+                tile_w / terrain_map0.shape[1],
+            )
+            stitched_terrain = self.get_terrain_map(self.report)
+            self.mesh_spacing = (
+                self.world_size[0] / stitched_terrain.shape[0],
+                self.world_size[1] / stitched_terrain.shape[1],
+            )
+
+            for i, report in enumerate(tile_reports):
+                terrain_map = self.get_terrain_map(report)
+                vertices, normals, uvs, faces = make_height_map_mesh(
+                    terrain_map, spacing=self.tile_mesh_spacing)
+                off_y, off_x = self.tile_offsets_world[i]
+                vertices = vertices.at[:, 0].add(off_x)
+                vertices = vertices.at[:, 1].add(off_y)
+
+                mesh_name = f"terrain_mesh_{i}"
+                texture_name = f"terrain_texture_{i}"
+                material_name = f"terrain_material_{i}"
+                instance_name = f"terrain_{i}"
+
+                self.terrain_uvs = uvs
+                self.terrain_faces = faces
+                self.tile_terrain_uvs.append(uvs)
+                self.tile_terrain_faces.append(faces)
+
+                self.renderer.load_mesh(
+                    name=mesh_name,
+                    mesh_data={
+                        'vertices' : vertices,
+                        'normals' : normals,
+                        'faces' : faces,
+                        'uvs' : uvs,
+                    },
+                    color_mode='textured',
+                )
+                self.renderer.load_texture(
+                    name=texture_name,
+                    texture_data=np.full(
+                        (self.tile_texture_shape + (3,)),
+                        127,
+                        dtype=np.uint8,
+                    ),
+                )
+                self.renderer.load_material(
+                    name=material_name,
+                    texture_name=texture_name,
+                    rough=1.,
+                )
+                self.renderer.add_instance(
+                    name=instance_name,
+                    mesh_name=mesh_name,
+                    material_name=material_name,
+                    transform=self.upright,
+                )
+
+            if self.get_water_map is not None:
+                for i, report in enumerate(tile_reports):
+                    water_map = self.get_water_map(report)
+                    terrain_map = self.get_terrain_map(report)
+                    total_map = terrain_map + water_map
+                    water_vertices, water_normals, water_uvs, water_faces = make_height_map_mesh(
+                        total_map, spacing=self.tile_mesh_spacing)
+                    off_y, off_x = self.tile_offsets_world[i]
+                    water_vertices = water_vertices.at[:, 0].add(off_x)
+                    water_vertices = water_vertices.at[:, 1].add(off_y)
+                    mesh_name = f"water_mesh_{i}"
+                    material_name = f"water_material_{i}"
+                    instance_name = f"water_{i}"
+                    self.tile_water_uvs.append(water_uvs)
+                    self.tile_water_faces.append(water_faces)
+                    self.renderer.load_mesh(
+                        name=mesh_name,
+                        mesh_data={
+                            'vertices' : water_vertices,
+                            'normals' : water_normals,
+                            'faces' : water_faces,
+                            'uvs' : water_uvs,
+                        },
+                        color_mode='flat_color',
+                    )
+                    self.renderer.load_material(
+                        name=material_name,
+                        flat_color=(66/255.,135/255.,255.),
+                        rough=1.,
+                    )
+                    self.renderer.add_instance(
+                        name=instance_name,
+                        mesh_name=mesh_name,
+                        material_name=material_name,
+                        transform=self.upright,
+                    )
+            if self.get_water_map is not None:
+                stitched_water = self.get_water_map(self.report)
+                self.total_height_map = stitched_terrain + stitched_water
+            else:
+                self.total_height_map = stitched_terrain
+
         if hasattr(self, 'get_sun_direction'):
             max_size = max(self.world_size)
             self.renderer.load_mesh(
@@ -815,63 +946,140 @@ class Viewer:
     
     def _update_landscape(self):
         self._update_sun_position()
-        if self.get_terrain_texture is not None:
-            texture = self.get_terrain_texture(
-                #self.params,
-                self.report,
-                self.terrain_texture_resolution,
-                self.display_mode,
-            )
-            self.renderer.load_texture(
-                'terrain_texture',
-                texture_data = texture,
-            )
-        
-        if self.get_terrain_map:
-            #self.terrain_map = self.get_terrain_map(self.params, self.report)
-            self.terrain_map = self.get_terrain_map(self.report)
-            (
-                terrain_vertices,
-                terrain_normals,
-            ) = make_height_map_vertices_and_normals(
-                self.terrain_map, spacing=self.mesh_spacing)
-            self.renderer.load_mesh(
-                name='terrain_mesh',
-                mesh_data={
-                    'vertices' : terrain_vertices,
-                    'normals' : terrain_normals,
-                    'faces' : self.terrain_faces,
-                    'uvs' : self.terrain_uvs,
-                }
-            )
-        
-        if self.get_water_map:
-            #water_map = self.get_water_map(self.params, self.report)
-            water_map = self.get_water_map(self.report)
-            self.total_height_map = self.terrain_map + water_map
-            (
-                water_vertices,
-                water_normals,
-            ) = make_height_map_vertices_and_normals(
-                self.total_height_map, spacing=self.mesh_spacing)
-            self.renderer.load_mesh(
-                name='water_mesh',
-                mesh_data={
-                    'vertices' : water_vertices,
-                    'normals' : water_normals,
-                    'faces' : self.water_faces,
-                    'uvs' : self.water_uvs,
-                },
-                color_mode='flat_color',
-            )
-        
+        if not self.tiled:
+            if self.get_terrain_texture is not None:
+                texture = self.get_terrain_texture(
+                    #self.params,
+                    self.report,
+                    self.terrain_texture_resolution,
+                    self.display_mode,
+                )
+                self.renderer.load_texture(
+                    'terrain_texture',
+                    texture_data = texture,
+                )
+            
+            if self.get_terrain_map:
+                #self.terrain_map = self.get_terrain_map(self.params, self.report)
+                self.terrain_map = self.get_terrain_map(self.report)
+                (
+                    terrain_vertices,
+                    terrain_normals,
+                ) = make_height_map_vertices_and_normals(
+                    self.terrain_map, spacing=self.mesh_spacing)
+                self.renderer.load_mesh(
+                    name='terrain_mesh',
+                    mesh_data={
+                        'vertices' : terrain_vertices,
+                        'normals' : terrain_normals,
+                        'faces' : self.terrain_faces,
+                        'uvs' : self.terrain_uvs,
+                    }
+                )
+            
+            if self.get_water_map:
+                #water_map = self.get_water_map(self.params, self.report)
+                water_map = self.get_water_map(self.report)
+                self.total_height_map = self.terrain_map + water_map
+                (
+                    water_vertices,
+                    water_normals,
+                ) = make_height_map_vertices_and_normals(
+                    self.total_height_map, spacing=self.mesh_spacing)
+                self.renderer.load_mesh(
+                    name='water_mesh',
+                    mesh_data={
+                        'vertices' : water_vertices,
+                        'normals' : water_normals,
+                        'faces' : self.water_faces,
+                        'uvs' : self.water_uvs,
+                    },
+                    color_mode='flat_color',
+                )
+            
+            else:
+                self.total_height_map = self.terrain_map
         else:
-            self.total_height_map = self.terrain_map
+            tile_reports = getattr(self, "tile_reports", None)
+            if tile_reports is None:
+                tile_reports = [self.report]
+            terrain_maps = []
+            water_maps = []
+
+            for i, report in enumerate(tile_reports):
+                terrain_map = None
+                if self.get_terrain_texture is not None:
+                    texture_shape = getattr(self, "tile_texture_shape", None)
+                    if texture_shape is None:
+                        if self.get_terrain_map is not None:
+                            terrain_map = self.get_terrain_map(report)
+                            texture_shape = terrain_map.shape
+                        else:
+                            texture_shape = self.terrain_texture_resolution
+                    texture = self.get_terrain_texture(
+                        report,
+                        texture_shape,
+                        self.display_mode,
+                    )
+                    self.renderer.load_texture(
+                        f"terrain_texture_{i}",
+                        texture_data=texture,
+                    )
+
+                if self.get_terrain_map:
+                    if terrain_map is None:
+                        terrain_map = self.get_terrain_map(report)
+                    terrain_maps.append(terrain_map)
+                    terrain_vertices, terrain_normals = make_height_map_vertices_and_normals(
+                        terrain_map, spacing=self.tile_mesh_spacing)
+                    off_y, off_x = self.tile_offsets_world[i]
+                    terrain_vertices = terrain_vertices.at[:, 0].add(off_x)
+                    terrain_vertices = terrain_vertices.at[:, 1].add(off_y)
+                    self.renderer.load_mesh(
+                        name=f"terrain_mesh_{i}",
+                        mesh_data={
+                            'vertices' : terrain_vertices,
+                            'normals' : terrain_normals,
+                            'faces' : self.tile_terrain_faces[i],
+                            'uvs' : self.tile_terrain_uvs[i],
+                        }
+                    )
+
+                if self.get_water_map:
+                    if terrain_map is None:
+                        terrain_map = self.get_terrain_map(report)
+                    water_map = self.get_water_map(report)
+                    water_maps.append(water_map)
+                    total_map = terrain_map + water_map
+                    water_vertices, water_normals = make_height_map_vertices_and_normals(
+                        total_map, spacing=self.tile_mesh_spacing)
+                    off_y, off_x = self.tile_offsets_world[i]
+                    water_vertices = water_vertices.at[:, 0].add(off_x)
+                    water_vertices = water_vertices.at[:, 1].add(off_y)
+                    self.renderer.load_mesh(
+                        name=f"water_mesh_{i}",
+                        mesh_data={
+                            'vertices' : water_vertices,
+                            'normals' : water_normals,
+                            'faces' : self.tile_water_faces[i],
+                            'uvs' : self.tile_water_uvs[i],
+                        },
+                        color_mode='flat_color',
+                    )
+
+            if terrain_maps:
+                self.terrain_map = self._stitch_grid(terrain_maps)
+            if self.get_water_map and water_maps:
+                stitched_water = self._stitch_grid(water_maps)
+                self.total_height_map = self.terrain_map + stitched_water
+            else:
+                self.total_height_map = self.terrain_map
     
     def _player_transform(self, player_x, player_r):
         height, width = self.world_size
-        zy = (player_x[..., 0] // self.mesh_spacing).astype(jnp.int32)
-        zx = (player_x[..., 1] // self.mesh_spacing).astype(jnp.int32)
+        spacing_y, spacing_x = self.mesh_spacing
+        zy = (player_x[..., 0] // spacing_y).astype(jnp.int32)
+        zx = (player_x[..., 1] // spacing_x).astype(jnp.int32)
         z = self.total_height_map[zy, zx] + PLAYER_RADIUS
         y = player_x[..., 0] - height/2. + 0.5
         x = player_x[..., 1] - width/2. + 0.5
