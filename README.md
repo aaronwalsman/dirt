@@ -30,9 +30,7 @@ Install dependencies:
 uv sync
 ```
 
-#### CUDA Support (Linux/SLURM Clusters)
-
-For GPU clusters with CUDA 12, install with the `cuda12` extra:
+For GPU clusters with CUDA 12, use this instead:
 ```
 uv sync --extra cuda12
 ```
