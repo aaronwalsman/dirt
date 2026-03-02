@@ -1004,12 +1004,11 @@ def make_bugs(
                 else:
                     fields[key] = jnp.where(
                         keep_mask[:, None], arr, jnp.zeros_like(arr))
-
-            players = jnp.where((emigrant | drop_mask)[:, None], -1, players)
-            parents = jnp.where((emigrant | drop_mask)[:, None, None], -1, parents)
-
-            available_slots = players[..., 0] == -1
-            capacity_reached = state.family_tree.player_state.capacity_reached
+            family_tree_state = family_tree.remove(
+                state.family_tree, emigrant | drop_mask)
+            players = family_tree_state.player_state.players
+            parents = family_tree_state.parents
+            capacity_reached = family_tree_state.player_state.capacity_reached
 
             def _incoming_for(mask, dr, dc, name):
                 x_adj = x + jnp.array([-dr * H, -dc * W], dtype=jnp.int32)
@@ -1034,65 +1033,29 @@ def make_bugs(
             for (name, dr, dc, _), mask in zip(directions, direction_masks):
                 incoming_payloads.append(_incoming_for(mask, dr, dc, name))
 
-            def _place_payload(payload, carry):
-                fields_local, players_local, parents_local, slots_local, cap_local = carry
-
-                incoming_mask = payload["mask"]
-                incoming_fields = payload["fields"]
-                incoming_players = payload["players"]
-                incoming_parents = payload["parents"]
-
-                def place_one(i, carry_inner):
-                    fields_i, players_i, parents_i, slots_i, cap_i = carry_inner
-                    mask_i = incoming_mask[i]
-                    has_slot = jnp.any(slots_i)
-                    cap_i = cap_i | (mask_i & ~has_slot)
-
-                    def _do_place(carry_do):
-                        fields_d, players_d, parents_d, slots_d = carry_do
-                        slot_idx = jnp.argmax(slots_d)
-                        fields_d = jax.tree_util.tree_map(
-                            lambda arr, inc: arr.at[slot_idx].set(inc[i]),
-                            fields_d,
-                            incoming_fields,
-                        )
-                        incoming_player = incoming_players[i]
-                        incoming_player = incoming_player.at[3].set(slot_idx)
-                        players_d = players_d.at[slot_idx].set(incoming_player)
-                        parents_d = parents_d.at[slot_idx].set(incoming_parents[i])
-                        slots_d = slots_d.at[slot_idx].set(False)
-                        return fields_d, players_d, parents_d, slots_d
-
-                    def _no_place(carry_do):
-                        return carry_do
-
-                    fields_i, players_i, parents_i, slots_i = jax.lax.cond(
-                        mask_i & has_slot,
-                        _do_place,
-                        _no_place,
-                        (fields_i, players_i, parents_i, slots_i),
-                    )
-                    return fields_i, players_i, parents_i, slots_i, cap_i
-
-                return jax.lax.fori_loop(
-                    0, params.max_players, place_one,
-                    (fields_local, players_local, parents_local, slots_local, cap_local),
-                )
-
             for payload in incoming_payloads:
-                fields, players, parents, available_slots, capacity_reached = _place_payload(
-                    payload,
-                    (fields, players, parents, available_slots, capacity_reached),
+                family_tree_state, slot_idx, source_idx, _ = (
+                    family_tree.place_payload(
+                        family_tree_state,
+                        payload["mask"],
+                        payload["players"],
+                        payload["parents"],
+                    )
                 )
+                valid = slot_idx >= 0
+                safe_slots = jnp.where(valid, slot_idx, 0)
+                safe_src = jnp.where(valid, source_idx, 0)
+                for key, arr in fields.items():
+                    incoming = payload["fields"][key][safe_src]
+                    fields[key] = arr.at[safe_slots].set(
+                        jnp.where(valid[:, None], incoming, arr[safe_slots])
+                        if arr.ndim > 1
+                        else jnp.where(valid, incoming, arr[safe_slots])
+                    )
 
-            player_state = state.family_tree.player_state.replace(
-                players=players,
-                capacity_reached=capacity_reached,
-            )
-            family_tree_state = state.family_tree.replace(
-                player_state=player_state,
-                parents=parents,
-            )
+            players = family_tree_state.player_state.players
+            parents = family_tree_state.parents
+            capacity_reached = family_tree_state.player_state.capacity_reached
 
             active_after = family_tree.active(family_tree_state)
             object_grid = dynamics.make_object_grid(

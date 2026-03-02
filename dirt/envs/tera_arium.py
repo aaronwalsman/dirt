@@ -128,6 +128,7 @@ def make_tera_arium(
     params : TeraAriumParams = TeraAriumParams(),
     float_dtype=DEFAULT_FLOAT_DTYPE,
 ):
+    params = params.override_descendants()
     extra_halos = None
     if params.distributed:
         movement_halo = int(math.ceil(params.bugs.max_movement))
