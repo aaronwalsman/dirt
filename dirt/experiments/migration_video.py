@@ -26,7 +26,32 @@ def _stitch_frames(frames: np.ndarray, tile_dimensions: Tuple[int, int]) -> np.n
     return np.concatenate(rows, axis=0)
 
 
-def build_env(tile_dimensions, world_size, max_players, initial_players):
+def build_env(
+    tile_dimensions,
+    world_size,
+    max_players,
+    initial_players,
+    include_water=True,
+    include_light=True,
+    mountain_density=None,
+):
+    landscape_params = LandscapeParams(
+        world_size=world_size,
+        include_audio=False,
+        include_smell=False,
+        include_wind=True,
+        include_rain=False,
+        include_temperature=True,
+        include_light=include_light,
+        include_water=include_water,
+        include_energy=True,
+        include_biomass=True,
+    )
+    if mountain_density is not None:
+        landscape_params = landscape_params.replace(
+            mountain_density=mountain_density,
+        )
+
     params = TeraAriumParams(
         distributed=True,
         tile_dimensions=tile_dimensions,
@@ -38,23 +63,12 @@ def build_env(tile_dimensions, world_size, max_players, initial_players):
         include_wind=True,
         include_rain=False,
         include_temperature=True,
-        include_light=True,
-        include_water=True,
+        include_light=include_light,
+        include_water=include_water,
         include_energy=True,
         include_biomass=True,
         report_object_grid=False,
-        landscape=LandscapeParams(
-            world_size=world_size,
-            include_audio=False,
-            include_smell=False,
-            include_wind=True,
-            include_rain=False,
-            include_temperature=True,
-            include_light=True,
-            include_water=True,
-            include_energy=True,
-            include_biomass=True,
-        ),
+        landscape=landscape_params,
         bugs=BugParams(
             world_size=world_size,
             initial_players=initial_players,
@@ -64,8 +78,8 @@ def build_env(tile_dimensions, world_size, max_players, initial_players):
             include_wind=True,
             include_rain=False,
             include_temperature=True,
-            include_light=True,
-            include_water=True,
+            include_light=include_light,
+            include_water=include_water,
             include_energy=True,
             include_biomass=True,
         ),
@@ -85,6 +99,9 @@ def run_simulation(args):
     parser.add_argument("--tile-cols", type=int, default=2)
     parser.add_argument("--max-players", type=int, default=64)
     parser.add_argument("--initial-players", type=int, default=32)
+    parser.add_argument("--no-water", action="store_true")
+    parser.add_argument("--no-light", action="store_true")
+    parser.add_argument("--no-mountains", action="store_true")
     args = parser.parse_args(args)
 
     world_size = tuple(args.world_size)
@@ -97,7 +114,13 @@ def run_simulation(args):
         )
 
     env, params = build_env(
-        tile_dimensions, world_size, args.max_players, args.initial_players
+        tile_dimensions,
+        world_size,
+        args.max_players,
+        args.initial_players,
+        include_water=not args.no_water,
+        include_light=not args.no_light,
+        mountain_density=0.0 if args.no_mountains else None,
     )
 
     def init_fn(key):
@@ -182,12 +205,21 @@ def run_viewer(args):
     parser.add_argument("--window-size", type=int, nargs=2, default=(1024, 1024))
     parser.add_argument("--max-players", type=int, default=64)
     parser.add_argument("--initial-players", type=int, default=32)
+    parser.add_argument("--no-water", action="store_true")
+    parser.add_argument("--no-light", action="store_true")
+    parser.add_argument("--no-mountains", action="store_true")
     args = parser.parse_args(args)
 
     world_size = tuple(args.world_size)
     tile_dimensions = (args.tile_rows, args.tile_cols)
     env, _ = build_env(
-        tile_dimensions, world_size, args.max_players, args.initial_players
+        tile_dimensions,
+        world_size,
+        args.max_players,
+        args.initial_players,
+        include_water=not args.no_water,
+        include_light=not args.no_light,
+        mountain_density=0.0 if args.no_mountains else None,
     )
 
     report_files = []
