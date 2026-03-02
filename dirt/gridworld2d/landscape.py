@@ -637,14 +637,15 @@ def make_landscape(
                 *max_size, params.terrain_downsample)
             terrain_spatial_offset = downsample_grid_shape(
                 *spatial_offset, params.terrain_downsample)
-            if not hasattr(Landscape, "_printed_init"):
-                Landscape._printed_init = True
-                print(
-                    "[landscape init]",
-                    "max_size=", max_size,
-                    "spatial_offset=", spatial_offset,
-                    "terrain_max_size=", terrain_max_size,
-                    "terrain_spatial_offset=", terrain_spatial_offset,
+            if distributed:
+                jax.debug.print(
+                    "[landscape init] dev={d} max_size={m} spatial_offset={s} "
+                    "terrain_max_size={tm} terrain_spatial_offset={ts}",
+                    d=dev,
+                    m=max_size,
+                    s=spatial_offset,
+                    tm=terrain_max_size,
+                    ts=terrain_spatial_offset,
                 )
             #terrain_spatial_offset = (
             #    params.spatial_offset[0] // params.terrain_downsample,
