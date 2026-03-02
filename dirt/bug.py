@@ -921,7 +921,7 @@ def make_bugs(
             active = family_tree.active(state.family_tree)
 
             # Exchange object grid halos so we can check destination occupancy.
-            object_grid_with_halo = object_grid.exchange(state.object_grid)
+            object_grid_with_halo = object_grid_spec.exchange(state.object_grid)
             xh = x + object_grid_halo
             dest_free = object_grid_with_halo[xh[:, 0], xh[:, 1]] == -1
 
