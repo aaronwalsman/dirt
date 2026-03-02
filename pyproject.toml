@@ -22,8 +22,15 @@ classifiers = [
 dependencies = [
   "jax",
   "chex",
-  "splendor-render",
-  "hydra-core"
+  "hydra-core",
+  "mechagogue @ git+https://github.com/aaronwalsman/mechagogue.git",
+  "splendor-render @ git+https://github.com/aaronwalsman/splendor-render.git@macos ; sys_platform == 'darwin'",
+  "splendor-render @ git+https://github.com/aaronwalsman/splendor-render.git@master ; sys_platform != 'darwin'",
+]
+
+[project.optional-dependencies]
+cuda12 = [
+  "jax[cuda12]",
 ]
 
 [project.urls]
