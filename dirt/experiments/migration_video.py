@@ -100,6 +100,7 @@ def run_simulation(args):
     parser.add_argument("--tile-cols", type=int, default=2)
     parser.add_argument("--max-players", type=int, default=64)
     parser.add_argument("--initial-players", type=int, default=32)
+    parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--no-water", action="store_true")
     parser.add_argument("--no-light", action="store_true")
     parser.add_argument("--no-mountains", action="store_true")
@@ -146,7 +147,7 @@ def run_simulation(args):
     render_pm = jax.pmap(render_fn, axis_name="mesh")
     report_pm = jax.pmap(report_fn, axis_name="mesh")
 
-    key = jrng.key(0)
+    key = jrng.key(args.seed)
     keys = jrng.split(key, tile_dimensions[0] * tile_dimensions[1])
     state = init_pm(keys)
 
@@ -206,6 +207,7 @@ def run_viewer(args):
     parser.add_argument("--window-size", type=int, nargs=2, default=(1024, 1024))
     parser.add_argument("--max-players", type=int, default=64)
     parser.add_argument("--initial-players", type=int, default=32)
+    parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--no-water", action="store_true")
     parser.add_argument("--no-light", action="store_true")
     parser.add_argument("--no-mountains", action="store_true")
