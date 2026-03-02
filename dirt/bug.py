@@ -711,6 +711,49 @@ def make_bugs(
         def off_map_scalar():
             return jnp.max(Bugs.off_map_x())
 
+        def _wallify_object_grid(grid_with_halo):
+            if object_grid_halo == 0:
+                return grid_with_halo
+            if not distributed or tile_dimensions == (1, 1):
+                tr = tc = 1
+                dev = 0
+            else:
+                tr, tc = tile_dimensions
+                dev = jax.lax.axis_index("mesh")
+            dev_row = dev // tc
+            dev_col = dev % tc
+            has_up = dev_row > 0
+            has_down = dev_row < (tr - 1)
+            has_left = dev_col > 0
+            has_right = dev_col < (tc - 1)
+
+            h = object_grid_halo
+            total_h = grid_with_halo.shape[0]
+            total_w = grid_with_halo.shape[1]
+            top = h
+            bottom = total_h - h
+            left = h
+            right = total_w - h
+
+            wall_value = jnp.array(0, dtype=grid_with_halo.dtype)
+            if not has_up:
+                grid_with_halo = grid_with_halo.at[:top, left:right].set(wall_value)
+            if not has_down:
+                grid_with_halo = grid_with_halo.at[bottom:bottom + h, left:right].set(wall_value)
+            if not has_left:
+                grid_with_halo = grid_with_halo.at[top:bottom, :left].set(wall_value)
+            if not has_right:
+                grid_with_halo = grid_with_halo.at[top:bottom, right:right + h].set(wall_value)
+            if not has_up and not has_left:
+                grid_with_halo = grid_with_halo.at[:top, :left].set(wall_value)
+            if not has_up and not has_right:
+                grid_with_halo = grid_with_halo.at[:top, right:right + h].set(wall_value)
+            if not has_down and not has_left:
+                grid_with_halo = grid_with_halo.at[bottom:bottom + h, :left].set(wall_value)
+            if not has_down and not has_right:
+                grid_with_halo = grid_with_halo.at[bottom:bottom + h, right:right + h].set(wall_value)
+            return grid_with_halo
+
         def object_grid():
             return object_grid_spec
 
@@ -835,7 +878,11 @@ def make_bugs(
             # starting position and rotation
             x0 = state.x
             r0 = state.r
-            g0 = state.object_grid
+            if distributed and object_grid_halo > 0:
+                g0 = object_grid_spec.exchange(state.object_grid)
+                g0 = Bugs._wallify_object_grid(g0)
+            else:
+                g0 = state.object_grid
             
             # compute the movement offset (dxr) for all bugs
             action_type = action_to_primitive_map[action, 0]
@@ -861,6 +908,10 @@ def make_bugs(
                 object_grid_halo=object_grid_halo,
                 out_of_bounds=out_of_bounds,
             )
+            if distributed and object_grid_halo > 0:
+                interior = object_grid_spec.interior(g1)
+                g1 = object_grid_spec.set_interior(
+                    object_grid_spec.init(), interior)
             
             # record move actions
             state = state.replace(
