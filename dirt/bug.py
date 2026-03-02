@@ -920,6 +920,11 @@ def make_bugs(
             x = state.x
             active = family_tree.active(state.family_tree)
 
+            # Exchange object grid halos so we can check destination occupancy.
+            object_grid_with_halo = object_grid.exchange(state.object_grid)
+            xh = x + object_grid_halo
+            dest_free = object_grid_with_halo[xh[:, 0], xh[:, 1]] == -1
+
             row_offset = jnp.where(
                 x[:, 0] < 0, -1, jnp.where(x[:, 0] >= H, 1, 0))
             col_offset = jnp.where(
@@ -989,15 +994,17 @@ def make_bugs(
 
             direction_masks = []
             for name, dr, dc, allowed in directions:
-                mask = emigrant & (row_offset == dr) & (col_offset == dc) & allowed
+                mask = emigrant & (row_offset == dr) & (col_offset == dc) & allowed & dest_free
                 direction_masks.append(mask)
 
             allowed_mask = jnp.zeros_like(emigrant)
             for mask in direction_masks:
                 allowed_mask = allowed_mask | mask
-            drop_mask = emigrant & ~allowed_mask
+            # If there's no neighbor (global edge), treat it as a wall and keep.
+            drop_mask = jnp.zeros_like(emigrant)
 
-            keep_mask = ~(emigrant | drop_mask)
+            # Only remove bugs that are actually migrating.
+            keep_mask = ~(allowed_mask | drop_mask)
             for key, arr in fields.items():
                 if arr.ndim == 1:
                     fields[key] = jnp.where(keep_mask, arr, jnp.zeros_like(arr))
@@ -1005,7 +1012,7 @@ def make_bugs(
                     fields[key] = jnp.where(
                         keep_mask[:, None], arr, jnp.zeros_like(arr))
             family_tree_state = family_tree.remove(
-                state.family_tree, emigrant | drop_mask)
+                state.family_tree, allowed_mask | drop_mask)
             players = family_tree_state.player_state.players
             parents = family_tree_state.parents
             capacity_reached = family_tree_state.player_state.capacity_reached
