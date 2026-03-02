@@ -10,52 +10,46 @@ DIRT is a set of tools for building large dynamic gridworlds.
 
 ## Setup
 
+### Prerequisites
+
+Install [uv](https://docs.astral.sh/uv/getting-started/installation/):
+```
+curl -LsSf https://astral.sh/uv/install.sh | sh
+```
+
+### Installation
+
 Clone the repo:
 ```
 git clone https://github.com/aaronwalsman/dirt.git
-```
-
-Create a conda env with Python 3.11:
-```
-conda create --name dirt python=3.11 pip
-```
-
-Activate the environment and install `dirt` dependencies:
-```
 cd dirt
-conda activate dirt
-pip install --upgrade pip
-pip install -e .
 ```
 
-Keep the conda env active for the remainder of setup and development.
-
-Clone the `macos` branch of our 3D renderer, `splendor-render`, and install the package:
+Install dependencies:
 ```
-cd ..
-git clone --branch macos https://github.com/aaronwalsman/splendor-render.git
-cd splendor-render
-pip install -e .
+uv sync
 ```
 
-Now, run
+For GPU clusters with CUDA 12, use this instead:
+```
+uv sync --extra cuda12
+```
+
+### Post-Installation
+
+Activate the virtual environment:
+```
+source .venv/bin/activate
+```
+
+Install splendor assets:
 ```
 splendor_asset_installer
 ```
 
-Next, clone `mechagogue` and install the package:
-```
-cd ..
-git clone https://github.com/aaronwalsman/mechagogue.git
-cd mechagogue
-pip install -e .
-```
-
-Ensure you have a CUDA-compatible GPU available to JAX.
-
 Test your setup with the `landscape` simulation example (the output is execution time):
 ```
-cd ../dirt/dirt/examples/landscape
+cd dirt/examples/landscape
 python landscape.py
 ```
 

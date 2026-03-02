@@ -138,6 +138,7 @@ class Viewer:
         self.show_players = True
         
         self.step_size = 1
+        self.selected_player = None
         self.change_step(start_step)
     
     def _init_params_and_reports(

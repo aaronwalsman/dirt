@@ -63,7 +63,7 @@ if __name__ == '__main__':
     key = jrng.key(params.seed)
     
     # make the landscape
-    landscape = make_landscape(landscape_params, float_dtype=float_dtype)
+    landscape = make_landscape(params.landscape_params, float_dtype=float_dtype)
     
     params_path = f'{params.output_directory}/params.state'
     reports_path = f'{params.output_directory}/report.state'
@@ -71,29 +71,29 @@ if __name__ == '__main__':
     if params.visualize:
         key, init_key = jrng.split(key)
         
-        def get_texture(report, texture_size, display_mode):
+        def get_texture(report, shape, display_mode):
             
             if display_mode == 1:
-                texture = landscape.render_rgb(report, shape=texture_size)
+                texture = landscape.render_rgb(report, shape=shape)
             
             elif display_mode == 2:
                 texture = landscape.render_rgb(
-                    report, shape=texture_size, use_light=False)
+                    report, shape=shape, use_light=False)
             
             elif display_mode == 3:
                 texture = landscape.render_temperature(
-                    report, shape=texture_size)
+                    report, shape=shape)
             
             elif display_mode == 4:
                 texture = landscape.render_weather(
-                    report, shape=texture_size)
+                    report, shape=shape)
             
             elif display_mode == 5:
                 texture = landscape.render_altitude(
-                    report, shape=texture_size)
+                    report, shape=shape)
             
             else:
-                texture = jnp.zeros((*texture_size, 3))
+                texture = jnp.zeros((*shape, 3))
             
             texture = np.array(
                 jnp.clip(texture, min=0., max=1.) * 255).astype(np.uint8)
@@ -118,7 +118,7 @@ if __name__ == '__main__':
             window_size=params.window_size,
             get_terrain_map = get_terrain,
             get_active_players = None,
-            get_terrain_texture = landscape.render_display_mode,
+            get_terrain_texture = get_texture,
             get_water_map = None,
             get_sun_direction = None,
         )
