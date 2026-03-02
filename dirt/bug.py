@@ -593,6 +593,7 @@ class BugState:
     migrate_outgoing : jnp.ndarray
     migrate_incoming : jnp.ndarray
     migrate_dir : jnp.ndarray
+    last_deaths : jnp.ndarray
 
 def make_bugs(
     params : BugParams = BugParams(),
@@ -845,6 +846,7 @@ def make_bugs(
                 migrate_outgoing=jnp.zeros((n,), dtype=jnp.bool),
                 migrate_incoming=jnp.zeros((n,), dtype=jnp.bool),
                 migrate_dir=jnp.zeros((n, 2), dtype=jnp.int32),
+                last_deaths=jnp.zeros((n,), dtype=jnp.bool),
             )
         
         def get_mass(water, biomass):
@@ -1714,6 +1716,7 @@ def make_bugs(
             state = state.replace(
                 age = age,
                 family_tree = family_tree_state,
+                last_deaths = recent_deaths,
             )
             
             state = state.replace(

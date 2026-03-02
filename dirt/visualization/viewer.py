@@ -870,6 +870,44 @@ class Viewer:
         if self.selected_player is not None:
             player_id, report = self._player_id_and_report(self.selected_player)
             self.print_player_info(player_id, report)
+
+        self._alert_debug_masks()
+
+    def _alert_debug_masks(self):
+        def _report_mask(report, name):
+            if not hasattr(report, name):
+                return
+            mask = getattr(report, name)
+            if mask is None or mask is False:
+                return
+            idx = np.where(np.array(mask))[0]
+            if idx.size > 0:
+                print(f"[viewer] {name} indices: {idx.tolist()}")
+
+        if not self.tiled:
+            _report_mask(self.report, "active_out_of_bounds")
+            _report_mask(self.report, "inactive_in_bounds")
+            _report_mask(self.report, "last_deaths")
+        else:
+            tile_reports = getattr(self, "tile_reports", None)
+            if tile_reports is None:
+                tile_reports = [self.report]
+            for i, report in enumerate(tile_reports):
+                if hasattr(report, "active_out_of_bounds"):
+                    mask = report.active_out_of_bounds
+                    idx = np.where(np.array(mask))[0]
+                    if idx.size > 0:
+                        print(f"[viewer] tile {i} active_out_of_bounds: {idx.tolist()}")
+                if hasattr(report, "inactive_in_bounds"):
+                    mask = report.inactive_in_bounds
+                    idx = np.where(np.array(mask))[0]
+                    if idx.size > 0:
+                        print(f"[viewer] tile {i} inactive_in_bounds: {idx.tolist()}")
+                if hasattr(report, "last_deaths"):
+                    mask = report.last_deaths
+                    idx = np.where(np.array(mask))[0]
+                    if idx.size > 0:
+                        print(f"[viewer] tile {i} last_deaths: {idx.tolist()}")
     
     def _update_players(self):
         if not self.tiled:
