@@ -541,6 +541,20 @@ class Viewer:
             
             
             self.renderer.set_instance_transform('sun', sun_transform)
+
+    def _player_id_and_report(self, player_id):
+        if not self.tiled:
+            return player_id, self.report
+        tile_map = getattr(self, "_player_tile_map", None)
+        if tile_map is None:
+            return player_id, self.report
+        if player_id < 0 or player_id >= len(tile_map):
+            return player_id, self.report
+        tile_idx, local_idx = tile_map[player_id]
+        tile_reports = getattr(self, "tile_reports", None)
+        if tile_reports is None or tile_idx >= len(tile_reports):
+            return player_id, self.report
+        return local_idx, tile_reports[tile_idx]
     
     def _init_players(self, max_render_players):
         #active_players = self.get_active_players(self.params, self.report)
@@ -788,7 +802,8 @@ class Viewer:
                 if render_id in self._render_players:
                     player_id = self._render_players[render_id]
                     self.selected_player = player_id
-                    self.print_player_info(player_id, self.report)
+                    player_id, report = self._player_id_and_report(player_id)
+                    self.print_player_info(player_id, report)
                 else:
                     self.selected_player = None
                 self._update_players()
@@ -853,7 +868,8 @@ class Viewer:
             self._update_players()
         
         if self.selected_player is not None:
-            self.print_player_info(self.selected_player, self.report)
+            player_id, report = self._player_id_and_report(self.selected_player)
+            self.print_player_info(player_id, report)
     
     def _update_players(self):
         if not self.tiled:
@@ -880,6 +896,7 @@ class Viewer:
             offsets_grid, _ = self._tile_offsets()
             if not hasattr(self, "_tile_player_debug_printed"):
                 self._tile_player_debug_printed = False
+            self._player_tile_map = []
             for i, report in enumerate(tile_reports):
                 active = self.get_active_players(report)
                 if not self.show_players:
@@ -899,27 +916,14 @@ class Viewer:
                 # convert to global grid coords for transforms
                 off_gy, off_gx = offsets_grid[i]
                 global_x = player_x + jnp.array([off_gy, off_gx], dtype=jnp.int32)
-                if not self._tile_player_debug_printed:
-                    active_count = int(jnp.sum(active))
-                    gx0 = int(jnp.min(global_x[..., 0]))
-                    gx1 = int(jnp.max(global_x[..., 0]))
-                    gy0 = int(jnp.min(global_x[..., 1]))
-                    gy1 = int(jnp.max(global_x[..., 1]))
-                    print(
-                        "[viewer] tile player debug:",
-                        "tile=", i,
-                        "active=", active_count,
-                        "global_x0=", gx0,
-                        "global_x1=", gx1,
-                        "global_y0=", gy0,
-                        "global_y1=", gy1,
-                        "offset=", (off_gy, off_gx),
-                    )
                 x_list.append(global_x)
                 z_list.append(z)
                 r_list.append(player_r)
                 active_list.append(active)
                 energy_list.append(player_energy)
+                # build global->(tile, local) mapping
+                for local_idx in range(active.shape[0]):
+                    self._player_tile_map.append((i, local_idx))
             if not self._tile_player_debug_printed:
                 self._tile_player_debug_printed = True
             player_x = jnp.concatenate(x_list, axis=0)
@@ -983,9 +987,10 @@ class Viewer:
                 ):
                     player_color = np.array([1., 0., 0.])
                 else:
+                    color_id, color_report = self._player_id_and_report(player_id)
                     player_color = self.get_player_color(
                     #    player_id, self.params, self.report)
-                        player_id, self.report)
+                        color_id, color_report)
                 material_name = f'player_material_{render_id}'
                 self.renderer.set_material_flat_color(
                     material_name, player_color)
