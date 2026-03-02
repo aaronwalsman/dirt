@@ -164,7 +164,11 @@ def make_tera_arium(
     ) -> TeraAriumState :
         
         if params.landscape_seed is None:
-            key, landscape_key = jrng.split(key)
+            if params.distributed:
+                base_key = jax.lax.pmin(jrng.key_data(key), axis_name="mesh")
+                landscape_key = jrng.wrap_key_data(base_key)
+            else:
+                key, landscape_key = jrng.split(key)
         else:
             landscape_key = jrng.key(params.landscape_seed)
         landscape_state = landscape.init(landscape_key)
