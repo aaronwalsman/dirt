@@ -136,8 +136,17 @@ def main():
 
             sharded_reports = report_pm(state, actions)
             host_reports = jax.device_get(sharded_reports)
-            for i, report in enumerate(host_reports):
-                report_tiles[i].append(report)
+            ntiles = tile_dimensions[0] * tile_dimensions[1]
+            def _slice_report(report, idx):
+                def _slice_leaf(leaf):
+                    if leaf is None or leaf is False:
+                        return leaf
+                    if hasattr(leaf, "shape") and leaf.shape and leaf.shape[0] == ntiles:
+                        return leaf[idx]
+                    return leaf
+                return jax.tree_util.tree_map(_slice_leaf, report)
+            for i in range(ntiles):
+                report_tiles[i].append(_slice_report(host_reports, i))
     finally:
         writer.close()
 
