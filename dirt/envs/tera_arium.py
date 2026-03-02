@@ -135,8 +135,15 @@ def make_tera_arium(
             "rock": movement_halo,
             "water": movement_halo,
         }
+    landscape_params = params.landscape
+    if params.distributed and landscape_params.max_size is None:
+        tr, tc = params.tile_dimensions
+        h, w = params.world_size
+        landscape_params = landscape_params.replace(
+            max_size=(h * tr, w * tc),
+        )
     landscape = make_landscape(
-        params.landscape,
+        landscape_params,
         float_dtype=float_dtype,
         extra_halos=extra_halos,
         distributed=params.distributed,

@@ -608,14 +608,35 @@ def make_landscape(
             
             # time
             state = state.replace(time=params.initial_time)
+
+            max_size = params.max_size
+            if max_size is None:
+                if distributed:
+                    tr, tc = tile_dimensions
+                    max_size = (
+                        params.world_size[0] * tr,
+                        params.world_size[1] * tc,
+                    )
+                else:
+                    max_size = params.world_size
+            spatial_offset = params.spatial_offset
+            if distributed:
+                dev = jax.lax.axis_index("mesh")
+                tr, tc = tile_dimensions
+                dev_row = dev // tc
+                dev_col = dev % tc
+                spatial_offset = (
+                    spatial_offset[0] + dev_row * params.world_size[0],
+                    spatial_offset[1] + dev_col * params.world_size[1],
+                )
             
             # terrain
             terrain_size = downsample_grid_shape(
                 *params.world_size, params.terrain_downsample)
             terrain_max_size = downsample_grid_shape(
-                *params.max_size, params.terrain_downsample)
+                *max_size, params.terrain_downsample)
             terrain_spatial_offset = downsample_grid_shape(
-                *params.spatial_offset, params.terrain_downsample)
+                *spatial_offset, params.terrain_downsample)
             #terrain_spatial_offset = (
             #    params.spatial_offset[0] // params.terrain_downsample,
             #    params.spatial_offset[1] // params.terrain_downsample,
@@ -648,7 +669,7 @@ def make_landscape(
                     state = state.replace(rock=rock)
                     
                     # -- add mountains
-                    mean_mountains = params.max_size[0] * params.max_size[1]
+                    mean_mountains = max_size[0] * max_size[1]
                     mean_mountains *= params.mountain_density / 1024**2
                     key, mountain_n_key, mountain_height_key = jrng.split(
                         key, 3)
@@ -668,17 +689,17 @@ def make_landscape(
                             mountain_x_key,
                             shape=(2,),
                             minval=0.,
-                            maxval=jnp.array(params.max_size),
+                            maxval=jnp.array(max_size),
                             dtype=float_dtype,
                         )
                         x0 = jnp.arange(
-                            params.spatial_offset[0],
-                            params.spatial_offset[0] + params.world_size[0],
+                            spatial_offset[0],
+                            spatial_offset[0] + params.world_size[0],
                             params.terrain_downsample,
                         )
                         x1 = jnp.arange(
-                            params.spatial_offset[1],
-                            params.spatial_offset[1] + params.world_size[1],
+                            spatial_offset[1],
+                            spatial_offset[1] + params.world_size[1],
                             params.terrain_downsample,
                         )
                         dx02 = (mountain_location[0] - x0).astype(
@@ -929,9 +950,9 @@ def make_landscape(
                 resource_size = downsample_grid_shape(
                     *params.world_size, params.resource_downsample)
                 resource_max_size = downsample_grid_shape(
-                    *params.max_size, params.resource_downsample)
+                    *max_size, params.resource_downsample)
                 resource_spatial_offset = downsample_grid_shape(
-                    *params.spatial_offset, params.resource_downsample)
+                    *spatial_offset, params.resource_downsample)
                 #resource_spatial_offset = (
                 #    params.spatial_offset[0] // params.resource_downsample,
                 #    params.spatial_offset[1] // params.resource_downsample,
@@ -946,12 +967,12 @@ def make_landscape(
                         energy_key,
                         mean_energy_sites,
                         round(mean_energy_sites*2),
-                        params.max_size,
+                        max_size,
                     )
-                    x0 = params.spatial_offset[0]
-                    x1 = params.spatial_offset[0] + params.world_size[0]
-                    y0 = params.spatial_offset[1]
-                    y1 = params.spatial_offset[1] + params.world_size[1]
+                    x0 = spatial_offset[0]
+                    x1 = spatial_offset[0] + params.world_size[0]
+                    y0 = spatial_offset[1]
+                    y1 = spatial_offset[1] + params.world_size[1]
                     energy_sites = energy_sites[x0:x1,y0:y1]
                     
                     energy = energy_sites * initial_energy
@@ -991,12 +1012,12 @@ def make_landscape(
                         biomass_key,
                         mean_biomass_sites,
                         round(mean_biomass_sites*2),
-                        params.max_size,
+                        max_size,
                     )
-                    x0 = params.spatial_offset[0]
-                    x1 = params.spatial_offset[0] + params.world_size[0]
-                    y0 = params.spatial_offset[1]
-                    y1 = params.spatial_offset[1] + params.world_size[1]
+                    x0 = spatial_offset[0]
+                    x1 = spatial_offset[0] + params.world_size[0]
+                    y0 = spatial_offset[1]
+                    y1 = spatial_offset[1] + params.world_size[1]
                     biomass_sites = biomass_sites[x0:x1,y0:y1]
                     biomass = (
                         biomass_sites *
