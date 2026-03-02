@@ -25,7 +25,7 @@ git clone https://github.com/aaronwalsman/dirt.git
 cd dirt
 ```
 
-Install dependencies (automatically detects macOS vs Linux):
+Install dependencies:
 ```
 uv sync
 ```
