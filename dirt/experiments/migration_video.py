@@ -67,6 +67,7 @@ def build_env(
         include_water=include_water,
         include_energy=True,
         include_biomass=True,
+        report_bug_internals=True,
         report_object_grid=False,
         landscape=landscape_params,
         bugs=BugParams(
