@@ -272,7 +272,10 @@ class Viewer:
             ]
             self.current_report_block = report_blocks
             self.reports_per_block = tree_len(report_blocks[0])
-            self.report = self._stitch_report(0)
+            self.tile_reports = [
+                tree_getitem(block, 0) for block in self.current_report_block
+            ]
+            self.report = self.tile_reports[0]
             self.step_N = step_0 + len(self.report_files[0]) * self.reports_per_block
     
     def _init_context_and_window(self, window_width, window_height):
@@ -399,14 +402,17 @@ class Viewer:
                 tile_h / terrain_map0.shape[0],
                 tile_w / terrain_map0.shape[1],
             )
-            stitched_terrain = self.get_terrain_map(self.report)
             self.mesh_spacing = (
-                self.world_size[0] / stitched_terrain.shape[0],
-                self.world_size[1] / stitched_terrain.shape[1],
+                self.world_size[0] / (terrain_map0.shape[0] * self.tile_dimensions[0]),
+                self.world_size[1] / (terrain_map0.shape[1] * self.tile_dimensions[1]),
             )
+            self.tile_terrain_maps = []
+            self.tile_water_maps = []
+            self.tile_total_height_maps = []
 
             for i, report in enumerate(tile_reports):
                 terrain_map = self.get_terrain_map(report)
+                self.tile_terrain_maps.append(terrain_map)
                 vertices, normals, uvs, faces = make_height_map_mesh(
                     terrain_map, spacing=self.tile_mesh_spacing)
                 off_y, off_x = self.tile_offsets_world[i]
@@ -457,7 +463,9 @@ class Viewer:
                 for i, report in enumerate(tile_reports):
                     water_map = self.get_water_map(report)
                     terrain_map = self.get_terrain_map(report)
+                    self.tile_water_maps.append(water_map)
                     total_map = terrain_map + water_map
+                    self.tile_total_height_maps.append(total_map)
                     water_vertices, water_normals, water_uvs, water_faces = make_height_map_mesh(
                         total_map, spacing=self.tile_mesh_spacing)
                     off_y, off_x = self.tile_offsets_world[i]
@@ -489,11 +497,9 @@ class Viewer:
                         material_name=material_name,
                         transform=self.upright,
                     )
-            if self.get_water_map is not None:
-                stitched_water = self.get_water_map(self.report)
-                self.total_height_map = stitched_terrain + stitched_water
-            else:
-                self.total_height_map = stitched_terrain
+            if self.get_water_map is None:
+                self.tile_total_height_maps = list(self.tile_terrain_maps)
+            self.total_height_map = None
 
         if hasattr(self, 'get_sun_direction'):
             max_size = max(self.world_size)
@@ -538,8 +544,18 @@ class Viewer:
     
     def _init_players(self, max_render_players):
         #active_players = self.get_active_players(self.params, self.report)
-        active_players = self.get_active_players(self.report)
-        self.max_players = min(active_players.shape[0], max_render_players)
+        if not self.tiled:
+            active_players = self.get_active_players(self.report)
+            total_players = active_players.shape[0]
+        else:
+            tile_reports = getattr(self, "tile_reports", None)
+            if tile_reports is None:
+                tile_reports = [self.report]
+            total_players = 0
+            for report in tile_reports:
+                active = self.get_active_players(report)
+                total_players += active.shape[0]
+        self.max_players = min(total_players, max_render_players)
         self.selected_player = None
         
         # make player cube
@@ -823,7 +839,11 @@ class Viewer:
             self.report = tree_getitem(
                 self.current_report_block, block_step)
         else:
-            self.report = self._stitch_report(block_step)
+            self.tile_reports = [
+                tree_getitem(block, block_step)
+                for block in self.current_report_block
+            ]
+            self.report = self.tile_reports[0]
         
         #print(self.report)
         
@@ -836,21 +856,79 @@ class Viewer:
             self.print_player_info(self.selected_player, self.report)
     
     def _update_players(self):
-        #active_players = self.get_active_players(self.params, self.report)
-        active_players = self.get_active_players(self.report)
-        if not self.show_players:
-            active_players = jnp.zeros_like(active_players)
-        
-        #player_x = self.get_player_x(self.params, self.report)
-        #player_r = self.get_player_r(self.params, self.report)
-        player_x = self.get_player_x(self.report)
-        player_r = self.get_player_r(self.report)
-        if self.get_player_energy is not None:
-            #player_energy = self.get_player_energy(self.params, self.report)
-            player_energy = self.get_player_energy(self.report)
+        if not self.tiled:
+            active_players = self.get_active_players(self.report)
+            if not self.show_players:
+                active_players = jnp.zeros_like(active_players)
+            player_x = self.get_player_x(self.report)
+            player_r = self.get_player_r(self.report)
+            if self.get_player_energy is not None:
+                player_energy = self.get_player_energy(self.report)
+            else:
+                player_energy = np.zeros(player_r.shape)
+            player_transforms = self._player_transform(player_x, player_r)
         else:
-            player_energy = np.zeros(player_r.shape)
-        player_transforms = self._player_transform(player_x, player_r)
+            tile_reports = getattr(self, "tile_reports", None)
+            if tile_reports is None:
+                tile_reports = [self.report]
+            active_list = []
+            x_list = []
+            r_list = []
+            z_list = []
+            energy_list = []
+            spacing_y, spacing_x = self.tile_mesh_spacing
+            offsets_grid, _ = self._tile_offsets()
+            if not hasattr(self, "_tile_player_debug_printed"):
+                self._tile_player_debug_printed = False
+            for i, report in enumerate(tile_reports):
+                active = self.get_active_players(report)
+                if not self.show_players:
+                    active = jnp.zeros_like(active)
+                player_x = self.get_player_x(report)
+                player_r = self.get_player_r(report)
+                if self.get_player_energy is not None:
+                    player_energy = self.get_player_energy(report)
+                else:
+                    player_energy = np.zeros(player_r.shape)
+                off_y, off_x = self.tile_offsets_world[i]
+                # compute heights from per-tile height maps
+                zy = (player_x[..., 0] // spacing_y).astype(jnp.int32)
+                zx = (player_x[..., 1] // spacing_x).astype(jnp.int32)
+                height_map = self.tile_total_height_maps[i]
+                z = height_map[zy, zx] + PLAYER_RADIUS
+                # convert to global grid coords for transforms
+                off_gy, off_gx = offsets_grid[i]
+                global_x = player_x + jnp.array([off_gy, off_gx], dtype=jnp.int32)
+                if not self._tile_player_debug_printed:
+                    active_count = int(jnp.sum(active))
+                    gx0 = int(jnp.min(global_x[..., 0]))
+                    gx1 = int(jnp.max(global_x[..., 0]))
+                    gy0 = int(jnp.min(global_x[..., 1]))
+                    gy1 = int(jnp.max(global_x[..., 1]))
+                    print(
+                        "[viewer] tile player debug:",
+                        "tile=", i,
+                        "active=", active_count,
+                        "global_x0=", gx0,
+                        "global_x1=", gx1,
+                        "global_y0=", gy0,
+                        "global_y1=", gy1,
+                        "offset=", (off_gy, off_gx),
+                    )
+                x_list.append(global_x)
+                z_list.append(z)
+                r_list.append(player_r)
+                active_list.append(active)
+                energy_list.append(player_energy)
+            if not self._tile_player_debug_printed:
+                self._tile_player_debug_printed = True
+            player_x = jnp.concatenate(x_list, axis=0)
+            player_r = jnp.concatenate(r_list, axis=0)
+            active_players = jnp.concatenate(active_list, axis=0)
+            player_energy = np.concatenate(energy_list, axis=0)
+            player_z = jnp.concatenate(z_list, axis=0)
+            player_transforms = self._player_transform_with_z(
+                player_x, player_r, player_z)
         
         print(f'Active Players: {jnp.sum(active_players)}')
         
@@ -1081,6 +1159,32 @@ class Viewer:
         zy = (player_x[..., 0] // spacing_y).astype(jnp.int32)
         zx = (player_x[..., 1] // spacing_x).astype(jnp.int32)
         z = self.total_height_map[zy, zx] + PLAYER_RADIUS
+        y = player_x[..., 0] - height/2. + 0.5
+        x = player_x[..., 1] - width/2. + 0.5
+        
+        cs = np.array((( 1, 0), ( 0, 1), (-1, 0), ( 0,-1)))[player_r]
+        c = cs[...,0]
+        s = cs[...,1]
+        
+        transforms = np.zeros((*player_r.shape, 4, 4))
+        transforms[...,0,0] = c
+        transforms[...,0,1] = s
+        transforms[...,0,3] = x
+        
+        transforms[...,1,0] = -s
+        
+        transforms[...,1,1] = c
+        transforms[...,1,3] = y
+        
+        transforms[...,2,2] = 1.
+        transforms[...,2,3] = z
+        
+        transforms[...,3,3] = 1.
+        
+        return self.upright @ transforms
+
+    def _player_transform_with_z(self, player_x, player_r, z):
+        height, width = self.world_size
         y = player_x[..., 0] - height/2. + 0.5
         x = player_x[..., 1] - width/2. + 0.5
         
