@@ -1,11 +1,15 @@
 import argparse
+import os
 from typing import Tuple
 
 import imageio
 import numpy as np
 
 import jax
+import jax.numpy as jnp
 import jax.random as jrng
+
+from mechagogue import serial
 
 from dirt.envs.tera_arium import make_tera_arium, TeraAriumParams
 from dirt.gridworld2d.landscape import LandscapeParams
@@ -25,6 +29,7 @@ def main():
     parser.add_argument("--steps", type=int, default=1024)
     parser.add_argument("--fps", type=int, default=30)
     parser.add_argument("--output", type=str, default="./migration_test.mp4")
+    parser.add_argument("--report-dir", type=str, default="./migration_reports")
     parser.add_argument("--world-size", type=int, nargs=2, default=(64, 64))
     parser.add_argument("--tile-rows", type=int, default=1)
     parser.add_argument("--tile-cols", type=int, default=2)
@@ -96,25 +101,31 @@ def main():
             action_key, (params.max_players,), 0, env.num_actions
         )
         next_state, _, _, _, _ = env.step(step_key, state, actions, state.bug_traits)
-        return next_state
+        return next_state, actions
 
     def render_fn(state):
         return env.make_video_report(state)
 
+    def report_fn(state, actions):
+        return env.make_visualizer_report(state, actions)
+
     init_pm = jax.pmap(init_fn, axis_name="mesh")
     step_pm = jax.pmap(step_fn, axis_name="mesh")
     render_pm = jax.pmap(render_fn, axis_name="mesh")
+    report_pm = jax.pmap(report_fn, axis_name="mesh")
 
     key = jrng.key(0)
     keys = jrng.split(key, tile_dimensions[0] * tile_dimensions[1])
     state = init_pm(keys)
+
+    report_tiles = [[] for _ in range(tile_dimensions[0] * tile_dimensions[1])]
 
     writer = imageio.get_writer(args.output, fps=args.fps, codec="libx264")
     try:
         for _ in range(args.steps):
             key, step_key = jrng.split(key)
             step_keys = jrng.split(step_key, tile_dimensions[0] * tile_dimensions[1])
-            state = step_pm(step_keys, state)
+            state, actions = step_pm(step_keys, state)
 
             sharded_frames = render_pm(state)
             host_frames = np.array(jax.device_get(sharded_frames))
@@ -122,8 +133,27 @@ def main():
             frame = (frame * 255).astype(np.uint8)
             frame = frame[::-1]
             writer.append_data(frame)
+
+            sharded_reports = report_pm(state, actions)
+            host_reports = jax.device_get(sharded_reports)
+            for i, report in enumerate(host_reports):
+                report_tiles[i].append(report)
     finally:
         writer.close()
+
+    if report_tiles:
+        os.makedirs(args.report_dir, exist_ok=True)
+        for i, reports in enumerate(report_tiles):
+            if not reports:
+                continue
+            report_block = jax.tree_util.tree_map(
+                lambda *xs: jnp.stack(xs), *reports
+            )
+            path = f"{args.report_dir}/tile_{i:03d}"
+            os.makedirs(path, exist_ok=True)
+            serial.save_leaf_data(
+                report_block, f"{path}/block_0000.msgpack", compress=False
+            )
 
 
 if __name__ == "__main__":

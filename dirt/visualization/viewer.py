@@ -69,6 +69,7 @@ class Viewer:
         get_player_color=default_get_player_color,
         get_sun_direction=None,
         print_player_info=default_print_player_info,
+        tile_dimensions=None,
     ):
         
         self.get_report_block = standardize_args(
@@ -117,6 +118,13 @@ class Viewer:
                 print_player_info, ('player_id', 'report',))
         
         self.world_size = world_size
+        self.tile_dimensions = tile_dimensions
+        self.tiled = (
+            tile_dimensions is not None and
+            isinstance(report_files, (list, tuple)) and
+            len(report_files) > 0 and
+            isinstance(report_files[0], (list, tuple))
+        )
         
         self._init_params_and_reports(
             #example_params,
@@ -139,6 +147,83 @@ class Viewer:
         
         self.step_size = 1
         self.change_step(start_step)
+
+    def _tile_offsets(self):
+        tr, tc = self.tile_dimensions
+        tile_h = self.world_size[0] // tr
+        tile_w = self.world_size[1] // tc
+        offsets = []
+        for r in range(tr):
+            for c in range(tc):
+                offsets.append((r * tile_h, c * tile_w))
+        return offsets, (tile_h, tile_w)
+
+    def _stitch_grid(self, grids):
+        tr, tc = self.tile_dimensions
+        rows = []
+        for r in range(tr):
+            row = jnp.concatenate(grids[r * tc:(r + 1) * tc], axis=1)
+            rows.append(row)
+        return jnp.concatenate(rows, axis=0)
+
+    def _stitch_report(self, block_step):
+        tile_reports = [
+            tree_getitem(block, block_step)
+            for block in self.current_report_block
+        ]
+        report0 = tile_reports[0]
+        offsets, _ = self._tile_offsets()
+
+        spatial_keys = {
+            "rock", "water", "light", "temperature",
+            "moisture", "raining", "energy", "biomass",
+            "smell", "audio", "object_grid", "rock_normals",
+        }
+        player_x_key = "player_x"
+        player_r_key = "player_r"
+        players_key = "players"
+        player_color_key = "player_color"
+
+        stitched = {}
+        players_len = None
+        if hasattr(report0, players_key):
+            players0 = getattr(report0, players_key)
+            if isinstance(players0, (np.ndarray, jnp.ndarray)):
+                players_len = players0.shape[0]
+
+        for key, value0 in report0.__dict__.items():
+            if value0 is None or value0 is False:
+                stitched[key] = value0
+                continue
+
+            tile_values = [getattr(r, key, None) for r in tile_reports]
+            if tile_values[0] is None:
+                stitched[key] = None
+                continue
+
+            if key in spatial_keys and isinstance(tile_values[0], (np.ndarray, jnp.ndarray)):
+                stitched[key] = self._stitch_grid(tile_values)
+                continue
+
+            if key == player_x_key:
+                xs = []
+                for (off_y, off_x), x in zip(offsets, tile_values):
+                    xs.append(x + jnp.array([off_y, off_x], dtype=jnp.int32))
+                stitched[key] = jnp.concatenate(xs, axis=0)
+                continue
+
+            if key in {player_r_key, players_key, player_color_key}:
+                stitched[key] = jnp.concatenate(tile_values, axis=0)
+                continue
+
+            if isinstance(tile_values[0], (np.ndarray, jnp.ndarray)) and players_len is not None:
+                if tile_values[0].shape[0] == players_len:
+                    stitched[key] = jnp.concatenate(tile_values, axis=0)
+                    continue
+
+            stitched[key] = tile_values[0]
+
+        return type(report0)(**stitched)
     
     def _init_params_and_reports(
         self,
@@ -156,14 +241,23 @@ class Viewer:
         
         #self.params = load_example_data(example_params, params_file)
         self.report_files = report_files
-        report_block = load_example_data(
-            self._example_report, self.report_files[self.block_index])
-        self.current_report_block = self.get_report_block(report_block)
-        self.report = tree_getitem(
-            self.current_report_block, 0)
-        self.reports_per_block = tree_len(self.current_report_block)
-        
-        self.step_N = step_0 + len(report_files) * self.reports_per_block
+        if not self.tiled:
+            report_block = load_example_data(
+                self._example_report, self.report_files[self.block_index])
+            self.current_report_block = self.get_report_block(report_block)
+            self.report = tree_getitem(
+                self.current_report_block, 0)
+            self.reports_per_block = tree_len(self.current_report_block)
+            self.step_N = step_0 + len(report_files) * self.reports_per_block
+        else:
+            report_blocks = [
+                load_example_data(self._example_report, files[self.block_index])
+                for files in self.report_files
+            ]
+            self.current_report_block = report_blocks
+            self.reports_per_block = tree_len(report_blocks[0])
+            self.report = self._stitch_report(0)
+            self.step_N = step_0 + len(self.report_files[0]) * self.reports_per_block
     
     def _init_context_and_window(self, window_width, window_height):
         glfw_context.initialize()
@@ -580,16 +674,25 @@ class Viewer:
         block_index, block_step = self.step_to_block(step)
         if block_index != self.block_index:
             self.block_index = block_index
-            report_block = load_example_data(
-                self._example_report, self.report_files[self.block_index])
-            self.current_report_block = self.get_report_block(report_block)
+            if not self.tiled:
+                report_block = load_example_data(
+                    self._example_report, self.report_files[self.block_index])
+                self.current_report_block = self.get_report_block(report_block)
+            else:
+                self.current_report_block = [
+                    load_example_data(self._example_report, files[self.block_index])
+                    for files in self.report_files
+                ]
         self.current_step = step
         
         print(f'Current Step: {step} '
             f'Block Location: {block_index}, {block_step}')
         
-        self.report = tree_getitem(
-            self.current_report_block, block_step)
+        if not self.tiled:
+            self.report = tree_getitem(
+                self.current_report_block, block_step)
+        else:
+            self.report = self._stitch_report(block_step)
         
         #print(self.report)
         
