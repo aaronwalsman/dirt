@@ -736,22 +736,23 @@ def make_bugs(
             right = total_w - h
 
             wall_value = jnp.array(0, dtype=grid_with_halo.dtype)
-            if not has_up:
-                grid_with_halo = grid_with_halo.at[:top, left:right].set(wall_value)
-            if not has_down:
-                grid_with_halo = grid_with_halo.at[bottom:bottom + h, left:right].set(wall_value)
-            if not has_left:
-                grid_with_halo = grid_with_halo.at[top:bottom, :left].set(wall_value)
-            if not has_right:
-                grid_with_halo = grid_with_halo.at[top:bottom, right:right + h].set(wall_value)
-            if not has_up and not has_left:
-                grid_with_halo = grid_with_halo.at[:top, :left].set(wall_value)
-            if not has_up and not has_right:
-                grid_with_halo = grid_with_halo.at[:top, right:right + h].set(wall_value)
-            if not has_down and not has_left:
-                grid_with_halo = grid_with_halo.at[bottom:bottom + h, :left].set(wall_value)
-            if not has_down and not has_right:
-                grid_with_halo = grid_with_halo.at[bottom:bottom + h, right:right + h].set(wall_value)
+            def _set_if(cond, grid, slicer):
+                return jax.lax.cond(
+                    cond,
+                    lambda g: g,
+                    lambda g: g.at[slicer].set(wall_value),
+                    grid,
+                )
+
+            grid_with_halo = _set_if(has_up, grid_with_halo, (slice(0, top), slice(left, right)))
+            grid_with_halo = _set_if(has_down, grid_with_halo, (slice(bottom, bottom + h), slice(left, right)))
+            grid_with_halo = _set_if(has_left, grid_with_halo, (slice(top, bottom), slice(0, left)))
+            grid_with_halo = _set_if(has_right, grid_with_halo, (slice(top, bottom), slice(right, right + h)))
+
+            grid_with_halo = _set_if(has_up & has_left, grid_with_halo, (slice(0, top), slice(0, left)))
+            grid_with_halo = _set_if(has_up & has_right, grid_with_halo, (slice(0, top), slice(right, right + h)))
+            grid_with_halo = _set_if(has_down & has_left, grid_with_halo, (slice(bottom, bottom + h), slice(0, left)))
+            grid_with_halo = _set_if(has_down & has_right, grid_with_halo, (slice(bottom, bottom + h), slice(right, right + h)))
             return grid_with_halo
 
         def object_grid():
