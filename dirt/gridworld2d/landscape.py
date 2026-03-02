@@ -637,6 +637,15 @@ def make_landscape(
                 *max_size, params.terrain_downsample)
             terrain_spatial_offset = downsample_grid_shape(
                 *spatial_offset, params.terrain_downsample)
+            if not hasattr(Landscape, "_printed_init"):
+                Landscape._printed_init = True
+                print(
+                    "[landscape init]",
+                    "max_size=", max_size,
+                    "spatial_offset=", spatial_offset,
+                    "terrain_max_size=", terrain_max_size,
+                    "terrain_spatial_offset=", terrain_spatial_offset,
+                )
             #terrain_spatial_offset = (
             #    params.spatial_offset[0] // params.terrain_downsample,
             #    params.spatial_offset[1] // params.terrain_downsample,
