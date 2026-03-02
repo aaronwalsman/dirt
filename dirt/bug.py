@@ -703,6 +703,14 @@ def make_bugs(
                 return x
             return x + object_grid_halo
 
+        def off_map_x():
+            off_map_margin = (
+                max(object_grid_halo, int(params.max_attack_radius)) + 1)
+            return jnp.array(params.world_size, dtype=jnp.int32) + off_map_margin
+
+        def off_map_scalar():
+            return jnp.max(Bugs.off_map_x())
+
         def object_grid():
             return object_grid_spec
 
@@ -1018,6 +1026,12 @@ def make_bugs(
                 else:
                     fields[key] = jnp.where(
                         keep_mask[:, None], arr, jnp.zeros_like(arr))
+            # keep inactive bugs off the map like birth_and_death does
+            fields["x"] = jnp.where(
+                keep_mask[:, None],
+                fields["x"],
+                Bugs.off_map_x(),
+            )
 
             outgoing_mask = allowed_mask
             outgoing_dir = jnp.stack((row_offset, col_offset), axis=1)
@@ -1400,7 +1414,7 @@ def make_bugs(
             rc = rc[None,...] + attack_positions[:,None,None,:]
             # -- change all negative numbers to a large positive number so that
             #    they will be off the grid
-            rc = jnp.where(rc >= 0, rc, max(params.world_size))
+            rc = jnp.where(rc >= 0, rc, Bugs.off_map_scalar())
             
             # initialize the hit map
             hit_map = jnp.zeros(params.world_size, dtype=float_dtype)
@@ -1669,7 +1683,7 @@ def make_bugs(
             # - move the dead bugs off the map and set 0 rotation
             x = jnp.where(
                 recent_deaths[:,None],
-                jnp.array(params.world_size, dtype=jnp.int32),
+                Bugs.off_map_x(),
                 state.x,
             )
             r = state.r * active
