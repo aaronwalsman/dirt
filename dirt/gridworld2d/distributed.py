@@ -183,3 +183,122 @@ def make_distributed_halo_grid(
             return distributed_grid
 
     return DistributedGrid
+
+def wallify_object_grid(
+    grid_with_halo: jnp.ndarray,
+    halo: int,
+    tile_dimensions: Tuple[int, int],
+    axis_name: str = AXIS,
+    wall_value: int = 0,
+):
+    if halo == 0:
+        return grid_with_halo
+    tr, tc = tile_dimensions
+    dev = lax.axis_index(axis_name)
+    dev_row = dev // tc
+    dev_col = dev % tc
+    has_up = dev_row > 0
+    has_down = dev_row < (tr - 1)
+    has_left = dev_col > 0
+    has_right = dev_col < (tc - 1)
+
+    total_h = grid_with_halo.shape[0]
+    total_w = grid_with_halo.shape[1]
+    top = halo
+    bottom = total_h - halo
+    left = halo
+    right = total_w - halo
+
+    def _set_if(cond, grid, slicer):
+        return lax.cond(
+            cond,
+            lambda g: g,
+            lambda g: g.at[slicer].set(wall_value),
+            grid,
+        )
+
+    grid_with_halo = _set_if(has_up, grid_with_halo, (slice(0, top), slice(left, right)))
+    grid_with_halo = _set_if(has_down, grid_with_halo, (slice(bottom, bottom + halo), slice(left, right)))
+    grid_with_halo = _set_if(has_left, grid_with_halo, (slice(top, bottom), slice(0, left)))
+    grid_with_halo = _set_if(has_right, grid_with_halo, (slice(top, bottom), slice(right, right + halo)))
+
+    grid_with_halo = _set_if(has_up & has_left, grid_with_halo, (slice(0, top), slice(0, left)))
+    grid_with_halo = _set_if(has_up & has_right, grid_with_halo, (slice(0, top), slice(right, right + halo)))
+    grid_with_halo = _set_if(has_down & has_left, grid_with_halo, (slice(bottom, bottom + halo), slice(0, left)))
+    grid_with_halo = _set_if(has_down & has_right, grid_with_halo, (slice(bottom, bottom + halo), slice(right, right + halo)))
+    return grid_with_halo
+
+def additive_halo_exchange(
+    grid_with_halo: jnp.ndarray,
+    halo: int,
+    tile_dimensions: Tuple[int, int],
+    axis_name: str = AXIS,
+):
+    if halo == 0:
+        return grid_with_halo
+    tr, tc = tile_dimensions
+    dev = lax.axis_index(axis_name)
+    dev_row = dev // tc
+    dev_col = dev % tc
+    has_up = dev_row > 0
+    has_down = dev_row < (tr - 1)
+    has_left = dev_col > 0
+    has_right = dev_col < (tc - 1)
+    has_up_left = has_up & has_left
+    has_up_right = has_up & has_right
+    has_down_left = has_down & has_left
+    has_down_right = has_down & has_right
+
+    perms = _make_perms(tr, tc)
+
+    def _fill_like(x):
+        return jnp.zeros_like(x)
+
+    total_h = grid_with_halo.shape[0]
+    total_w = grid_with_halo.shape[1]
+    top = halo
+    bottom = total_h - halo
+    left = halo
+    right = total_w - halo
+
+    top_halo = grid_with_halo[0:top, left:right]
+    bottom_halo = grid_with_halo[bottom:bottom + halo, left:right]
+    left_halo = grid_with_halo[top:bottom, 0:left]
+    right_halo = grid_with_halo[top:bottom, right:right + halo]
+
+    tl_halo = grid_with_halo[0:top, 0:left]
+    tr_halo = grid_with_halo[0:top, right:right + halo]
+    bl_halo = grid_with_halo[bottom:bottom + halo, 0:left]
+    br_halo = grid_with_halo[bottom:bottom + halo, right:right + halo]
+
+    payload_up = lax.cond(has_up, lambda _: top_halo, lambda _: _fill_like(top_halo), operand=None)
+    payload_down = lax.cond(has_down, lambda _: bottom_halo, lambda _: _fill_like(bottom_halo), operand=None)
+    payload_left = lax.cond(has_left, lambda _: left_halo, lambda _: _fill_like(left_halo), operand=None)
+    payload_right = lax.cond(has_right, lambda _: right_halo, lambda _: _fill_like(right_halo), operand=None)
+
+    from_down = lax.ppermute(payload_up, axis_name=axis_name, perm=perms["up"])
+    from_up = lax.ppermute(payload_down, axis_name=axis_name, perm=perms["down"])
+    from_right = lax.ppermute(payload_left, axis_name=axis_name, perm=perms["left"])
+    from_left = lax.ppermute(payload_right, axis_name=axis_name, perm=perms["right"])
+
+    grid_with_halo = grid_with_halo.at[bottom - halo:bottom, left:right].add(from_down)
+    grid_with_halo = grid_with_halo.at[top:top + halo, left:right].add(from_up)
+    grid_with_halo = grid_with_halo.at[top:bottom, right - halo:right].add(from_right)
+    grid_with_halo = grid_with_halo.at[top:bottom, left:left + halo].add(from_left)
+
+    payload_tl = lax.cond(has_up_left, lambda _: tl_halo, lambda _: _fill_like(tl_halo), operand=None)
+    payload_tr = lax.cond(has_up_right, lambda _: tr_halo, lambda _: _fill_like(tr_halo), operand=None)
+    payload_bl = lax.cond(has_down_left, lambda _: bl_halo, lambda _: _fill_like(bl_halo), operand=None)
+    payload_br = lax.cond(has_down_right, lambda _: br_halo, lambda _: _fill_like(br_halo), operand=None)
+
+    from_down_right = lax.ppermute(payload_tl, axis_name=axis_name, perm=perms["up_left"])
+    from_down_left = lax.ppermute(payload_tr, axis_name=axis_name, perm=perms["up_right"])
+    from_up_right = lax.ppermute(payload_bl, axis_name=axis_name, perm=perms["down_left"])
+    from_up_left = lax.ppermute(payload_br, axis_name=axis_name, perm=perms["down_right"])
+
+    grid_with_halo = grid_with_halo.at[bottom - halo:bottom, right - halo:right].add(from_down_right)
+    grid_with_halo = grid_with_halo.at[bottom - halo:bottom, left:left + halo].add(from_down_left)
+    grid_with_halo = grid_with_halo.at[top:top + halo, right - halo:right].add(from_up_right)
+    grid_with_halo = grid_with_halo.at[top:top + halo, left:left + halo].add(from_up_left)
+
+    return grid_with_halo

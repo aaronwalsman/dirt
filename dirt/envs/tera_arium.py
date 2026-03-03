@@ -299,7 +299,7 @@ def make_tera_arium(
         # with a fresh halo exchange before moving near tile edges.
         key, move_key = jrng.split(key)
         altitude = landscape.get_altitude_full(landscape_state)
-        bug_state, evaporated_move = bugs.move(
+        bug_state, evaporated_move = bugs.move_and_migrate(
             move_key,
             bug_state,
             action,
@@ -308,9 +308,6 @@ def make_tera_arium(
             params.landscape.terrain_downsample,
             altitude_grid=landscape.altitude_grid(),
         )
-
-        if params.distributed:
-            bug_state = bugs.migrate(bug_state)
         
         # - birth and death
         # TODO(halo): birth/death may write to object_grid; consider halo

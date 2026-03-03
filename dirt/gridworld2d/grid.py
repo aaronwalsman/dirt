@@ -336,6 +336,13 @@ def read_grid_locations(a, x, downsample, downsample_scale=True, halo=0):
         value /= (downsample**2)
     return value
 
+def off_map_x(world_size, halo):
+    off_map_margin = halo + 1
+    return jnp.array(world_size, dtype=jnp.int32) + off_map_margin
+
+def off_map_scalar(world_size, halo):
+    return jnp.max(off_map_x(world_size, halo))
+
 def write_grid_locations(
     a, x, value, downsample, overwrite_all=False, halo=0):
     '''
