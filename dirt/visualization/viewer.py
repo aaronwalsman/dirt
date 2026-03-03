@@ -1,4 +1,5 @@
 import numpy as np
+import re
 
 import jax
 import jax.numpy as jnp
@@ -1270,6 +1271,51 @@ class Viewer:
             self.renderer.mask_render(flip_y=False)
         else:
             self.renderer.color_render(flip_y=False)
+
+    def _select_player_by_index(self, tile_idx, local_idx):
+        if not self.tiled:
+            self.selected_player = local_idx
+            self.change_step(self.current_step)
+            return
+        tile_map = getattr(self, "_player_tile_map", None)
+        if tile_map is None:
+            print("[viewer] No tile map available yet.")
+            return
+        try:
+            global_idx = tile_map.index((tile_idx, local_idx))
+        except ValueError:
+            print(f"[viewer] No player at tile {tile_idx} index {local_idx}")
+            return
+        self.selected_player = global_idx
+        self.change_step(self.current_step)
+
+    def _prompt_select_player(self):
+        if self.tiled:
+            prompt = "Select player (tile,idx) or (global_idx): "
+        else:
+            prompt = "Select player (idx): "
+        try:
+            raw = input(prompt).strip()
+        except EOFError:
+            return
+        if not raw:
+            return
+        parts = [p for p in re.split(r"[^0-9]+", raw) if p != ""]
+        if len(parts) == 0:
+            return
+        if self.tiled and len(parts) == 1:
+            global_idx = int(parts[0])
+            self.selected_player = global_idx
+            self.change_step(self.current_step)
+            return
+        if len(parts) >= 2:
+            tile_idx = int(parts[0])
+            local_idx = int(parts[1])
+            self._select_player_by_index(tile_idx, local_idx)
+            return
+        local_idx = int(parts[0])
+        self.selected_player = local_idx
+        self.change_step(self.current_step)
     
     def key_callback(self, window, key, scancode, action, mods):
         # 0-9 sets various display modes
@@ -1295,6 +1341,9 @@ class Viewer:
         if key == 65 and action:
              self.show_players = not self.show_players
              self.change_step(self.current_step)
+        # f
+        if key == 70 and action == glfw.PRESS:
+            self._prompt_select_player()
         
         if action == glfw.PRESS or action == glfw.REPEAT:
             if key == 44:

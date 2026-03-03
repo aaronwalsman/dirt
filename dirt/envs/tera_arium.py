@@ -655,6 +655,9 @@ def make_tera_arium(
             active_out_of_bounds : jnp.ndarray = False
             inactive_in_bounds : jnp.ndarray = False
             last_deaths : jnp.ndarray = False
+            last_attack : jnp.ndarray = False
+            last_attack_pos : jnp.ndarray = False
+            last_attack_hw : jnp.ndarray = False
             if params.include_water:
                 player_water : jnp.ndarray = False
             if params.include_energy:
@@ -716,6 +719,9 @@ def make_tera_arium(
                 active_out_of_bounds=active_mask & ~in_bounds,
                 inactive_in_bounds=~active_mask & in_bounds,
                 last_deaths=state.bugs.last_deaths,
+                last_attack=state.bugs.last_attack,
+                last_attack_pos=state.bugs.last_attack_pos,
+                last_attack_hw=state.bugs.last_attack_hw,
             )
             if params.include_water:
                 report = report.replace(player_water=state.bugs.water)
@@ -735,6 +741,8 @@ def make_tera_arium(
     
     def print_player_info(player_id, report):
         print(f'ID:        {player_id}')
+        if hasattr(report, "player_x"):
+            print(f'  pos:        {report.player_x[player_id]}')
         if params.report_bug_actions:
             action_type, action_primitive = bugs.get_action_type_and_primitive(
                 report.actions[player_id]) 
@@ -754,6 +762,9 @@ def make_tera_arium(
             print(f'  oob_active:  {report.active_out_of_bounds[player_id]}')
             print(f'  inb_inact:   {report.inactive_in_bounds[player_id]}')
             print(f'  died_step:   {report.last_deaths[player_id]}')
+            print(f'  attack:      {report.last_attack[player_id]}')
+            print(f'  attack_pos:  {report.last_attack_pos[player_id]}')
+            print(f'  attack_hw:   {report.last_attack_hw[player_id]}')
             if params.include_water:
                 print(f'  water:       {report.player_water[player_id]}')
             if params.include_energy:

@@ -594,6 +594,9 @@ class BugState:
     migrate_incoming : jnp.ndarray
     migrate_dir : jnp.ndarray
     last_deaths : jnp.ndarray
+    last_attack : jnp.ndarray
+    last_attack_pos : jnp.ndarray
+    last_attack_hw : jnp.ndarray
 
 def make_bugs(
     params : BugParams = BugParams(),
@@ -847,6 +850,9 @@ def make_bugs(
                 migrate_incoming=jnp.zeros((n,), dtype=jnp.bool),
                 migrate_dir=jnp.zeros((n, 2), dtype=jnp.int32),
                 last_deaths=jnp.zeros((n,), dtype=jnp.bool),
+                last_attack=jnp.zeros((n,), dtype=jnp.bool),
+                last_attack_pos=jnp.zeros((n, 2), dtype=jnp.int32),
+                last_attack_hw=jnp.zeros((n, 2), dtype=jnp.int32),
             )
         
         def get_mass(water, biomass):
@@ -1494,6 +1500,12 @@ def make_bugs(
             now_alive = state.hp > 0
             homicides = previous_alive & ~now_alive
             homicide_locations = state.x
+
+            state = state.replace(
+                last_attack=attack,
+                last_attack_pos=attack_positions,
+                last_attack_hw=global_attack_hw,
+            )
             
             if params.include_energy:
                 attack_area = attack_hw[...,0] * attack_hw[...,1]
