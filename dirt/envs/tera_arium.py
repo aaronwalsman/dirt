@@ -649,15 +649,6 @@ def make_tera_arium(
             age : jnp.ndarray = False
             generation : jnp.ndarray = False
             hp : jnp.ndarray = False
-            migrate_outgoing : jnp.ndarray = False
-            migrate_incoming : jnp.ndarray = False
-            migrate_dir : jnp.ndarray = False
-            active_out_of_bounds : jnp.ndarray = False
-            inactive_in_bounds : jnp.ndarray = False
-            last_deaths : jnp.ndarray = False
-            last_attack : jnp.ndarray = False
-            last_attack_pos : jnp.ndarray = False
-            last_attack_hw : jnp.ndarray = False
             if params.include_water:
                 player_water : jnp.ndarray = False
             if params.include_energy:
@@ -703,26 +694,9 @@ def make_tera_arium(
         if params.report_bug_actions:
             report = report.replace(actions=actions)
         if params.report_bug_internals:
-            h, w = params.world_size
-            active_mask = active_players(state)
-            in_bounds = (
-                (state.bugs.x[:, 0] >= 0) & (state.bugs.x[:, 0] < h) &
-                (state.bugs.x[:, 1] >= 0) & (state.bugs.x[:, 1] < w)
-            )
             report = report.replace(age=state.bugs.age)
             report = report.replace(generation=state.bugs.generation)
             report = report.replace(hp=state.bugs.hp)
-            report = report.replace(
-                migrate_outgoing=state.bugs.migrate_outgoing,
-                migrate_incoming=state.bugs.migrate_incoming,
-                migrate_dir=state.bugs.migrate_dir,
-                active_out_of_bounds=active_mask & ~in_bounds,
-                inactive_in_bounds=~active_mask & in_bounds,
-                last_deaths=state.bugs.last_deaths,
-                last_attack=state.bugs.last_attack,
-                last_attack_pos=state.bugs.last_attack_pos,
-                last_attack_hw=state.bugs.last_attack_hw,
-            )
             if params.include_water:
                 report = report.replace(player_water=state.bugs.water)
             if params.include_energy:
@@ -756,15 +730,6 @@ def make_tera_arium(
             print(f'  age:         {report.age[player_id]}')
             print(f'  generation:  {report.generation[player_id]}')
             print(f'  hp:          {report.hp[player_id]}')
-            print(f'  migrating:   {report.migrate_outgoing[player_id]}')
-            print(f'  incoming:    {report.migrate_incoming[player_id]}')
-            print(f'  migrate_dir: {report.migrate_dir[player_id]}')
-            print(f'  oob_active:  {report.active_out_of_bounds[player_id]}')
-            print(f'  inb_inact:   {report.inactive_in_bounds[player_id]}')
-            print(f'  died_step:   {report.last_deaths[player_id]}')
-            print(f'  attack:      {report.last_attack[player_id]}')
-            print(f'  attack_pos:  {report.last_attack_pos[player_id]}')
-            print(f'  attack_hw:   {report.last_attack_hw[player_id]}')
             if params.include_water:
                 print(f'  water:       {report.player_water[player_id]}')
             if params.include_energy:
