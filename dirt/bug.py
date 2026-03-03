@@ -759,6 +759,77 @@ def make_bugs(
             grid_with_halo = _set_if(has_down & has_right, grid_with_halo, (slice(bottom, bottom + h), slice(right, right + h)))
             return grid_with_halo
 
+        def _additive_halo_exchange(grid_with_halo, halo):
+            if halo == 0 or not distributed or tile_dimensions == (1, 1):
+                return grid_with_halo
+
+            tr, tc = tile_dimensions
+            dev = jax.lax.axis_index("mesh")
+            dev_row = dev // tc
+            dev_col = dev % tc
+            has_up = dev_row > 0
+            has_down = dev_row < (tr - 1)
+            has_left = dev_col > 0
+            has_right = dev_col < (tc - 1)
+            has_up_left = has_up & has_left
+            has_up_right = has_up & has_right
+            has_down_left = has_down & has_left
+            has_down_right = has_down & has_right
+
+            perms = _make_perms(tr, tc)
+
+            def _fill_like(x):
+                return jnp.zeros_like(x)
+
+            total_h = grid_with_halo.shape[0]
+            total_w = grid_with_halo.shape[1]
+            top = halo
+            bottom = total_h - halo
+            left = halo
+            right = total_w - halo
+
+            top_halo = grid_with_halo[0:top, left:right]
+            bottom_halo = grid_with_halo[bottom:bottom + halo, left:right]
+            left_halo = grid_with_halo[top:bottom, 0:left]
+            right_halo = grid_with_halo[top:bottom, right:right + halo]
+
+            tl_halo = grid_with_halo[0:top, 0:left]
+            tr_halo = grid_with_halo[0:top, right:right + halo]
+            bl_halo = grid_with_halo[bottom:bottom + halo, 0:left]
+            br_halo = grid_with_halo[bottom:bottom + halo, right:right + halo]
+
+            payload_up = jax.lax.cond(has_up, lambda _: top_halo, lambda _: _fill_like(top_halo), operand=None)
+            payload_down = jax.lax.cond(has_down, lambda _: bottom_halo, lambda _: _fill_like(bottom_halo), operand=None)
+            payload_left = jax.lax.cond(has_left, lambda _: left_halo, lambda _: _fill_like(left_halo), operand=None)
+            payload_right = jax.lax.cond(has_right, lambda _: right_halo, lambda _: _fill_like(right_halo), operand=None)
+
+            from_down = jax.lax.ppermute(payload_up, axis_name="mesh", perm=perms["up"])
+            from_up = jax.lax.ppermute(payload_down, axis_name="mesh", perm=perms["down"])
+            from_right = jax.lax.ppermute(payload_left, axis_name="mesh", perm=perms["left"])
+            from_left = jax.lax.ppermute(payload_right, axis_name="mesh", perm=perms["right"])
+
+            grid_with_halo = grid_with_halo.at[bottom - halo:bottom, left:right].add(from_down)
+            grid_with_halo = grid_with_halo.at[top:top + halo, left:right].add(from_up)
+            grid_with_halo = grid_with_halo.at[top:bottom, right - halo:right].add(from_right)
+            grid_with_halo = grid_with_halo.at[top:bottom, left:left + halo].add(from_left)
+
+            payload_tl = jax.lax.cond(has_up_left, lambda _: tl_halo, lambda _: _fill_like(tl_halo), operand=None)
+            payload_tr = jax.lax.cond(has_up_right, lambda _: tr_halo, lambda _: _fill_like(tr_halo), operand=None)
+            payload_bl = jax.lax.cond(has_down_left, lambda _: bl_halo, lambda _: _fill_like(bl_halo), operand=None)
+            payload_br = jax.lax.cond(has_down_right, lambda _: br_halo, lambda _: _fill_like(br_halo), operand=None)
+
+            from_down_right = jax.lax.ppermute(payload_tl, axis_name="mesh", perm=perms["up_left"])
+            from_down_left = jax.lax.ppermute(payload_tr, axis_name="mesh", perm=perms["up_right"])
+            from_up_right = jax.lax.ppermute(payload_bl, axis_name="mesh", perm=perms["down_left"])
+            from_up_left = jax.lax.ppermute(payload_br, axis_name="mesh", perm=perms["down_right"])
+
+            grid_with_halo = grid_with_halo.at[bottom - halo:bottom, right - halo:right].add(from_down_right)
+            grid_with_halo = grid_with_halo.at[bottom - halo:bottom, left:left + halo].add(from_down_left)
+            grid_with_halo = grid_with_halo.at[top:top + halo, right - halo:right].add(from_up_right)
+            grid_with_halo = grid_with_halo.at[top:top + halo, left:left + halo].add(from_up_left)
+
+            return grid_with_halo
+
         def object_grid():
             return object_grid_spec
 
@@ -1452,7 +1523,7 @@ def make_bugs(
                 attack_offsets,
                 jnp.zeros_like(state.r),
                 space='local',
-                world_size=params.world_size,
+                out_of_bounds='none',
             )
             
             # build the hit masks
@@ -1472,15 +1543,39 @@ def make_bugs(
             ), axis=-1)
             rc = rc - params.max_attack_radius
             rc = rc[None,...] + attack_positions[:,None,None,:]
-            # -- change all negative numbers to a large positive number so that
-            #    they will be off the grid
-            rc = jnp.where(rc >= 0, rc, Bugs.off_map_scalar())
-            
-            # initialize the hit map
-            hit_map = jnp.zeros(params.world_size, dtype=float_dtype)
-            
-            # add to the hit map
-            hit_map = hit_map.at[rc[...,0], rc[...,1]].add(hit_masks)
+            hit_halo = params.max_attack_offset + params.max_attack_radius
+            if distributed and hit_halo > 0:
+                hit_map = jnp.zeros(
+                    (params.world_size[0] + 2 * hit_halo,
+                     params.world_size[1] + 2 * hit_halo),
+                    dtype=float_dtype,
+                )
+                rc_shift = rc + hit_halo
+                in_bounds = (
+                    (rc[...,0] >= -hit_halo) & (rc[...,0] < params.world_size[0] + hit_halo) &
+                    (rc[...,1] >= -hit_halo) & (rc[...,1] < params.world_size[1] + hit_halo)
+                )
+                rc_shift = jnp.where(in_bounds[..., None], rc_shift, 0)
+                hit_map = hit_map.at[
+                    rc_shift[...,0],
+                    rc_shift[...,1],
+                ].add(hit_masks * in_bounds)
+                hit_map = Bugs._additive_halo_exchange(hit_map, hit_halo)
+                hit_map = hit_map[
+                    hit_halo:hit_halo + params.world_size[0],
+                    hit_halo:hit_halo + params.world_size[1],
+                ]
+            else:
+                hit_map = jnp.zeros(params.world_size, dtype=float_dtype)
+                in_bounds = (
+                    (rc[...,0] >= 0) & (rc[...,0] < params.world_size[0]) &
+                    (rc[...,1] >= 0) & (rc[...,1] < params.world_size[1])
+                )
+                rc_safe = jnp.where(in_bounds[..., None], rc, 0)
+                hit_map = hit_map.at[
+                    rc_safe[...,0],
+                    rc_safe[...,1],
+                ].add(hit_masks * in_bounds)
             
             # figure out who would hit themselves
             self_hit = (

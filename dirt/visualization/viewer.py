@@ -889,6 +889,7 @@ class Viewer:
             _report_mask(self.report, "active_out_of_bounds")
             _report_mask(self.report, "inactive_in_bounds")
             _report_mask(self.report, "last_deaths")
+            _report_mask(self.report, "last_attack")
         else:
             tile_reports = getattr(self, "tile_reports", None)
             if tile_reports is None:
@@ -909,6 +910,11 @@ class Viewer:
                     idx = np.where(np.array(mask))[0]
                     if idx.size > 0:
                         print(f"[viewer] tile {i} last_deaths: {idx.tolist()}")
+                if hasattr(report, "last_attack"):
+                    mask = report.last_attack
+                    idx = np.where(np.array(mask))[0]
+                    if idx.size > 0:
+                        print(f"[viewer] tile {i} last_attack: {idx.tolist()}")
     
     def _update_players(self):
         if not self.tiled:
