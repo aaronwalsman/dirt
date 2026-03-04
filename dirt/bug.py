@@ -603,6 +603,9 @@ def make_bugs(
     player_list = birthday_hometown_player_list(
         params.max_players, axis_name=axis_name)
     family_tree = player_family_tree(player_list, 1)
+    report_player_list = birthday_hometown_player_list(
+        params.max_players, axis_name=None)
+    report_family_tree = player_family_tree(report_player_list, 1)
     
     # construct the action mapping
     # - figure out how many eat and expell action primitives there are
@@ -2161,6 +2164,6 @@ def make_bugs(
             return state.family_tree.player_state.capacity_reached
         
         def empty_family_tree_state():
-            return family_tree.init(0)
+            return report_family_tree.init(0)
     
     return Bugs
