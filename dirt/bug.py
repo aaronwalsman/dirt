@@ -940,15 +940,16 @@ def make_bugs(
                 altitude_grid=altitude_grid,
                 altitude_halo=altitude_halo,
             )
+            migrations = None
             if distributed:
-                state = Bugs.migrate(state)
-            return state, water_cost
+                state, migrations = Bugs.migrate(state)
+            return state, water_cost, migrations
 
         def migrate(
             state : BugState,
-        ) -> BugState:
+        ):
             if not distributed or tile_dimensions == (1, 1):
-                return state
+                return state, None
 
             H, W = params.world_size
             x = state.x
@@ -1084,6 +1085,8 @@ def make_bugs(
             for (name, dr, dc, _), mask in zip(directions, direction_masks):
                 incoming_payloads.append(_incoming_for(mask, dr, dc, name))
 
+            src_list = []
+            dst_list = []
             for payload in incoming_payloads:
                 family_tree_state, slot_idx, source_idx, _ = (
                     family_tree.place_payload(
@@ -1093,6 +1096,8 @@ def make_bugs(
                         payload["parents"],
                     )
                 )
+                dst_list.append(slot_idx)
+                src_list.append(source_idx)
                 valid = slot_idx >= 0
                 safe_slots = jnp.where(valid, slot_idx, 0)
                 safe_src = jnp.where(valid, source_idx, 0)
@@ -1139,7 +1144,14 @@ def make_bugs(
             if params.include_biomass:
                 next_state = next_state.replace(biomass=fields["biomass"])
 
-            return next_state
+            if src_list:
+                migration_src = jnp.stack(src_list, axis=0)
+                migration_dst = jnp.stack(dst_list, axis=0)
+            else:
+                migration_src = jnp.zeros((0, params.max_players), dtype=jnp.int32)
+                migration_dst = jnp.zeros((0, params.max_players), dtype=jnp.int32)
+
+            return next_state, (migration_src, migration_dst)
         
         def eat(
             state : BugState,

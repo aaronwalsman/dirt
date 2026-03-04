@@ -115,6 +115,8 @@ class TeraAriumState:
     attacks : jnp.array = None
     homicide_locations : jnp.array = None
     hit_map : jnp.array = None
+    migration_src : jnp.array = None
+    migration_dst : jnp.array = None
     
 TeraAriumTraits = BugTraits
 
@@ -299,7 +301,7 @@ def make_tera_arium(
         # with a fresh halo exchange before moving near tile edges.
         key, move_key = jrng.split(key)
         altitude = landscape.get_altitude_full(landscape_state)
-        bug_state, evaporated_move = bugs.move_and_migrate(
+        bug_state, evaporated_move, migrations = bugs.move_and_migrate(
             move_key,
             bug_state,
             action,
@@ -308,6 +310,11 @@ def make_tera_arium(
             params.landscape.terrain_downsample,
             altitude_grid=landscape.altitude_grid(),
         )
+        if migrations is not None:
+            migration_src, migration_dst = migrations
+        else:
+            migration_src = None
+            migration_dst = None
         
         # - birth and death
         # TODO(halo): birth/death may write to object_grid; consider halo
@@ -386,6 +393,8 @@ def make_tera_arium(
             attacks=attacks,
             homicides=homicides,
             homicide_locations=homicide_locations,
+            migration_src=migration_src,
+            migration_dst=migration_dst,
         )
         if params.display_hit_map:
             state = state.replace(hit_map=hit_map)
@@ -526,8 +535,13 @@ def make_tera_arium(
     def active_players(state):
         return bugs.active_players(state.bugs)
     
-    def family_info(state):
-        return bugs.family_info(state.bugs)
+    def family_info(state, action=None, next_state=None):
+        if next_state is None:
+            next_state = state
+        return bugs.family_info(next_state.bugs)
+
+    def migrations(state, action, next_state):
+        return (next_state.migration_src, next_state.migration_dst)
     
     def correct(state, steps):
         if params.auto_correct_biomass:
@@ -761,6 +775,9 @@ def make_tera_arium(
         biomass_requirement=bugs.biomass_requirement,
         correct=correct,
         capacity_reached=bugs.capacity_reached,
+        migrations=migrations,
+        distributed=params.distributed,
+        tile_dimensions=params.tile_dimensions,
     )
     
     return game
