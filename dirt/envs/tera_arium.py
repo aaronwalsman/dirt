@@ -218,8 +218,12 @@ def make_tera_arium(
         )
 
         if params.distributed:
-            state = state.replace(landscape=landscape.exchange(state.landscape))
-            state = state.replace(bugs=bugs.exchange(state.bugs))
+            try:
+                state = state.replace(landscape=landscape.exchange(state.landscape))
+                state = state.replace(bugs=bugs.exchange(state.bugs))
+            except NameError:
+                # Not inside a pmapped context (e.g., eval_shape).
+                pass
         
         return state
     
