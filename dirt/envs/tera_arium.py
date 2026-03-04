@@ -173,8 +173,13 @@ def make_tera_arium(
         
         if params.landscape_seed is None:
             if params.distributed:
-                base_key = jax.lax.pmin(jrng.key_data(key), axis_name="mesh")
-                landscape_key = jrng.wrap_key_data(base_key)
+                try:
+                    base_key = jax.lax.pmin(
+                        jrng.key_data(key), axis_name="mesh")
+                    landscape_key = jrng.wrap_key_data(base_key)
+                except NameError:
+                    # Not inside a pmapped context (e.g., eval_shape).
+                    key, landscape_key = jrng.split(key)
             else:
                 key, landscape_key = jrng.split(key)
         else:
