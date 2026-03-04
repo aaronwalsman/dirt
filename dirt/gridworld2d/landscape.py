@@ -1014,6 +1014,8 @@ def make_landscape(
                             (x0, y0),
                             resource_size,
                         )
+                    else:
+                        energy_mask = jnp.ones(resource_size, dtype=bool)
                     energy *= energy_mask
                     state = state.replace(
                         energy=_energy_grid.set_interior(
