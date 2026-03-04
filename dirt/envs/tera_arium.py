@@ -157,6 +157,11 @@ def make_tera_arium(
         distributed=params.distributed,
         tile_dimensions=params.tile_dimensions,
     )
+    if params.distributed and params.tile_dimensions != (1, 1):
+        migration_shape = (8, params.max_players)
+    else:
+        migration_shape = (0, params.max_players)
+    empty_migration = jnp.full(migration_shape, -1, dtype=jnp.int32)
     bug_object_grid = bugs.object_grid
     
     if params.distributed:
@@ -203,6 +208,8 @@ def make_tera_arium(
             homicides=homicides,
             attacks=attacks,
             homicide_locations=homicide_locations,
+            migration_src=empty_migration,
+            migration_dst=empty_migration,
         )
 
         if params.distributed:
@@ -313,8 +320,8 @@ def make_tera_arium(
         if migrations is not None:
             migration_src, migration_dst = migrations
         else:
-            migration_src = None
-            migration_dst = None
+            migration_src = empty_migration
+            migration_dst = empty_migration
         
         # - birth and death
         # TODO(halo): birth/death may write to object_grid; consider halo
