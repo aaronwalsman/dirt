@@ -718,7 +718,14 @@ def make_bugs(
         ) -> BugState :
             
             # initialize the family tree
-            family_tree_state = family_tree.init(params.initial_players)
+            if distributed:
+                try:
+                    family_tree_state = family_tree.init(params.initial_players)
+                except NameError:
+                    family_tree_state = report_family_tree.init(
+                        params.initial_players)
+            else:
+                family_tree_state = family_tree.init(params.initial_players)
             active_players = family_tree.active(family_tree_state)
             
             # initialize map positions and rotations
