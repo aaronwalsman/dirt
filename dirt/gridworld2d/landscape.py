@@ -621,7 +621,11 @@ def make_landscape(
                     max_size = params.world_size
             spatial_offset = params.spatial_offset
             if distributed:
+            try:
                 dev = jax.lax.axis_index("mesh")
+            except NameError:
+                # Not inside a pmapped context (e.g., eval_shape).
+                dev = jnp.array(0, dtype=jnp.int32)
                 tr, tc = tile_dimensions
                 dev_row = dev // tc
                 dev_col = dev % tc
